@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import type { UploadSummary } from '@/types'
 
@@ -48,11 +48,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Ensure profile row exists (safety net — in case trigger hasn't run)
-    await supabase.from('profiles').upsert(
+    // Ensure profile row exists (safety net — use service client to bypass RLS)
+    const serviceClient = await createServiceClient()
+    const { error: profileError } = await serviceClient.from('profiles').upsert(
       { id: user.id, email: user.email, is_paid: false },
       { onConflict: 'id', ignoreDuplicates: true }
     )
+    if (profileError) {
+      console.error('Profile upsert error:', profileError)
+    }
 
     // Create upload batch
     const { data: batch, error: batchError } = await supabase
@@ -70,7 +74,11 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (batchError || !batch) {
-      return NextResponse.json({ error: 'Gagal menyimpan batch upload' }, { status: 500 })
+      console.error('Batch insert error:', batchError)
+      return NextResponse.json(
+        { error: `Gagal menyimpan batch upload: ${batchError?.message ?? 'unknown error'}` },
+        { status: 500 }
+      )
     }
 
     // Prepare ads rows for insert
