@@ -176,27 +176,37 @@ export default function DashboardShell({
         </main>
 
         {/* Mobile Bottom Nav */}
-        <nav className="lg:hidden border-t bg-card flex items-center justify-around h-16 shrink-0">
-          {navItems.slice(0, 5).map((item) => {
-            const Icon = item.icon
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'flex flex-col items-center gap-1 px-3 py-2 text-xs rounded-lg transition-colors',
-                  'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <Icon className="h-5 w-5" />
-                <span className="truncate max-w-[56px] text-center leading-tight">
-                  {item.label.split(' ')[0]}
-                </span>
-              </Link>
-            )
-          })}
-        </nav>
+        <MobileBottomNav />
       </div>
     </div>
+  )
+}
+
+function MobileBottomNav() {
+  const pathname = usePathname()
+  return (
+    <nav className="lg:hidden border-t bg-card flex items-center justify-around h-16 shrink-0">
+      {navItems.slice(0, 5).map((item) => {
+        const Icon = item.icon
+        const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              'flex flex-col items-center gap-1 px-3 py-2 text-xs rounded-lg transition-colors',
+              isActive
+                ? 'text-primary'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Icon className={cn('h-5 w-5', isActive && 'stroke-[2.5]')} />
+            <span className="truncate max-w-[56px] text-center leading-tight">
+              {item.label.split(' ')[0]}
+            </span>
+          </Link>
+        )
+      })}
+    </nav>
   )
 }

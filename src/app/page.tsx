@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +10,13 @@ import {
   ArrowRight,
   Star,
 } from "lucide-react";
+
+export const metadata: Metadata = {
+  title: "Profit Tebel — Tau Profit Beneran, Bukan Cuma Omzet",
+};
+
+const CHECKOUT_URL =
+  process.env.NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL ?? "/login";
 
 export default function LandingPage() {
   return (
@@ -232,12 +240,12 @@ export default function LandingPage() {
                 </li>
               ))}
             </ul>
-            <Link href="/login">
-              <Button size="lg" className="w-full gap-2">
+            <a href={CHECKOUT_URL} target="_blank" rel="noopener noreferrer">
+              <Button size="lg" className="w-full gap-2 bg-orange-500 hover:bg-orange-600 text-white">
                 Beli Sekarang
                 <ArrowRight className="h-4 w-4" />
               </Button>
-            </Link>
+            </a>
           </div>
         </div>
       </section>
@@ -283,12 +291,12 @@ export default function LandingPage() {
           Bergabung dengan seller yang sudah berhenti nebak-nebak profit dan mulai
           ambil keputusan berdasarkan data.
         </p>
-        <Link href="/login">
-          <Button size="lg" className="gap-2">
+        <a href={CHECKOUT_URL} target="_blank" rel="noopener noreferrer">
+          <Button size="lg" className="gap-2 bg-orange-500 hover:bg-orange-600 text-white">
             Mulai Sekarang — Rp 99.000
             <ArrowRight className="h-4 w-4" />
           </Button>
-        </Link>
+        </a>
       </section>
 
       {/* Footer */}

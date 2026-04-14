@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import DashboardShell from '@/components/layout/dashboard-shell'
+import UpgradeGate from '@/components/layout/upgrade-gate'
 
 export default async function DashboardLayout({
   children,
@@ -14,5 +15,18 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
-  return <DashboardShell user={user}>{children}</DashboardShell>
+  // Fetch payment status from profiles table
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('is_paid')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  const isPaid = profile?.is_paid ?? false
+
+  return (
+    <DashboardShell user={user}>
+      {isPaid ? children : <UpgradeGate />}
+    </DashboardShell>
+  )
 }
