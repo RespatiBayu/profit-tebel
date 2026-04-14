@@ -48,6 +48,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Ensure profile row exists (safety net — in case trigger hasn't run)
+    await supabase.from('profiles').upsert(
+      { id: user.id, email: user.email, is_paid: false },
+      { onConflict: 'id', ignoreDuplicates: true }
+    )
+
     // Create upload batch
     const { data: batch, error: batchError } = await supabase
       .from('upload_batches')
