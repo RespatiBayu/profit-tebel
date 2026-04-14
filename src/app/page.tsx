@@ -15,9 +15,6 @@ export const metadata: Metadata = {
   title: "Profit Tebel — Tau Profit Beneran, Bukan Cuma Omzet",
 };
 
-const CHECKOUT_URL =
-  process.env.NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL ?? "/login";
-
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white">
@@ -240,12 +237,12 @@ export default function LandingPage() {
                 </li>
               ))}
             </ul>
-            <a href={CHECKOUT_URL} target="_blank" rel="noopener noreferrer">
+            <Link href="/login">
               <Button size="lg" className="w-full gap-2 bg-orange-500 hover:bg-orange-600 text-white">
                 Beli Sekarang
                 <ArrowRight className="h-4 w-4" />
               </Button>
-            </a>
+            </Link>
           </div>
         </div>
       </section>
@@ -291,12 +288,12 @@ export default function LandingPage() {
           Bergabung dengan seller yang sudah berhenti nebak-nebak profit dan mulai
           ambil keputusan berdasarkan data.
         </p>
-        <a href={CHECKOUT_URL} target="_blank" rel="noopener noreferrer">
+        <Link href="/login">
           <Button size="lg" className="gap-2 bg-orange-500 hover:bg-orange-600 text-white">
             Mulai Sekarang — Rp 99.000
             <ArrowRight className="h-4 w-4" />
           </Button>
-        </a>
+        </Link>
       </section>
 
       {/* Footer */}

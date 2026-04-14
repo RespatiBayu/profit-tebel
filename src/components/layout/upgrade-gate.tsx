@@ -1,8 +1,9 @@
+'use client'
+
+import { useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { CheckCircle, Lock, ArrowRight } from 'lucide-react'
-
-const CHECKOUT_URL = process.env.NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL ?? '/login'
+import { CheckCircle, Lock, ArrowRight, Loader2 } from 'lucide-react'
 
 const features = [
   'Analisis profit unlimited dari laporan Shopee',
@@ -14,6 +15,33 @@ const features = [
 ]
 
 export default function UpgradeGate() {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleBuy() {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/payment/create', { method: 'POST' })
+      const data = await res.json() as { redirectUrl?: string; alreadyPaid?: boolean; error?: string }
+
+      if (data.alreadyPaid) {
+        // Refresh the page — layout will re-check is_paid and show dashboard
+        window.location.reload()
+        return
+      }
+      if (data.redirectUrl) {
+        window.location.href = data.redirectUrl
+        return
+      }
+      setError(data.error ?? 'Terjadi kesalahan. Coba lagi.')
+    } catch {
+      setError('Gagal terhubung ke server. Coba lagi.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="p-4 sm:p-6 flex flex-col items-center justify-center min-h-[80vh] gap-6 text-center">
       {/* Icon */}
@@ -45,12 +73,28 @@ export default function UpgradeGate() {
           ))}
         </ul>
 
-        <a href={CHECKOUT_URL} target="_blank" rel="noopener noreferrer">
-          <Button size="lg" className="w-full gap-2 bg-orange-500 hover:bg-orange-600 text-white">
-            Beli Sekarang
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        </a>
+        {error && (
+          <p className="text-sm text-red-600 mb-3 text-center">{error}</p>
+        )}
+
+        <Button
+          size="lg"
+          className="w-full gap-2 bg-orange-500 hover:bg-orange-600 text-white"
+          onClick={handleBuy}
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Memproses...
+            </>
+          ) : (
+            <>
+              Beli Sekarang — Rp 99.000
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Already paid? */}
