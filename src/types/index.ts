@@ -102,3 +102,102 @@ export interface MasterProduct {
   has_income_data?: boolean
   has_ads_data?: boolean
 }
+
+// DB row from `orders` table (what Supabase returns)
+export interface DbOrder {
+  id: string
+  upload_batch_id: string
+  marketplace: string
+  order_number: string
+  order_date: string | null
+  release_date: string | null
+  payment_method: string | null
+  original_price: number
+  product_discount: number
+  refund_amount: number
+  seller_voucher: number
+  seller_voucher_cofund: number
+  seller_cashback: number
+  buyer_shipping_fee: number
+  shopee_shipping_subsidy: number
+  actual_shipping_cost: number
+  return_shipping_cost: number
+  ams_commission: number
+  admin_fee: number
+  service_fee: number
+  processing_fee: number
+  premium_fee: number
+  shipping_program_fee: number
+  transaction_fee: number
+  campaign_fee: number
+  total_income: number
+  voucher_code: string | null
+  shipping_type: string | null
+  courier_name: string | null
+  seller_free_shipping_promo: number
+}
+
+// DB row from `order_products` table
+export interface DbOrderProduct {
+  id: string
+  order_number: string
+  marketplace_product_id: string
+  product_name: string | null
+  processing_fee_prorata: number
+}
+
+// Calculated profit results
+export interface ProfitKpis {
+  totalOmzet: number
+  totalNetIncome: number
+  totalFees: number
+  totalHppCost: number
+  realProfit: number
+  profitMargin: number | null  // null if no HPP data
+  orderCount: number
+  hasHppData: boolean
+}
+
+export interface FeeBreakdownItem {
+  name: string
+  value: number
+  color: string
+}
+
+export interface TrendPoint {
+  date: string
+  omzet: number
+  netIncome: number
+  profit: number | null
+}
+
+export interface ProductProfitRow {
+  productId: string
+  productName: string
+  orderCount: number
+  attributedIncome: number
+  totalHppCost: number
+  profit: number
+  margin: number | null
+  hasHpp: boolean
+}
+
+export interface PaymentDistItem {
+  method: string
+  count: number
+  amount: number
+}
+
+export interface CourierStatRow {
+  courier: string
+  orderCount: number
+  totalShippingCost: number
+  avgShippingCost: number
+}
+
+export interface CashFlowStats {
+  avgDays: number
+  minDays: number
+  maxDays: number
+  ordersWithBothDates: number
+}
