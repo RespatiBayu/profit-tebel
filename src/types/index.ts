@@ -201,3 +201,87 @@ export interface CashFlowStats {
   maxDays: number
   ordersWithBothDates: number
 }
+
+// DB row from `ads_data` table
+export interface DbAdsRow {
+  id: string
+  upload_batch_id: string
+  marketplace: string
+  product_name: string | null
+  product_code: string
+  impressions: number
+  clicks: number
+  ctr: number
+  conversions: number
+  direct_conversions: number
+  conversion_rate: number
+  direct_conversion_rate: number
+  cost_per_conversion: number
+  cost_per_direct_conversion: number
+  units_sold: number
+  direct_units_sold: number
+  gmv: number
+  direct_gmv: number
+  ad_spend: number
+  roas: number
+  direct_roas: number
+  acos: number
+  direct_acos: number
+  voucher_amount: number
+  vouchered_sales: number
+  report_period_start: string | null
+  report_period_end: string | null
+}
+
+// Ads calculation results
+export type TrafficLight = 'scale' | 'optimize' | 'kill'
+
+export interface AdsKpis {
+  totalAdSpend: number
+  totalGmv: number
+  overallRoas: number
+  totalConversions: number
+  avgCpa: number
+  productCount: number
+  scaleCount: number
+  optimizeCount: number
+  killCount: number
+}
+
+export interface TrafficLightRow {
+  productCode: string
+  productName: string
+  impressions: number
+  clicks: number
+  conversions: number
+  unitsSold: number
+  gmv: number
+  adSpend: number
+  roas: number
+  directRoas: number
+  cpa: number
+  ctr: number
+  conversionRate: number
+  signal: TrafficLight
+  trueRoas: number | null   // ROAS adjusted for HPP
+  profitPerUnit: number | null
+}
+
+export interface FunnelRow {
+  productName: string
+  productCode: string
+  impressions: number
+  clicks: number
+  conversions: number
+  ctr: number
+  conversionRate: number
+}
+
+export interface QuadrantPoint {
+  productCode: string
+  productName: string
+  roas: number
+  profitPerUnit: number
+  adSpend: number   // bubble size
+  signal: TrafficLight
+}
