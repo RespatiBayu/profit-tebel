@@ -54,7 +54,7 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
       if (error.message.includes('Invalid login credentials')) {
@@ -66,6 +66,19 @@ export default function LoginPage() {
       }
       setLoading(false)
       return
+    }
+
+    // Ensure profile row exists for email+password users
+    if (data.user) {
+      await supabase.from('profiles').upsert(
+        {
+          id: data.user.id,
+          email: data.user.email,
+          full_name: data.user.email?.split('@')[0] ?? null,
+          is_paid: false,
+        },
+        { onConflict: 'id', ignoreDuplicates: true }
+      )
     }
 
     router.push('/dashboard')
