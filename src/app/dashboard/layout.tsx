@@ -22,7 +22,9 @@ export default async function DashboardLayout({
     .eq('id', user.id)
     .maybeSingle()
 
-  const isPaid = profile?.is_paid ?? false
+  const adminEmails = (process.env.ADMIN_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean)
+  const isAdmin = adminEmails.includes(user.email ?? '')
+  const isPaid = isAdmin || (profile?.is_paid ?? false)
 
   return (
     <DashboardShell user={user}>
