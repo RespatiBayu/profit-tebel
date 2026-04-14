@@ -1,0 +1,204 @@
+import * as XLSX from 'xlsx'
+import type { IncomeParseResult, ParsedOrder, ParsedOrderProduct } from '@/types'
+
+// Column indices in Income sheet (0-based)
+const COL = {
+  ORDER_NUMBER: 1,          // B - No. Pesanan
+  ORDER_DATE: 4,            // E - Waktu Pesanan Dibuat
+  PAYMENT_METHOD: 5,        // F - Metode Pembayaran
+  RELEASE_DATE: 6,          // G - Tanggal Dana Dilepaskan
+  ORIGINAL_PRICE: 7,        // H - Harga Asli Produk
+  PRODUCT_DISCOUNT: 8,      // I - Total Diskon Produk
+  REFUND_AMOUNT: 9,         // J - Jumlah Pengembalian Dana
+  SELLER_VOUCHER: 11,       // L - Voucher disponsori Penjual
+  SELLER_VOUCHER_COFUND: 12, // M - Voucher co-fund
+  SELLER_CASHBACK: 13,      // N - Cashback Koin disponsori Penjual
+  BUYER_SHIPPING: 15,       // P - Ongkir Dibayar Pembeli
+  SHOPEE_SHIPPING_SUBSIDY: 17, // R - Gratis Ongkir dari Shopee
+  ACTUAL_SHIPPING: 18,      // S - Ongkir Diteruskan ke Jasa Kirim
+  RETURN_SHIPPING: 19,      // T - Ongkos Kirim Pengembalian
+  AMS_COMMISSION: 22,       // W - Biaya Komisi AMS
+  ADMIN_FEE: 23,            // X - Biaya Administrasi
+  SERVICE_FEE: 24,          // Y - Biaya Layanan
+  PROCESSING_FEE: 25,       // Z - Biaya Proses Pesanan
+  PREMIUM_FEE: 26,          // AA - Premi
+  SHIPPING_PROGRAM_FEE: 27, // AB - Biaya Program Hemat Biaya Kirim
+  TRANSACTION_FEE: 28,      // AC - Biaya Transaksi
+  CAMPAIGN_FEE: 29,         // AD - Biaya Kampanye
+  TOTAL_INCOME: 32,         // AG - Total Penghasilan
+  VOUCHER_CODE: 33,         // AH - Kode Voucher
+  SELLER_FREE_SHIPPING: 35, // AJ - Promo Gratis Ongkir dari Penjual
+  SHIPPING_TYPE: 36,        // AK - Jasa Kirim
+  COURIER_NAME: 37,         // AL - Nama Kurir
+} as const
+
+// Column indices in Order Processing Fee sheet (0-based)
+const OPF_COL = {
+  ROW_TYPE: 1,              // B - "Order" or "Sku"
+  ORDER_NUMBER: 2,          // C - No. Pesanan
+  PRODUCT_ID: 3,            // D - ID Produk
+  PRODUCT_NAME: 4,          // E - Nama Produk
+  PROCESSING_FEE_PRORATA: 6, // G - Biaya Proses Pesanan per Produk (Prorata)
+} as const
+
+function parseNum(value: unknown): number {
+  if (value === null || value === undefined || value === '') return 0
+  if (typeof value === 'number') return isNaN(value) ? 0 : value
+  const str = String(value).replace(/[^\d.,-]/g, '').replace(',', '.')
+  const num = parseFloat(str)
+  return isNaN(num) ? 0 : num
+}
+
+function parseShopeeDate(value: unknown): string | null {
+  if (!value) return null
+
+  // Already a JS Date (from SheetJS cellDates)
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return null
+    return value.toISOString().split('T')[0]
+  }
+
+  const str = String(value).trim()
+  if (!str) return null
+
+  // Try common formats: "2024-01-15 14:30:00", "15/01/2024 14:30", "2024-01-15"
+  const patterns = [
+    /^(\d{4})-(\d{2})-(\d{2})/, // YYYY-MM-DD...
+    /^(\d{2})\/(\d{2})\/(\d{4})/, // DD/MM/YYYY
+    /^(\d{2})-(\d{2})-(\d{4})/, // DD-MM-YYYY
+  ]
+
+  for (const pattern of patterns) {
+    const m = str.match(pattern)
+    if (m) {
+      if (pattern === patterns[0]) {
+        return `${m[1]}-${m[2]}-${m[3]}`
+      } else {
+        return `${m[3]}-${m[2]}-${m[1]}`
+      }
+    }
+  }
+
+  // Try native Date parsing as fallback
+  const d = new Date(str)
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+
+  return null
+}
+
+function parseStr(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  const s = String(value).trim()
+  return s || null
+}
+
+export function parseShopeeIncome(buffer: Buffer): IncomeParseResult {
+  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true })
+
+  // --- Income Sheet ---
+  const incomeSheet = workbook.Sheets['Income'] ?? workbook.Sheets[workbook.SheetNames[1]]
+  if (!incomeSheet) {
+    throw new Error('Sheet "Income" tidak ditemukan dalam file XLSX')
+  }
+
+  const incomeRows: unknown[][] = XLSX.utils.sheet_to_json(incomeSheet, {
+    header: 1,
+    defval: null,
+    raw: false, // formatted strings for dates
+  })
+
+  // Row 5 (index 5) = headers, Row 6+ (index 6+) = data
+  const orders: ParsedOrder[] = []
+  let periodStart: string | null = null
+  let periodEnd: string | null = null
+
+  for (let i = 6; i < incomeRows.length; i++) {
+    const row = incomeRows[i]
+    if (!row || !row[COL.ORDER_NUMBER]) continue
+
+    const orderNumber = parseStr(row[COL.ORDER_NUMBER])
+    if (!orderNumber) continue
+
+    const orderDate = parseShopeeDate(row[COL.ORDER_DATE])
+    const releaseDate = parseShopeeDate(row[COL.RELEASE_DATE])
+
+    // Track period range
+    if (orderDate) {
+      if (!periodStart || orderDate < periodStart) periodStart = orderDate
+      if (!periodEnd || orderDate > periodEnd) periodEnd = orderDate
+    }
+
+    orders.push({
+      order_number: orderNumber,
+      order_date: orderDate,
+      release_date: releaseDate,
+      payment_method: parseStr(row[COL.PAYMENT_METHOD]),
+      original_price: parseNum(row[COL.ORIGINAL_PRICE]),
+      product_discount: parseNum(row[COL.PRODUCT_DISCOUNT]),
+      refund_amount: parseNum(row[COL.REFUND_AMOUNT]),
+      seller_voucher: parseNum(row[COL.SELLER_VOUCHER]),
+      seller_voucher_cofund: parseNum(row[COL.SELLER_VOUCHER_COFUND]),
+      seller_cashback: parseNum(row[COL.SELLER_CASHBACK]),
+      buyer_shipping_fee: parseNum(row[COL.BUYER_SHIPPING]),
+      shopee_shipping_subsidy: parseNum(row[COL.SHOPEE_SHIPPING_SUBSIDY]),
+      actual_shipping_cost: parseNum(row[COL.ACTUAL_SHIPPING]),
+      return_shipping_cost: parseNum(row[COL.RETURN_SHIPPING]),
+      ams_commission: parseNum(row[COL.AMS_COMMISSION]),
+      admin_fee: parseNum(row[COL.ADMIN_FEE]),
+      service_fee: parseNum(row[COL.SERVICE_FEE]),
+      processing_fee: parseNum(row[COL.PROCESSING_FEE]),
+      premium_fee: parseNum(row[COL.PREMIUM_FEE]),
+      shipping_program_fee: parseNum(row[COL.SHIPPING_PROGRAM_FEE]),
+      transaction_fee: parseNum(row[COL.TRANSACTION_FEE]),
+      campaign_fee: parseNum(row[COL.CAMPAIGN_FEE]),
+      total_income: parseNum(row[COL.TOTAL_INCOME]),
+      voucher_code: parseStr(row[COL.VOUCHER_CODE]),
+      shipping_type: parseStr(row[COL.SHIPPING_TYPE]),
+      courier_name: parseStr(row[COL.COURIER_NAME]),
+      seller_free_shipping_promo: parseNum(row[COL.SELLER_FREE_SHIPPING]),
+    })
+  }
+
+  // --- Order Processing Fee Sheet ---
+  const opfSheet =
+    workbook.Sheets['Order Processing Fee'] ??
+    workbook.Sheets[workbook.SheetNames[3]]
+
+  const orderProducts: ParsedOrderProduct[] = []
+
+  if (opfSheet) {
+    const opfRows: unknown[][] = XLSX.utils.sheet_to_json(opfSheet, {
+      header: 1,
+      defval: null,
+      raw: false,
+    })
+
+    let currentOrderNumber: string | null = null
+
+    // Skip header rows (row 0 = title, row 1 = headers typically)
+    for (let i = 2; i < opfRows.length; i++) {
+      const row = opfRows[i]
+      if (!row) continue
+
+      const rowType = parseStr(row[OPF_COL.ROW_TYPE])?.toLowerCase()
+
+      if (rowType === 'order' || rowType === 'pesanan') {
+        // "Order" row — capture order number
+        currentOrderNumber = parseStr(row[OPF_COL.ORDER_NUMBER])
+      } else if ((rowType === 'sku' || rowType === 'produk') && currentOrderNumber) {
+        // "Sku" row — has product ID and name
+        const productId = parseStr(row[OPF_COL.PRODUCT_ID])
+        if (productId) {
+          orderProducts.push({
+            order_number: currentOrderNumber,
+            marketplace_product_id: productId,
+            product_name: parseStr(row[OPF_COL.PRODUCT_NAME]),
+            processing_fee_prorata: parseNum(row[OPF_COL.PROCESSING_FEE_PRORATA]),
+          })
+        }
+      }
+    }
+  }
+
+  return { orders, orderProducts, periodStart, periodEnd }
+}
