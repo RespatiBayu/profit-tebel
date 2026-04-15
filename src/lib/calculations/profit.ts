@@ -92,19 +92,21 @@ export function calculateKpis(
     totalOmzet += o.original_price
     totalNetIncome += o.total_income
 
+    // Shopee reports fees/vouchers as negative values — take abs so "Total Biaya"
+    // is always a positive magnitude (matches calculateFeeBreakdown).
     const fees =
-      o.ams_commission +
-      o.admin_fee +
-      o.service_fee +
-      o.processing_fee +
-      o.premium_fee +
-      o.shipping_program_fee +
-      o.transaction_fee +
-      o.campaign_fee +
-      o.seller_voucher +
-      o.seller_voucher_cofund +
-      o.seller_cashback +
-      o.seller_free_shipping_promo +
+      Math.abs(o.ams_commission) +
+      Math.abs(o.admin_fee) +
+      Math.abs(o.service_fee) +
+      Math.abs(o.processing_fee) +
+      Math.abs(o.premium_fee) +
+      Math.abs(o.shipping_program_fee) +
+      Math.abs(o.transaction_fee) +
+      Math.abs(o.campaign_fee) +
+      Math.abs(o.seller_voucher) +
+      Math.abs(o.seller_voucher_cofund) +
+      Math.abs(o.seller_cashback) +
+      Math.abs(o.seller_free_shipping_promo) +
       Math.max(0, o.actual_shipping_cost - o.buyer_shipping_fee - o.shopee_shipping_subsidy)
     totalFees += fees
 

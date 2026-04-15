@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,6 +42,7 @@ interface EditingProduct {
 
 export default function ProductsPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const storeId = searchParams.get('store') ?? ''
   const [products, setProducts] = useState<MasterProduct[]>([])
   const [loading, setLoading] = useState(true)
@@ -142,6 +143,8 @@ export default function ProductsPage() {
       cancelEdit(product.id)
       setSaved((prev) => ({ ...prev, [product.id]: true }))
       setTimeout(() => setSaved((prev) => { const n = { ...prev }; delete n[product.id]; return n }), 2000)
+      // Invalidate server caches so dashboard pages re-fetch with new HPP
+      router.refresh()
     }
   }
 

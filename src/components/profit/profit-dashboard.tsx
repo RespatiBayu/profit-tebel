@@ -40,6 +40,11 @@ import {
   ArrowUpDown,
   ChevronUp,
   ChevronDown,
+  Info,
+  Wallet,
+  Receipt,
+  Percent,
+  ShoppingBag,
 } from 'lucide-react'
 import {
   buildHppMap,
@@ -95,24 +100,57 @@ function KpiCard({
   value,
   sub,
   accent,
+  icon: Icon,
+  tooltip,
+  cta,
 }: {
   label: string
   value: string
   sub?: string
-  accent?: 'green' | 'red' | 'blue' | 'default'
+  accent?: 'green' | 'red' | 'blue' | 'default' | 'muted'
+  icon?: React.ComponentType<{ className?: string }>
+  tooltip?: string
+  cta?: { label: string; href: string }
 }) {
   const colors = {
     green: 'text-green-600',
     red: 'text-red-600',
     blue: 'text-blue-600',
     default: 'text-foreground',
+    muted: 'text-muted-foreground',
+  }
+  const iconBg = {
+    green: 'bg-green-100 text-green-600',
+    red: 'bg-red-100 text-red-600',
+    blue: 'bg-blue-100 text-blue-600',
+    default: 'bg-muted text-muted-foreground',
+    muted: 'bg-muted text-muted-foreground',
   }
   return (
-    <Card>
+    <Card className="relative">
       <CardContent className="p-4 sm:p-5">
-        <p className="text-xs text-muted-foreground mb-1">{label}</p>
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            {label}
+            {tooltip && (
+              <span title={tooltip} className="inline-flex cursor-help">
+                <Info className="h-3 w-3 opacity-60" />
+              </span>
+            )}
+          </p>
+          {Icon && (
+            <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${iconBg[accent ?? 'default']}`}>
+              <Icon className="h-3.5 w-3.5" />
+            </div>
+          )}
+        </div>
         <p className={`text-xl sm:text-2xl font-bold ${colors[accent ?? 'default']}`}>{value}</p>
         {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+        {cta && (
+          <Link href={cta.href} className="mt-2 inline-block">
+            <span className="text-xs text-primary hover:underline font-medium">{cta.label} →</span>
+          </Link>
+        )}
       </CardContent>
     </Card>
   )
@@ -311,6 +349,9 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   const courierStats = useMemo(() => calculateCourierStats(filteredOrders), [filteredOrders])
 
   const negativeProducts = productRows.filter((r) => r.hasHpp && r.profit < 0)
+  const totalProducts = masterProducts.length
+  const hppFilled = totalProducts - noHppCount
+  const hppProgress = totalProducts > 0 ? Math.round((hppFilled / totalProducts) * 100) : 0
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
@@ -339,14 +380,27 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       {noHppCount > 0 && (
         <Alert className="border-orange-200 bg-orange-50">
           <AlertCircle className="h-4 w-4 text-orange-600" />
-          <AlertDescription className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-orange-800">
-              <strong>{noHppCount} produk</strong> belum ada HPP — profit belum akurat.
-            </span>
+          <AlertDescription className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 min-w-[200px] space-y-1.5">
+              <p className="text-orange-800">
+                <strong>{noHppCount} dari {totalProducts} produk</strong> belum ada HPP —
+                Real Profit belum akurat sebelum semua HPP diisi.
+              </p>
+              {/* Progress bar */}
+              <div className="h-1.5 bg-orange-200 rounded-full overflow-hidden max-w-md">
+                <div
+                  className="h-full bg-orange-500 transition-all"
+                  style={{ width: `${hppProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-orange-700">
+                {hppFilled} dari {totalProducts} produk sudah diisi ({hppProgress}%)
+              </p>
+            </div>
             <Link href="/dashboard/products">
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-orange-300">
+              <Button size="sm" className="h-8 text-xs gap-1 bg-orange-600 hover:bg-orange-700">
                 <Package className="h-3 w-3" />
-                Isi HPP
+                Isi HPP Sekarang
               </Button>
             </Link>
           </AlertDescription>
@@ -366,21 +420,81 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <KpiCard label="Total Omzet" value={formatRp(kpis.totalOmzet)} sub={`${kpis.orderCount} order`} accent="blue" />
-        <KpiCard label="Net Income" value={formatRp(kpis.totalNetIncome)} sub="Setelah fee Shopee" />
-        <KpiCard label="Total Biaya" value={formatRp(kpis.totalFees)} accent="red" />
+        <KpiCard
+          label="Total Omzet"
+          value={formatRp(kpis.totalOmzet)}
+          sub={`${kpis.orderCount.toLocaleString('id-ID')} order`}
+          accent="blue"
+          icon={ShoppingBag}
+          tooltip="Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee)."
+        />
+        <KpiCard
+          label="Net Income"
+          value={formatRp(kpis.totalNetIncome)}
+          sub="Dana yang kamu terima"
+          icon={Wallet}
+          accent="blue"
+          tooltip="Total Penghasilan dari Shopee setelah dipotong semua fee marketplace (komisi, admin, layanan, voucher, dll). Ini yang dana cair ke rekening kamu."
+        />
+        <KpiCard
+          label="Total Biaya"
+          value={formatRp(kpis.totalFees)}
+          sub="Fee marketplace"
+          accent="red"
+          icon={Receipt}
+          tooltip="Total potongan Shopee: komisi AMS, biaya admin, layanan, voucher seller, cashback, selisih ongkir, dll."
+        />
         <KpiCard
           label="Real Profit"
-          value={kpis.hasHppData ? formatRp(kpis.realProfit) : 'Isi HPP dulu'}
-          accent={kpis.hasHppData ? (kpis.realProfit >= 0 ? 'green' : 'red') : 'default'}
-          sub={kpis.hasHppData ? 'Setelah HPP & packaging' : undefined}
+          value={kpis.hasHppData ? formatRp(kpis.realProfit) : '—'}
+          accent={kpis.hasHppData ? (kpis.realProfit >= 0 ? 'green' : 'red') : 'muted'}
+          sub={
+            kpis.hasHppData
+              ? noHppCount > 0
+                ? `Estimasi (${noHppCount} produk belum HPP)`
+                : 'Net Income − HPP & packaging'
+              : 'Isi HPP dulu untuk melihat'
+          }
+          icon={TrendingUp}
+          tooltip="Profit sebenarnya setelah memperhitungkan HPP (harga pokok) dan biaya packaging. Rumus: Net Income − HPP − Packaging."
+          cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
         />
         <KpiCard
           label="Profit Margin"
-          value={kpis.profitMargin !== null ? `${kpis.profitMargin.toFixed(1)}%` : '-'}
-          accent={kpis.profitMargin !== null ? (kpis.profitMargin >= 0 ? 'green' : 'red') : 'default'}
+          value={kpis.profitMargin !== null ? `${kpis.profitMargin.toFixed(1)}%` : '—'}
+          accent={kpis.profitMargin !== null ? (kpis.profitMargin >= 0 ? 'green' : 'red') : 'muted'}
+          sub={kpis.profitMargin !== null ? 'Profit / Omzet' : 'Perlu HPP lengkap'}
+          icon={Percent}
+          tooltip="Persentase profit terhadap total omzet. Semakin tinggi, semakin efisien bisnis kamu."
         />
       </div>
+
+      {/* Summary formula card — shows how Real Profit is calculated */}
+      {kpis.hasHppData && (
+        <Card className="bg-muted/30 border-dashed">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <Info className="h-4 w-4" />
+              </div>
+              <div className="flex-1 space-y-1.5 text-sm">
+                <p className="font-medium">Cara menghitung Real Profit:</p>
+                <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono">
+                  <span className="text-blue-600">{formatRp(kpis.totalNetIncome)}</span>
+                  <span className="text-muted-foreground">(Net Income)</span>
+                  <span className="text-muted-foreground">−</span>
+                  <span className="text-orange-600">{formatRp(kpis.totalHppCost)}</span>
+                  <span className="text-muted-foreground">(HPP + Packaging)</span>
+                  <span className="text-muted-foreground">=</span>
+                  <span className={kpis.realProfit >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                    {formatRp(kpis.realProfit)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Charts Tabs */}
       <Tabs defaultValue="trend" className="space-y-4">
