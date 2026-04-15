@@ -74,8 +74,7 @@ export function buildAdSpendMap(adsData: DbAdsRow[]): Map<string, number> {
 function orderAdSpendCost(
   order: DbOrder,
   orderProductMap: Map<string, string[]>,
-  adSpendMap: Map<string, number>,
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>
+  adSpendMap: Map<string, number>
 ): number {
   const productIds = orderProductMap.get(order.order_number) ?? []
   if (productIds.length === 0) return 0
@@ -144,7 +143,7 @@ export function calculateKpis(
     totalHppCost += hpp
     if (hpp > 0) hasHppData = true
 
-    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap, hppMap)
+    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap)
     totalAdSpend += adSpend
   }
 
@@ -227,7 +226,7 @@ export function calculateTrend(
     const key = groupBy === 'week' ? weekKey(o.order_date) : o.order_date
     const existing = grouped.get(key) ?? { omzet: 0, netIncome: 0, hpp: 0, adSpend: 0, hasHpp: false }
     const hpp = orderHppCost(o, orderProductMap, hppMap)
-    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap, hppMap)
+    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap)
     existing.omzet += o.original_price
     existing.netIncome += o.total_income
     existing.hpp += hpp
