@@ -145,10 +145,63 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const CHUNK = 500
-    for (let i = 0; i < adsRows.length; i += CHUNK) {
-      await supabase.from('ads_data').insert(adsRows.slice(i, i + CHUNK))
+    // Dedup: check which (product_code, period) already exist for this user+marketplace
+    const adsKeys = adsRows.map((r) => ({
+      product_code: r.product_code,
+      period_start: r.report_period_start,
+      period_end: r.report_period_end,
+    }))
+    const existingSet = new Set<string>()
+    const QUERY_CHUNK = 500
+    const uniqueCodes = Array.from(new Set(adsKeys.map((k) => k.product_code)))
+    for (let i = 0; i < uniqueCodes.length; i += QUERY_CHUNK) {
+      const slice = uniqueCodes.slice(i, i + QUERY_CHUNK)
+      const { data: existingAds } = await supabase
+        .from('ads_data')
+        .select('product_code, report_period_start, report_period_end')
+        .eq('user_id', user.id)
+        .eq('marketplace', marketplace)
+        .in('product_code', slice)
+      if (existingAds) {
+        for (const row of existingAds) {
+          existingSet.add(
+            `${row.product_code}|${row.report_period_start}|${row.report_period_end}`
+          )
+        }
+      }
     }
+
+    const newAdsRows = adsRows.filter(
+      (r) =>
+        !existingSet.has(
+          `${r.product_code}|${r.report_period_start}|${r.report_period_end}`
+        )
+    )
+    const duplicateCount = adsRows.length - newAdsRows.length
+
+    const CHUNK = 500
+    let insertedCount = 0
+    const warnings: string[] = []
+    for (let i = 0; i < newAdsRows.length; i += CHUNK) {
+      const chunk = newAdsRows.slice(i, i + CHUNK)
+      const { error } = await supabase.from('ads_data').upsert(chunk, {
+        onConflict:
+          'user_id,marketplace,product_code,report_period_start,report_period_end',
+        ignoreDuplicates: true,
+      })
+      if (error) {
+        console.error('Ads insert error:', error.message)
+        warnings.push(`Sebagian data iklan gagal disimpan: ${error.message}`)
+      } else {
+        insertedCount += chunk.length
+      }
+    }
+
+    // Update batch with actual inserted count
+    await supabase
+      .from('upload_batches')
+      .update({ record_count: insertedCount })
+      .eq('id', batch.id)
 
     // Auto-create master_products for new products found in ads
     let newProducts = 0
@@ -179,10 +232,12 @@ export async function POST(request: NextRequest) {
     const summary: UploadSummary = {
       batchId: batch.id,
       recordCount: rows.length,
+      insertedCount,
+      duplicateCount,
       newProducts,
       periodStart,
       periodEnd,
-      warnings: [],
+      warnings,
     }
 
     return NextResponse.json(summary)

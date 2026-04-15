@@ -35,6 +35,8 @@ interface UploadState {
   progress: number
   result: {
     recordCount?: number
+    insertedCount?: number
+    duplicateCount?: number
     newProducts?: number
     periodStart?: string | null
     periodEnd?: string | null
@@ -117,10 +119,24 @@ function DropZone({
               <CheckCircle className="h-4 w-4" />
               <span className="font-medium">Upload berhasil!</span>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-              <span>{state.result.recordCount?.toLocaleString('id-ID')} baris data</span>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <span>
+                <span className="text-green-700 font-medium">
+                  +{(state.result.insertedCount ?? 0).toLocaleString('id-ID')} data baru
+                </span>
+              </span>
+              {(state.result.duplicateCount ?? 0) > 0 && (
+                <span className="text-amber-700">
+                  {state.result.duplicateCount?.toLocaleString('id-ID')} duplikat dilewati
+                </span>
+              )}
+              <span className="col-span-2">
+                Total di file: {state.result.recordCount?.toLocaleString('id-ID')} baris
+              </span>
               {(state.result.newProducts ?? 0) > 0 && (
-                <span className="text-green-700">+{state.result.newProducts} produk baru</span>
+                <span className="col-span-2 text-green-700">
+                  +{state.result.newProducts} produk baru ditambahkan ke master
+                </span>
               )}
               {state.result.periodStart && (
                 <span className="col-span-2">
@@ -238,6 +254,8 @@ export default function UploadPage() {
         progress: 100,
         result: {
           recordCount: data.recordCount,
+          insertedCount: data.insertedCount,
+          duplicateCount: data.duplicateCount,
           newProducts: data.newProducts,
           periodStart: data.periodStart,
           periodEnd: data.periodEnd,

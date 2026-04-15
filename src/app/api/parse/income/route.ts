@@ -82,36 +82,76 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Insert orders in chunks of 500
+    // Dedup: check which order_numbers already exist for this user+marketplace
+    const incomingOrderNumbers = orders.map((o) => o.order_number)
+    const existingSet = new Set<string>()
+
+    // Query in chunks (Supabase .in() has a limit around 1000)
+    const QUERY_CHUNK = 500
+    for (let i = 0; i < incomingOrderNumbers.length; i += QUERY_CHUNK) {
+      const slice = incomingOrderNumbers.slice(i, i + QUERY_CHUNK)
+      const { data: existingOrders } = await supabase
+        .from('orders')
+        .select('order_number')
+        .eq('user_id', user.id)
+        .eq('marketplace', marketplace)
+        .in('order_number', slice)
+      if (existingOrders) {
+        for (const row of existingOrders) existingSet.add(row.order_number)
+      }
+    }
+
+    // Filter: only keep NEW orders
+    const newOrders = orders.filter((o) => !existingSet.has(o.order_number))
+    const duplicateCount = orders.length - newOrders.length
+
+    // Insert new orders in chunks of 500
     const CHUNK = 500
-    const orderRows = orders.map((o) => ({
+    const orderRows = newOrders.map((o) => ({
       ...o,
       user_id: user.id,
       upload_batch_id: batch.id,
       marketplace,
     }))
 
+    let insertedCount = 0
+    const warnings: string[] = []
     for (let i = 0; i < orderRows.length; i += CHUNK) {
+      const chunk = orderRows.slice(i, i + CHUNK)
       const { error } = await supabase
         .from('orders')
-        .upsert(orderRows.slice(i, i + CHUNK), {
-          onConflict: 'upload_batch_id,order_number',
-          ignoreDuplicates: false,
+        .upsert(chunk, {
+          onConflict: 'user_id,marketplace,order_number',
+          ignoreDuplicates: true,
         })
       if (error) {
-        // Non-fatal: continue but track warning
         console.error('Order insert error:', error.message)
+        warnings.push(`Sebagian order gagal disimpan: ${error.message}`)
+      } else {
+        insertedCount += chunk.length
       }
     }
 
-    // Insert order_products
+    // Insert order_products — dedup via upsert on unique key
     if (orderProducts.length > 0) {
-      const opRows = orderProducts.map((op) => ({
-        ...op,
-        user_id: user.id,
-      }))
-      for (let i = 0; i < opRows.length; i += CHUNK) {
-        await supabase.from('order_products').insert(opRows.slice(i, i + CHUNK))
+      // Only insert products for orders that we actually inserted (or that already existed — skip re-linking)
+      const insertedOrderSet = new Set(newOrders.map((o) => o.order_number))
+      const opRowsNew = orderProducts
+        .filter((op) => insertedOrderSet.has(op.order_number))
+        .map((op) => ({
+          ...op,
+          user_id: user.id,
+        }))
+      for (let i = 0; i < opRowsNew.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('order_products')
+          .upsert(opRowsNew.slice(i, i + CHUNK), {
+            onConflict: 'user_id,order_number,marketplace_product_id',
+            ignoreDuplicates: true,
+          })
+        if (error) {
+          console.error('Order products insert error:', error.message)
+        }
       }
     }
 
@@ -124,6 +164,12 @@ export async function POST(request: NextRequest) {
         })
       }
     }
+
+    // Update batch with actual inserted count
+    await supabase
+      .from('upload_batches')
+      .update({ record_count: insertedCount })
+      .eq('id', batch.id)
 
     let newProducts = 0
     for (const [productId, { name }] of Array.from(uniqueProducts)) {
@@ -151,10 +197,12 @@ export async function POST(request: NextRequest) {
     const summary: UploadSummary = {
       batchId: batch.id,
       recordCount: orders.length,
+      insertedCount,
+      duplicateCount,
       newProducts,
       periodStart,
       periodEnd,
-      warnings: [],
+      warnings,
     }
 
     return NextResponse.json(summary)

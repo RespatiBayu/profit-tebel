@@ -82,7 +82,9 @@ export interface AdsParseResult {
 // Upload batch summary returned to client
 export interface UploadSummary {
   batchId: string
-  recordCount: number
+  recordCount: number         // total rows parsed from file
+  insertedCount: number       // actually saved as new (after dedup)
+  duplicateCount: number      // skipped because already existed
   newProducts: number
   periodStart: string | null
   periodEnd: string | null
