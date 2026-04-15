@@ -331,19 +331,31 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     })
   }, [orders, dateFrom, dateTo])
 
+  // Filter ads data by date range (match order period)
+  const filteredAdsData = useMemo(() => {
+    if (!dateFrom && !dateTo) return adsData
+    return adsData.filter((ad) => {
+      // Match if ad report period overlaps with selected range
+      if (!ad.report_period_end) return true
+      if (dateFrom && ad.report_period_end < dateFrom) return false
+      if (dateTo && ad.report_period_start && ad.report_period_start > dateTo) return false
+      return true
+    })
+  }, [adsData, dateFrom, dateTo])
+
   // Calculate all metrics
   const kpis = useMemo(
-    () => calculateKpis(filteredOrders, orderProductMap, hppMap, adsData),
-    [filteredOrders, orderProductMap, hppMap, adsData]
+    () => calculateKpis(filteredOrders, orderProductMap, hppMap, filteredAdsData),
+    [filteredOrders, orderProductMap, hppMap, filteredAdsData]
   )
   const feeBreakdown = useMemo(() => calculateFeeBreakdown(filteredOrders), [filteredOrders])
   const trendData = useMemo(
-    () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, adsData),
-    [filteredOrders, trendGroup, orderProductMap, hppMap, adsData]
+    () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData),
+    [filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData]
   )
   const productRows = useMemo(
-    () => calculateProductProfit(filteredOrders, orderProducts, hppMap, adsData),
-    [filteredOrders, orderProducts, hppMap, adsData]
+    () => calculateProductProfit(filteredOrders, orderProducts, hppMap, filteredAdsData),
+    [filteredOrders, orderProducts, hppMap, filteredAdsData]
   )
   const cashFlow = useMemo(() => calculateCashFlowGap(filteredOrders), [filteredOrders])
   const paymentDist = useMemo(() => calculatePaymentDistribution(filteredOrders), [filteredOrders])
