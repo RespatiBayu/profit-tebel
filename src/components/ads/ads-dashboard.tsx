@@ -465,8 +465,8 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
   // For quadrant + True ROAS, we need profit data from income
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
   const profitRows = useMemo(
-    () => hasIncomeData ? calculateProductProfit(orders, orderProducts, hppMap) : [],
-    [orders, orderProducts, hppMap, hasIncomeData]
+    () => hasIncomeData ? calculateProductProfit(orders, orderProducts, hppMap, adsData) : [],
+    [orders, orderProducts, hppMap, adsData, hasIncomeData]
   )
 
   const quadrantData = useMemo(

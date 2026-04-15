@@ -1,6 +1,7 @@
 import type {
   DbOrder,
   DbOrderProduct,
+  DbAdsRow,
   MasterProduct,
   ProfitKpis,
   FeeBreakdownItem,
@@ -59,6 +60,32 @@ export function buildOrderProductMap(
   return map
 }
 
+// Build: product_code → total ad_spend from ads_data
+export function buildAdSpendMap(adsData: DbAdsRow[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const ad of adsData) {
+    const existing = map.get(ad.product_code) ?? 0
+    map.set(ad.product_code, existing + (ad.ad_spend ?? 0))
+  }
+  return map
+}
+
+// Per-order ad spend cost (sum of all products in order)
+function orderAdSpendCost(
+  order: DbOrder,
+  orderProductMap: Map<string, string[]>,
+  adSpendMap: Map<string, number>,
+  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>
+): number {
+  const productIds = orderProductMap.get(order.order_number) ?? []
+  if (productIds.length === 0) return 0
+  return productIds.reduce((sum, pid) => {
+    // Try to find ad spend by marketplace_product_id (product_code)
+    const adSpend = adSpendMap.get(pid) ?? 0
+    return sum + adSpend
+  }, 0)
+}
+
 // Per-order HPP cost (sum of all products in order)
 function orderHppCost(
   order: DbOrder,
@@ -80,12 +107,15 @@ function orderHppCost(
 export function calculateKpis(
   orders: DbOrder[],
   orderProductMap: Map<string, string[]>,
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>
+  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  adsData: DbAdsRow[] = []
 ): ProfitKpis {
+  const adSpendMap = buildAdSpendMap(adsData)
   let totalOmzet = 0
   let totalNetIncome = 0
   let totalFees = 0
   let totalHppCost = 0
+  let totalAdSpend = 0
   let hasHppData = false
 
   for (const o of orders) {
@@ -113,9 +143,12 @@ export function calculateKpis(
     const hpp = orderHppCost(o, orderProductMap, hppMap)
     totalHppCost += hpp
     if (hpp > 0) hasHppData = true
+
+    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap, hppMap)
+    totalAdSpend += adSpend
   }
 
-  const realProfit = totalNetIncome - totalHppCost
+  const realProfit = totalNetIncome - totalHppCost - totalAdSpend
   const profitMargin =
     hasHppData && totalOmzet > 0 ? (realProfit / totalOmzet) * 100 : null
 
@@ -124,6 +157,7 @@ export function calculateKpis(
     totalNetIncome,
     totalFees,
     totalHppCost,
+    totalAdSpend,
     realProfit,
     profitMargin,
     orderCount: orders.length,
@@ -179,21 +213,25 @@ export function calculateTrend(
   orders: DbOrder[],
   groupBy: 'day' | 'week',
   orderProductMap: Map<string, string[]>,
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>
+  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  adsData: DbAdsRow[] = []
 ): TrendPoint[] {
+  const adSpendMap = buildAdSpendMap(adsData)
   const grouped = new Map<
     string,
-    { omzet: number; netIncome: number; hpp: number; hasHpp: boolean }
+    { omzet: number; netIncome: number; hpp: number; adSpend: number; hasHpp: boolean }
   >()
 
   for (const o of orders) {
     if (!o.order_date) continue
     const key = groupBy === 'week' ? weekKey(o.order_date) : o.order_date
-    const existing = grouped.get(key) ?? { omzet: 0, netIncome: 0, hpp: 0, hasHpp: false }
+    const existing = grouped.get(key) ?? { omzet: 0, netIncome: 0, hpp: 0, adSpend: 0, hasHpp: false }
     const hpp = orderHppCost(o, orderProductMap, hppMap)
+    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap, hppMap)
     existing.omzet += o.original_price
     existing.netIncome += o.total_income
     existing.hpp += hpp
+    existing.adSpend += adSpend
     if (hpp > 0) existing.hasHpp = true
     grouped.set(key, existing)
   }
@@ -204,7 +242,7 @@ export function calculateTrend(
       date,
       omzet: data.omzet,
       netIncome: data.netIncome,
-      profit: data.hasHpp ? data.netIncome - data.hpp : null,
+      profit: data.hasHpp ? data.netIncome - data.hpp - data.adSpend : null,
     }))
 }
 
@@ -215,12 +253,15 @@ export function calculateTrend(
 export function calculateProductProfit(
   orders: DbOrder[],
   orderProducts: DbOrderProduct[],
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>
+  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  adsData: DbAdsRow[] = []
 ): ProductProfitRow[] {
+  const adSpendMap = buildAdSpendMap(adsData)
+
   // Map product → list of contributing orders (with prorated income)
   const productStats = new Map<
     string,
-    { name: string; orderCount: number; attributedIncome: number; hppCost: number; hasHpp: boolean }
+    { name: string; orderCount: number; attributedIncome: number; hppCost: number; adSpend: number; hasHpp: boolean }
   >()
 
   // Build: order_number → [product IDs]
@@ -240,16 +281,19 @@ export function calculateProductProfit(
 
     for (const pid of productIds) {
       const hppInfo = hppMap.get(pid)
+      const adSpend = adSpendMap.get(pid) ?? 0
       const existing = productStats.get(pid) ?? {
         name: hppInfo?.name ?? pid,
         orderCount: 0,
         attributedIncome: 0,
         hppCost: 0,
+        adSpend: 0,
         hasHpp: false,
       }
 
       existing.orderCount += 1
       existing.attributedIncome += incomePerProduct
+      existing.adSpend += adSpend
       if (hppInfo && (hppInfo.hpp > 0 || hppInfo.packaging_cost > 0)) {
         existing.hppCost += hppInfo.hpp + hppInfo.packaging_cost
         existing.hasHpp = true
@@ -259,7 +303,7 @@ export function calculateProductProfit(
   }
 
   return Array.from(productStats.entries()).map(([productId, data]) => {
-    const profit = data.attributedIncome - data.hppCost
+    const profit = data.attributedIncome - data.hppCost - data.adSpend
     const margin =
       data.hasHpp && data.attributedIncome > 0
         ? (profit / data.attributedIncome) * 100
@@ -271,6 +315,7 @@ export function calculateProductProfit(
       orderCount: data.orderCount,
       attributedIncome: data.attributedIncome,
       totalHppCost: data.hppCost,
+      totalAdSpend: data.adSpend,
       profit,
       margin,
       hasHpp: data.hasHpp,

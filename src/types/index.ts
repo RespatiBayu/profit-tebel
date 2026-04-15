@@ -166,6 +166,7 @@ export interface ProfitKpis {
   totalNetIncome: number
   totalFees: number
   totalHppCost: number
+  totalAdSpend: number
   realProfit: number
   profitMargin: number | null  // null if no HPP data
   orderCount: number
@@ -191,6 +192,7 @@ export interface ProductProfitRow {
   orderCount: number
   attributedIncome: number
   totalHppCost: number
+  totalAdSpend: number
   profit: number
   margin: number | null
   hasHpp: boolean

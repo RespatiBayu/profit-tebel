@@ -57,7 +57,7 @@ import {
   calculatePaymentDistribution,
   calculateCourierStats,
 } from '@/lib/calculations/profit'
-import type { DbOrder, DbOrderProduct, MasterProduct, ProductProfitRow } from '@/types'
+import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct, ProductProfitRow } from '@/types'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -307,10 +307,11 @@ interface Props {
   orders: DbOrder[]
   orderProducts: DbOrderProduct[]
   masterProducts: MasterProduct[]
+  adsData: DbAdsRow[]
   noHppCount: number
 }
 
-export default function ProfitDashboard({ orders, orderProducts, masterProducts, noHppCount }: Props) {
+export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, noHppCount }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -332,17 +333,17 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
 
   // Calculate all metrics
   const kpis = useMemo(
-    () => calculateKpis(filteredOrders, orderProductMap, hppMap),
-    [filteredOrders, orderProductMap, hppMap]
+    () => calculateKpis(filteredOrders, orderProductMap, hppMap, adsData),
+    [filteredOrders, orderProductMap, hppMap, adsData]
   )
   const feeBreakdown = useMemo(() => calculateFeeBreakdown(filteredOrders), [filteredOrders])
   const trendData = useMemo(
-    () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap),
-    [filteredOrders, trendGroup, orderProductMap, hppMap]
+    () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, adsData),
+    [filteredOrders, trendGroup, orderProductMap, hppMap, adsData]
   )
   const productRows = useMemo(
-    () => calculateProductProfit(filteredOrders, orderProducts, hppMap),
-    [filteredOrders, orderProducts, hppMap]
+    () => calculateProductProfit(filteredOrders, orderProducts, hppMap, adsData),
+    [filteredOrders, orderProducts, hppMap, adsData]
   )
   const cashFlow = useMemo(() => calculateCashFlowGap(filteredOrders), [filteredOrders])
   const paymentDist = useMemo(() => calculatePaymentDistribution(filteredOrders), [filteredOrders])
@@ -452,11 +453,11 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
             kpis.hasHppData
               ? noHppCount > 0
                 ? `Estimasi (${noHppCount} produk belum HPP)`
-                : 'Net Income − HPP & packaging'
+                : 'Net Income − HPP & packaging − iklan'
               : 'Isi HPP dulu untuk melihat'
           }
           icon={TrendingUp}
-          tooltip="Profit sebenarnya setelah memperhitungkan HPP (harga pokok) dan biaya packaging. Rumus: Net Income − HPP − Packaging."
+          tooltip="Profit sebenarnya setelah memperhitungkan HPP (harga pokok), biaya packaging, dan biaya iklan. Rumus: Net Income − HPP − Packaging − Biaya Iklan."
           cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
         />
         <KpiCard
@@ -479,16 +480,28 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               </div>
               <div className="flex-1 space-y-1.5 text-sm">
                 <p className="font-medium">Cara menghitung Real Profit:</p>
-                <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono">
-                  <span className="text-blue-600">{formatRp(kpis.totalNetIncome)}</span>
-                  <span className="text-muted-foreground">(Net Income)</span>
-                  <span className="text-muted-foreground">−</span>
-                  <span className="text-orange-600">{formatRp(kpis.totalHppCost)}</span>
-                  <span className="text-muted-foreground">(HPP + Packaging)</span>
-                  <span className="text-muted-foreground">=</span>
-                  <span className={kpis.realProfit >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
-                    {formatRp(kpis.realProfit)}
-                  </span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono">
+                    <span className="text-blue-600">{formatRp(kpis.totalNetIncome)}</span>
+                    <span className="text-muted-foreground">(Net Income)</span>
+                    <span className="text-muted-foreground">−</span>
+                    <span className="text-orange-600">{formatRp(kpis.totalHppCost)}</span>
+                    <span className="text-muted-foreground">(HPP + Packaging)</span>
+                  </div>
+                  {kpis.totalAdSpend > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono ml-4">
+                      <span className="text-muted-foreground">−</span>
+                      <span className="text-red-600">{formatRp(kpis.totalAdSpend)}</span>
+                      <span className="text-muted-foreground">(Biaya Iklan)</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono">
+                    <span className="text-muted-foreground">=</span>
+                    <span className={kpis.realProfit >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                      {formatRp(kpis.realProfit)}
+                    </span>
+                    <span className="text-muted-foreground font-normal">(Real Profit)</span>
+                  </div>
                 </div>
               </div>
             </div>
