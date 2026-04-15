@@ -45,6 +45,7 @@ import {
   Receipt,
   Percent,
   ShoppingBag,
+  Zap,
 } from 'lucide-react'
 import {
   buildHppMap,
@@ -107,7 +108,7 @@ function KpiCard({
   label: string
   value: string
   sub?: string
-  accent?: 'green' | 'red' | 'blue' | 'default' | 'muted'
+  accent?: 'green' | 'red' | 'blue' | 'orange' | 'default' | 'muted'
   icon?: React.ComponentType<{ className?: string }>
   tooltip?: string
   cta?: { label: string; href: string }
@@ -116,6 +117,7 @@ function KpiCard({
     green: 'text-green-600',
     red: 'text-red-600',
     blue: 'text-blue-600',
+    orange: 'text-orange-600',
     default: 'text-foreground',
     muted: 'text-muted-foreground',
   }
@@ -123,6 +125,7 @@ function KpiCard({
     green: 'bg-green-100 text-green-600',
     red: 'bg-red-100 text-red-600',
     blue: 'bg-blue-100 text-blue-600',
+    orange: 'bg-orange-100 text-orange-600',
     default: 'bg-muted text-muted-foreground',
     muted: 'bg-muted text-muted-foreground',
   }
@@ -432,7 +435,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         <KpiCard
           label="Total Omzet"
           value={formatRp(kpis.totalOmzet)}
@@ -456,6 +459,14 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
           accent="red"
           icon={Receipt}
           tooltip="Total potongan Shopee: komisi AMS, biaya admin, layanan, voucher seller, cashback, selisih ongkir, dll."
+        />
+        <KpiCard
+          label="Biaya Iklan"
+          value={formatRp(kpis.totalAdSpend)}
+          sub={kpis.totalAdSpend > 0 ? 'Ad spend' : 'Belum ada'}
+          accent={kpis.totalAdSpend > 0 ? 'orange' : 'muted'}
+          icon={Zap}
+          tooltip="Total biaya iklan yang dikeluarkan untuk mempromosikan produk di platform."
         />
         <KpiCard
           label="Real Profit"
