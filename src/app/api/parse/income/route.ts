@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
     const marketplace = (formData.get('marketplace') as string) ?? 'shopee'
+    let storeId = (formData.get('storeId') as string | null) ?? null
 
     if (!file) {
       return NextResponse.json({ error: 'File tidak ditemukan' }, { status: 400 })
@@ -40,7 +41,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 422 })
     }
 
-    const { orders, orderProducts, periodStart, periodEnd } = parseResult
+    const { orders, orderProducts } = parseResult
+    // Validate dates — only pass valid ISO to DB, else null
+    const isoDate = /^\d{4}-\d{2}-\d{2}$/
+    const periodStart = parseResult.periodStart && isoDate.test(parseResult.periodStart)
+      ? parseResult.periodStart
+      : null
+    const periodEnd = parseResult.periodEnd && isoDate.test(parseResult.periodEnd)
+      ? parseResult.periodEnd
+      : null
+    // Also sanitize per-order dates
+    for (const o of orders) {
+      if (o.order_date && !isoDate.test(o.order_date)) o.order_date = null
+      if (o.release_date && !isoDate.test(o.release_date)) o.release_date = null
+    }
 
     if (orders.length === 0) {
       return NextResponse.json(
@@ -59,11 +73,49 @@ export async function POST(request: NextRequest) {
       console.error('Profile upsert error:', profileError)
     }
 
+    // Resolve/auto-create store
+    if (storeId) {
+      const { data: storeRow } = await supabase
+        .from('stores')
+        .select('id')
+        .eq('id', storeId)
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (!storeRow) storeId = null
+    }
+    if (!storeId) {
+      const { data: defaultStore } = await supabase
+        .from('stores')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('marketplace', marketplace)
+        .eq('name', 'Toko Utama')
+        .maybeSingle()
+      if (defaultStore) {
+        storeId = defaultStore.id
+      } else {
+        const { data: newStore, error: storeErr } = await supabase
+          .from('stores')
+          .insert({ user_id: user.id, name: 'Toko Utama', marketplace })
+          .select('id')
+          .single()
+        if (storeErr || !newStore) {
+          console.error('Store create error:', storeErr)
+          return NextResponse.json(
+            { error: `Gagal membuat store default: ${storeErr?.message ?? 'unknown'}` },
+            { status: 500 }
+          )
+        }
+        storeId = newStore.id
+      }
+    }
+
     // Create upload batch
     const { data: batch, error: batchError } = await supabase
       .from('upload_batches')
       .insert({
         user_id: user.id,
+        store_id: storeId,
         file_name: file.name,
         file_type: 'income',
         marketplace,
@@ -82,7 +134,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Dedup: check which order_numbers already exist for this user+marketplace
+    // Dedup: check which order_numbers already exist for THIS store
     const incomingOrderNumbers = orders.map((o) => o.order_number)
     const existingSet = new Set<string>()
 
@@ -93,8 +145,7 @@ export async function POST(request: NextRequest) {
       const { data: existingOrders } = await supabase
         .from('orders')
         .select('order_number')
-        .eq('user_id', user.id)
-        .eq('marketplace', marketplace)
+        .eq('store_id', storeId)
         .in('order_number', slice)
       if (existingOrders) {
         for (const row of existingOrders) existingSet.add(row.order_number)
@@ -110,6 +161,7 @@ export async function POST(request: NextRequest) {
     const orderRows = newOrders.map((o) => ({
       ...o,
       user_id: user.id,
+      store_id: storeId,
       upload_batch_id: batch.id,
       marketplace,
     }))
@@ -121,7 +173,7 @@ export async function POST(request: NextRequest) {
       const { error } = await supabase
         .from('orders')
         .upsert(chunk, {
-          onConflict: 'user_id,marketplace,order_number',
+          onConflict: 'store_id,order_number',
           ignoreDuplicates: true,
         })
       if (error) {
@@ -141,12 +193,13 @@ export async function POST(request: NextRequest) {
         .map((op) => ({
           ...op,
           user_id: user.id,
+          store_id: storeId,
         }))
       for (let i = 0; i < opRowsNew.length; i += CHUNK) {
         const { error } = await supabase
           .from('order_products')
           .upsert(opRowsNew.slice(i, i + CHUNK), {
-            onConflict: 'user_id,order_number,marketplace_product_id',
+            onConflict: 'store_id,order_number,marketplace_product_id',
             ignoreDuplicates: true,
           })
         if (error) {
@@ -176,14 +229,14 @@ export async function POST(request: NextRequest) {
       const { data: existing } = await supabase
         .from('master_products')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('store_id', storeId)
         .eq('marketplace_product_id', productId)
-        .eq('marketplace', marketplace)
-        .single()
+        .maybeSingle()
 
       if (!existing) {
         const { error } = await supabase.from('master_products').insert({
           user_id: user.id,
+          store_id: storeId,
           marketplace_product_id: productId,
           product_name: name,
           marketplace,

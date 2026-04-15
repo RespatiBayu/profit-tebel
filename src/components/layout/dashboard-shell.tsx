@@ -26,7 +26,9 @@ import {
   Menu,
   LogOut,
   ChevronRight,
+  Store,
 } from 'lucide-react'
+import { StoreSwitcher } from './store-switcher'
 
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -34,6 +36,7 @@ const navItems = [
   { href: '/dashboard/ads', label: 'Analisis Iklan', icon: BarChart3 },
   { href: '/dashboard/roas-calculator', label: 'Kalkulator ROAS', icon: Calculator },
   { href: '/dashboard/products', label: 'Master Produk', icon: Package },
+  { href: '/dashboard/stores', label: 'Toko Saya', icon: Store },
   { href: '/dashboard/upload', label: 'Upload Data', icon: Upload },
 ]
 
@@ -141,8 +144,10 @@ export default function DashboardShell({
             <Menu className="h-5 w-5" />
           </Button>
 
-          {/* Desktop: spacer */}
-          <div className="hidden lg:block" />
+          {/* Store switcher */}
+          <div className="flex-1 flex items-center lg:justify-start justify-center">
+            <StoreSwitcher />
+          </div>
 
           {/* User menu */}
           <DropdownMenu>

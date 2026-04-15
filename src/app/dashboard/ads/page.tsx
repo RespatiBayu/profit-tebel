@@ -5,20 +5,31 @@ import { Upload } from 'lucide-react'
 import AdsDashboard from '@/components/ads/ads-dashboard'
 import type { DbAdsRow, DbOrder, DbOrderProduct, MasterProduct } from '@/types'
 
-export default async function AdsPage() {
+export default async function AdsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ store?: string }>
+}) {
+  const { store: storeId } = await searchParams
   const supabase = await createClient()
+
+  const adsQ = supabase.from('ads_data').select('*').order('ad_spend', { ascending: false })
+  const mpQ = supabase.from('master_products').select('*')
+  const ordQ = supabase.from('orders').select('*')
+  const opQ = supabase.from('order_products').select('*')
+  if (storeId) {
+    adsQ.eq('store_id', storeId)
+    mpQ.eq('store_id', storeId)
+    ordQ.eq('store_id', storeId)
+    opQ.eq('store_id', storeId)
+  }
 
   const [
     { data: adsData },
     { data: masterProducts },
     { data: orders },
     { data: orderProducts },
-  ] = await Promise.all([
-    supabase.from('ads_data').select('*').order('ad_spend', { ascending: false }),
-    supabase.from('master_products').select('*'),
-    supabase.from('orders').select('*'),
-    supabase.from('order_products').select('*'),
-  ])
+  ] = await Promise.all([adsQ, mpQ, ordQ, opQ])
 
   const typedAds = (adsData ?? []) as DbAdsRow[]
   const typedProducts = (masterProducts ?? []) as MasterProduct[]

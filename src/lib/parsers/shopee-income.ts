@@ -49,39 +49,67 @@ function parseNum(value: unknown): number {
   return isNaN(num) ? 0 : num
 }
 
+function pad2(s: string | number): string {
+  const v = String(s)
+  return v.length === 1 ? `0${v}` : v
+}
+
+function toIsoDate(d: Date): string {
+  const yyyy = d.getFullYear()
+  const mm = pad2(d.getMonth() + 1)
+  const dd = pad2(d.getDate())
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function isValidIsoDate(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false
+  const parts = s.split('-').map(Number)
+  const m = parts[1]
+  const d = parts[2]
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false
+  return true
+}
+
 function parseShopeeDate(value: unknown): string | null {
-  if (!value) return null
+  if (value === null || value === undefined || value === '') return null
 
   // Already a JS Date (from SheetJS cellDates)
   if (value instanceof Date) {
     if (isNaN(value.getTime())) return null
-    return value.toISOString().split('T')[0]
+    return toIsoDate(value)
   }
 
-  const str = String(value).trim()
+  // Excel serial number (days since 1899-12-30)
+  if (typeof value === 'number' && isFinite(value)) {
+    const excelEpoch = Date.UTC(1899, 11, 30)
+    const d = new Date(excelEpoch + value * 86400000)
+    if (!isNaN(d.getTime())) return toIsoDate(d)
+    return null
+  }
+
+  let str = String(value).trim()
   if (!str) return null
 
-  // Try common formats: "2024-01-15 14:30:00", "15/01/2024 14:30", "2024-01-15"
-  const patterns = [
-    /^(\d{4})-(\d{2})-(\d{2})/, // YYYY-MM-DD...
-    /^(\d{2})\/(\d{2})\/(\d{4})/, // DD/MM/YYYY
-    /^(\d{2})-(\d{2})-(\d{4})/, // DD-MM-YYYY
-  ]
+  // Strip time portion if present (anything after space or T)
+  str = str.split(/[ T]/)[0]
 
-  for (const pattern of patterns) {
-    const m = str.match(pattern)
-    if (m) {
-      if (pattern === patterns[0]) {
-        return `${m[1]}-${m[2]}-${m[3]}`
-      } else {
-        return `${m[3]}-${m[2]}-${m[1]}`
-      }
-    }
+  // ISO-like: YYYY-MM-DD or YYYY/MM/DD
+  let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/)
+  if (m) {
+    const out = `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`
+    return isValidIsoDate(out) ? out : null
   }
 
-  // Try native Date parsing as fallback
+  // Day-first: DD-MM-YYYY or DD/MM/YYYY (Indonesian/Shopee format)
+  m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+  if (m) {
+    const out = `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`
+    return isValidIsoDate(out) ? out : null
+  }
+
+  // Native Date parsing as last resort
   const d = new Date(str)
-  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+  if (!isNaN(d.getTime())) return toIsoDate(d)
 
   return null
 }

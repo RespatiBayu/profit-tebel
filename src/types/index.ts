@@ -91,6 +91,18 @@ export interface UploadSummary {
   warnings: string[]
 }
 
+// Store (per-user workspace for a specific shop)
+export interface Store {
+  id: string
+  user_id: string
+  name: string
+  marketplace: string
+  color: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
 // Master product (from DB)
 export interface MasterProduct {
   id: string

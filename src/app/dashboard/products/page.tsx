@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,6 +41,8 @@ interface EditingProduct {
 }
 
 export default function ProductsPage() {
+  const searchParams = useSearchParams()
+  const storeId = searchParams.get('store') ?? ''
   const [products, setProducts] = useState<MasterProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -54,10 +57,12 @@ export default function ProductsPage() {
 
   const fetchProducts = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase
+    const q = supabase
       .from('master_products')
       .select('*')
       .order('product_name', { ascending: true })
+    if (storeId) q.eq('store_id', storeId)
+    const { data, error } = await q
 
     if (error) {
       setError(error.message)
@@ -65,16 +70,19 @@ export default function ProductsPage() {
       // Join with order_products and ads_data to detect sources
       const productIds = (data ?? []).map((p) => p.marketplace_product_id)
 
-      const [{ data: incomeIds }, { data: adsIds }] = await Promise.all([
-        supabase
-          .from('order_products')
-          .select('marketplace_product_id')
-          .in('marketplace_product_id', productIds),
-        supabase
-          .from('ads_data')
-          .select('product_code')
-          .in('product_code', productIds),
-      ])
+      const opQ = supabase
+        .from('order_products')
+        .select('marketplace_product_id')
+        .in('marketplace_product_id', productIds)
+      const adQ = supabase
+        .from('ads_data')
+        .select('product_code')
+        .in('product_code', productIds)
+      if (storeId) {
+        opQ.eq('store_id', storeId)
+        adQ.eq('store_id', storeId)
+      }
+      const [{ data: incomeIds }, { data: adsIds }] = await Promise.all([opQ, adQ])
 
       const incomeSet = new Set((incomeIds ?? []).map((r) => r.marketplace_product_id))
       const adsSet = new Set((adsIds ?? []).map((r) => r.product_code))
@@ -88,7 +96,7 @@ export default function ProductsPage() {
       )
     }
     setLoading(false)
-  }, [supabase])
+  }, [supabase, storeId])
 
   useEffect(() => {
     fetchProducts()

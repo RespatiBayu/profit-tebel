@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,9 +23,12 @@ import {
   X,
   ArrowRight,
   Loader2,
+  Store as StoreIcon,
+  Plus,
 } from 'lucide-react'
 import Link from 'next/link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
+import type { Store } from '@/types'
 
 type UploadType = 'income' | 'ads'
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
@@ -196,13 +200,45 @@ function DropZone({
 }
 
 export default function UploadPage() {
+  const searchParams = useSearchParams()
+  const urlStoreId = searchParams.get('store') ?? ''
   const [marketplace, setMarketplace] = useState('shopee')
+  const [stores, setStores] = useState<Store[]>([])
+  const [storeId, setStoreId] = useState<string>(urlStoreId)
+  const [storesLoading, setStoresLoading] = useState(true)
   const [incomeState, setIncomeState] = useState<UploadState>({
     file: null, status: 'idle', progress: 0, result: null,
   })
   const [adsState, setAdsState] = useState<UploadState>({
     file: null, status: 'idle', progress: 0, result: null,
   })
+
+  // Load stores on mount
+  useEffect(() => {
+    fetch('/api/stores')
+      .then((r) => r.json())
+      .then((data) => {
+        const list: Store[] = data.stores ?? []
+        setStores(list)
+        // Default store: URL param > first store
+        if (!urlStoreId && list.length > 0 && !storeId) {
+          setStoreId(list[0].id)
+          setMarketplace(list[0].marketplace)
+        } else if (urlStoreId) {
+          const s = list.find((x) => x.id === urlStoreId)
+          if (s) setMarketplace(s.marketplace)
+        }
+        setStoresLoading(false)
+      })
+      .catch(() => setStoresLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // When store changes, sync marketplace
+  useEffect(() => {
+    const s = stores.find((x) => x.id === storeId)
+    if (s) setMarketplace(s.marketplace)
+  }, [storeId, stores])
 
   function setFile(type: UploadType, file: File) {
     if (type === 'income') {
@@ -230,6 +266,7 @@ export default function UploadPage() {
     const formData = new FormData()
     formData.append('file', state.file)
     formData.append('marketplace', marketplace)
+    if (storeId) formData.append('storeId', storeId)
 
     const endpoint = `/api/parse/${type}`
 
@@ -286,27 +323,82 @@ export default function UploadPage() {
         </p>
       </div>
 
-      {/* Marketplace selector */}
+      {/* Store + marketplace selector */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Pilih Marketplace</CardTitle>
+          <CardTitle className="text-base flex items-center gap-2">
+            <StoreIcon className="h-4 w-4 text-primary" />
+            Pilih Toko Tujuan
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <Select value={marketplace} onValueChange={(v) => v && setMarketplace(v)}>
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MARKETPLACE_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {marketplace === 'tiktok' && (
-            <p className="text-xs text-muted-foreground mt-2">
-              TikTok Shop parser segera hadir. Saat ini hanya Shopee yang didukung.
-            </p>
+        <CardContent className="space-y-4">
+          {storesLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Memuat daftar toko...
+            </div>
+          ) : stores.length === 0 ? (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Kamu belum punya toko. Kami akan otomatis buat &quot;Toko Utama&quot; saat upload
+                pertama, atau kamu bisa{' '}
+                <Link href="/dashboard/stores?new=1" className="underline font-medium">
+                  buat toko dulu di sini
+                </Link>
+                .
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">Toko</label>
+                <Select value={storeId} onValueChange={(v) => v && setStoreId(v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih toko" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stores.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}{' '}
+                        <span className="text-muted-foreground text-xs">
+                          ({s.marketplace})
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">
+                  Marketplace (ikut toko)
+                </label>
+                <Select value={marketplace} onValueChange={(v) => v && setMarketplace(v)} disabled>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MARKETPLACE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           )}
+          <div className="flex items-center justify-between pt-1">
+            <p className="text-xs text-muted-foreground">
+              Upload akan menambah data ke toko yang dipilih.
+            </p>
+            <Link href="/dashboard/stores?new=1">
+              <Button variant="ghost" size="sm" className="gap-2 text-xs">
+                <Plus className="h-3.5 w-3.5" />
+                Tambah Toko
+              </Button>
+            </Link>
+          </div>
         </CardContent>
       </Card>
 

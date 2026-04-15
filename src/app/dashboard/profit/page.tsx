@@ -5,25 +5,31 @@ import { Upload } from 'lucide-react'
 import ProfitDashboard from '@/components/profit/profit-dashboard'
 import type { DbOrder, DbOrderProduct, MasterProduct } from '@/types'
 
-export default async function ProfitPage() {
+export default async function ProfitPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ store?: string }>
+}) {
+  const { store: storeId } = await searchParams
   const supabase = await createClient()
+
+  const ordersQ = supabase
+    .from('orders')
+    .select('*')
+    .order('order_date', { ascending: false })
+  if (storeId) ordersQ.eq('store_id', storeId)
+
+  const orderProductsQ = supabase.from('order_products').select('*')
+  if (storeId) orderProductsQ.eq('store_id', storeId)
+
+  const masterProductsQ = supabase.from('master_products').select('*')
+  if (storeId) masterProductsQ.eq('store_id', storeId)
 
   const [
     { data: orders },
     { data: orderProducts },
     { data: masterProducts },
-  ] = await Promise.all([
-    supabase
-      .from('orders')
-      .select('*')
-      .order('order_date', { ascending: false }),
-    supabase
-      .from('order_products')
-      .select('*'),
-    supabase
-      .from('master_products')
-      .select('*'),
-  ])
+  ] = await Promise.all([ordersQ, orderProductsQ, masterProductsQ])
 
   const typedOrders = (orders ?? []) as DbOrder[]
   const typedOrderProducts = (orderProducts ?? []) as DbOrderProduct[]

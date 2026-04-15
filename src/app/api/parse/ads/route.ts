@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
     const marketplace = (formData.get('marketplace') as string) ?? 'shopee'
+    let storeId = (formData.get('storeId') as string | null) ?? null
 
     if (!file) {
       return NextResponse.json({ error: 'File tidak ditemukan' }, { status: 400 })
@@ -39,7 +40,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 422 })
     }
 
-    const { rows, shopAggregate, periodStart, periodEnd } = parseResult
+    const { rows, shopAggregate } = parseResult
+    // Validate dates — only pass valid ISO to DB, else null
+    const isoDate = /^\d{4}-\d{2}-\d{2}$/
+    const periodStart = parseResult.periodStart && isoDate.test(parseResult.periodStart)
+      ? parseResult.periodStart
+      : null
+    const periodEnd = parseResult.periodEnd && isoDate.test(parseResult.periodEnd)
+      ? parseResult.periodEnd
+      : null
 
     if (rows.length === 0) {
       return NextResponse.json(
@@ -58,11 +67,49 @@ export async function POST(request: NextRequest) {
       console.error('Profile upsert error:', profileError)
     }
 
+    // Resolve/auto-create store
+    if (storeId) {
+      const { data: storeRow } = await supabase
+        .from('stores')
+        .select('id')
+        .eq('id', storeId)
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (!storeRow) storeId = null
+    }
+    if (!storeId) {
+      const { data: defaultStore } = await supabase
+        .from('stores')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('marketplace', marketplace)
+        .eq('name', 'Toko Utama')
+        .maybeSingle()
+      if (defaultStore) {
+        storeId = defaultStore.id
+      } else {
+        const { data: newStore, error: storeErr } = await supabase
+          .from('stores')
+          .insert({ user_id: user.id, name: 'Toko Utama', marketplace })
+          .select('id')
+          .single()
+        if (storeErr || !newStore) {
+          console.error('Store create error:', storeErr)
+          return NextResponse.json(
+            { error: `Gagal membuat store default: ${storeErr?.message ?? 'unknown'}` },
+            { status: 500 }
+          )
+        }
+        storeId = newStore.id
+      }
+    }
+
     // Create upload batch
     const { data: batch, error: batchError } = await supabase
       .from('upload_batches')
       .insert({
         user_id: user.id,
+        store_id: storeId,
         file_name: file.name,
         file_type: 'ads',
         marketplace,
@@ -84,6 +131,7 @@ export async function POST(request: NextRequest) {
     // Prepare ads rows for insert
     const adsRows = rows.map((r) => ({
       user_id: user.id,
+      store_id: storeId,
       upload_batch_id: batch.id,
       marketplace,
       product_name: r.product_name,
@@ -116,6 +164,7 @@ export async function POST(request: NextRequest) {
     if (shopAggregate) {
       adsRows.push({
         user_id: user.id,
+        store_id: storeId,
         upload_batch_id: batch.id,
         marketplace,
         product_name: 'Shop GMV Max (Agregat)',
@@ -159,8 +208,7 @@ export async function POST(request: NextRequest) {
       const { data: existingAds } = await supabase
         .from('ads_data')
         .select('product_code, report_period_start, report_period_end')
-        .eq('user_id', user.id)
-        .eq('marketplace', marketplace)
+        .eq('store_id', storeId)
         .in('product_code', slice)
       if (existingAds) {
         for (const row of existingAds) {
@@ -186,7 +234,7 @@ export async function POST(request: NextRequest) {
       const chunk = newAdsRows.slice(i, i + CHUNK)
       const { error } = await supabase.from('ads_data').upsert(chunk, {
         onConflict:
-          'user_id,marketplace,product_code,report_period_start,report_period_end',
+          'store_id,product_code,report_period_start,report_period_end',
         ignoreDuplicates: true,
       })
       if (error) {
@@ -211,14 +259,14 @@ export async function POST(request: NextRequest) {
       const { data: existing } = await supabase
         .from('master_products')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('store_id', storeId)
         .eq('marketplace_product_id', row.product_code)
-        .eq('marketplace', marketplace)
-        .single()
+        .maybeSingle()
 
       if (!existing) {
         const { error } = await supabase.from('master_products').insert({
           user_id: user.id,
+          store_id: storeId,
           marketplace_product_id: row.product_code,
           product_name: row.product_name ?? `Produk ${row.product_code}`,
           marketplace,

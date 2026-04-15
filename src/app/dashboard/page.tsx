@@ -31,30 +31,43 @@ function formatFileType(fileType: string) {
   return map[fileType] ?? fileType
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ store?: string }>
+}) {
+  const { store: storeId } = await searchParams
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Fetch recent uploads
-  const { data: recentUploads } = await supabase
+  // Fetch recent uploads (filter by store if set)
+  const uploadsQuery = supabase
     .from('upload_batches')
     .select('*')
     .order('uploaded_at', { ascending: false })
     .limit(5)
+  if (storeId) uploadsQuery.eq('store_id', storeId)
+  const { data: recentUploads } = await uploadsQuery
 
-  // Fetch quick stats
-  const { count: orderCount } = await supabase
+  // Quick stats (filter by store if set)
+  const ordersQuery = supabase
     .from('orders')
     .select('*', { count: 'exact', head: true })
+  if (storeId) ordersQuery.eq('store_id', storeId)
+  const { count: orderCount } = await ordersQuery
 
-  const { count: adsCount } = await supabase
+  const adsQuery = supabase
     .from('ads_data')
     .select('*', { count: 'exact', head: true })
+  if (storeId) adsQuery.eq('store_id', storeId)
+  const { count: adsCount } = await adsQuery
 
-  const { count: productCount } = await supabase
+  const productsQuery = supabase
     .from('master_products')
     .select('*', { count: 'exact', head: true })
+  if (storeId) productsQuery.eq('store_id', storeId)
+  const { count: productCount } = await productsQuery
 
   const hasData = (orderCount ?? 0) > 0 || (adsCount ?? 0) > 0
   const firstName = user?.email?.split('@')[0] ?? 'Seller'
