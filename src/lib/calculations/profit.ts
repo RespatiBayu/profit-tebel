@@ -117,6 +117,11 @@ export function calculateKpis(
   let totalAdSpend = 0
   let hasHppData = false
 
+  // Check if there's any HPP data globally (for all products)
+  // If any product has HPP set, use it for all periods
+  const hasAnyGlobalHpp =
+    hppMap.size > 0 && Array.from(hppMap.values()).some((h) => h.hpp > 0 || h.packaging_cost > 0)
+
   for (const o of orders) {
     totalOmzet += o.original_price
     totalNetIncome += o.total_income
@@ -145,6 +150,12 @@ export function calculateKpis(
 
     const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap)
     totalAdSpend += adSpend
+  }
+
+  // If no HPP found in this period but there's global HPP data, still mark as having HPP data
+  // This allows Real Profit to be calculated for all periods once HPP is set
+  if (!hasHppData && hasAnyGlobalHpp && orders.length > 0) {
+    hasHppData = true
   }
 
   const realProfit = totalNetIncome - totalHppCost - totalAdSpend
