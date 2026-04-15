@@ -184,28 +184,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Insert order_products — dedup via upsert on unique key
+    // Insert order_products — always upsert ALL parsed product rows (not just for new orders).
+    // This allows re-upload to backfill missing mappings for already-existing orders.
+    // The unique constraint (store_id, order_number, marketplace_product_id) + ignoreDuplicates
+    // ensures we never create dupes while still backfilling gaps.
     if (orderProducts.length > 0) {
-      // Only insert products for orders that we actually inserted (or that already existed — skip re-linking)
-      const insertedOrderSet = new Set(newOrders.map((o) => o.order_number))
-      const opRowsNew = orderProducts
-        .filter((op) => insertedOrderSet.has(op.order_number))
-        .map((op) => ({
-          ...op,
-          user_id: user.id,
-          store_id: storeId,
-        }))
-      for (let i = 0; i < opRowsNew.length; i += CHUNK) {
+      const opRowsAll = orderProducts.map((op) => ({
+        ...op,
+        user_id: user.id,
+        store_id: storeId,
+      }))
+      let opInserted = 0
+      for (let i = 0; i < opRowsAll.length; i += CHUNK) {
         const { error } = await supabase
           .from('order_products')
-          .upsert(opRowsNew.slice(i, i + CHUNK), {
+          .upsert(opRowsAll.slice(i, i + CHUNK), {
             onConflict: 'store_id,order_number,marketplace_product_id',
             ignoreDuplicates: true,
           })
         if (error) {
           console.error('Order products insert error:', error.message)
+          warnings.push(`Sebagian mapping produk gagal: ${error.message}`)
+        } else {
+          opInserted += Math.min(CHUNK, opRowsAll.length - i)
         }
       }
+      console.log(`Upserted ${opInserted}/${opRowsAll.length} order_products rows`)
     }
 
     // Auto-create master_products for new products

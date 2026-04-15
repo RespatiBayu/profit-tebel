@@ -70,21 +70,6 @@ export function buildAdSpendMap(adsData: DbAdsRow[]): Map<string, number> {
   return map
 }
 
-// Per-order ad spend cost (sum of all products in order)
-function orderAdSpendCost(
-  order: DbOrder,
-  orderProductMap: Map<string, string[]>,
-  adSpendMap: Map<string, number>
-): number {
-  const productIds = orderProductMap.get(order.order_number) ?? []
-  if (productIds.length === 0) return 0
-  return productIds.reduce((sum, pid) => {
-    // Try to find ad spend by marketplace_product_id (product_code)
-    const adSpend = adSpendMap.get(pid) ?? 0
-    return sum + adSpend
-  }, 0)
-}
-
 // Per-order HPP cost (sum of all products in order)
 function orderHppCost(
   order: DbOrder,
@@ -109,12 +94,10 @@ export function calculateKpis(
   hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
   adsData: DbAdsRow[] = []
 ): ProfitKpis {
-  const adSpendMap = buildAdSpendMap(adsData)
   let totalOmzet = 0
   let totalNetIncome = 0
   let totalFees = 0
   let totalHppCost = 0
-  let totalAdSpend = 0
   let hasHppData = false
 
   // Check if there's any HPP data globally (for all products)
@@ -147,9 +130,14 @@ export function calculateKpis(
     const hpp = orderHppCost(o, orderProductMap, hppMap)
     totalHppCost += hpp
     if (hpp > 0) hasHppData = true
+  }
 
-    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap)
-    totalAdSpend += adSpend
+  // Ad spend is independent of orders — sum directly from ads report data.
+  // (Previous per-order attribution was broken: it multiplied each product's total
+  //  ad_spend by the number of orders containing that product.)
+  let totalAdSpend = 0
+  for (const ad of adsData) {
+    totalAdSpend += ad.ad_spend ?? 0
   }
 
   // If no HPP found in this period but there's global HPP data, still mark as having HPP data
@@ -219,6 +207,31 @@ export function calculateFeeBreakdown(orders: DbOrder[]): FeeBreakdownItem[] {
 // 3. Trend (daily or weekly)
 // ---------------------------------------------------------------------------
 
+// Distribute each ads row's ad_spend evenly across the days in its report period
+function buildDailyAdSpend(adsData: DbAdsRow[]): Map<string, number> {
+  const map = new Map<string, number>() // ISO date → total ad_spend for that day
+  for (const ad of adsData) {
+    const amount = ad.ad_spend ?? 0
+    if (!amount) continue
+    const start = ad.report_period_start
+    const end = ad.report_period_end
+    if (!start || !end) continue
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) continue
+    const days = Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1
+    if (days < 1) continue
+    const perDay = amount / days
+    const cursor = new Date(startDate)
+    for (let i = 0; i < days; i++) {
+      const key = cursor.toISOString().split('T')[0]
+      map.set(key, (map.get(key) ?? 0) + perDay)
+      cursor.setDate(cursor.getDate() + 1)
+    }
+  }
+  return map
+}
+
 export function calculateTrend(
   orders: DbOrder[],
   groupBy: 'day' | 'week',
@@ -226,25 +239,37 @@ export function calculateTrend(
   hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
   adsData: DbAdsRow[] = []
 ): TrendPoint[] {
-  const adSpendMap = buildAdSpendMap(adsData)
   const grouped = new Map<
     string,
     { omzet: number; netIncome: number; hpp: number; adSpend: number; hasHpp: boolean }
   >()
 
+  // Accumulate order-driven metrics
   for (const o of orders) {
     if (!o.order_date) continue
     const key = groupBy === 'week' ? weekKey(o.order_date) : o.order_date
     const existing = grouped.get(key) ?? { omzet: 0, netIncome: 0, hpp: 0, adSpend: 0, hasHpp: false }
     const hpp = orderHppCost(o, orderProductMap, hppMap)
-    const adSpend = orderAdSpendCost(o, orderProductMap, adSpendMap)
     existing.omzet += o.original_price
     existing.netIncome += o.total_income
     existing.hpp += hpp
-    existing.adSpend += adSpend
     if (hpp > 0) existing.hasHpp = true
     grouped.set(key, existing)
   }
+
+  // Add ad_spend independently (ads happen regardless of whether orders occur that day)
+  const dailyAdSpend = buildDailyAdSpend(adsData)
+  for (const [date, amount] of Array.from(dailyAdSpend.entries())) {
+    const key = groupBy === 'week' ? weekKey(date) : date
+    const existing = grouped.get(key) ?? { omzet: 0, netIncome: 0, hpp: 0, adSpend: 0, hasHpp: false }
+    existing.adSpend += amount
+    grouped.set(key, existing)
+  }
+
+  // Use global-HPP fallback for profit display: once any product has HPP, include adSpend
+  // impact on profit for all periods (profit may be approximate if order_products missing).
+  const hasAnyGlobalHpp =
+    hppMap.size > 0 && Array.from(hppMap.values()).some((h) => h.hpp > 0 || h.packaging_cost > 0)
 
   return Array.from(grouped.entries())
     .sort(([a], [b]) => a.localeCompare(b))
@@ -252,7 +277,10 @@ export function calculateTrend(
       date,
       omzet: data.omzet,
       netIncome: data.netIncome,
-      profit: data.hasHpp ? data.netIncome - data.hpp - data.adSpend : null,
+      profit:
+        data.hasHpp || hasAnyGlobalHpp
+          ? data.netIncome - data.hpp - data.adSpend
+          : null,
     }))
 }
 
@@ -291,7 +319,6 @@ export function calculateProductProfit(
 
     for (const pid of productIds) {
       const hppInfo = hppMap.get(pid)
-      const adSpend = adSpendMap.get(pid) ?? 0
       const existing = productStats.get(pid) ?? {
         name: hppInfo?.name ?? pid,
         orderCount: 0,
@@ -303,12 +330,31 @@ export function calculateProductProfit(
 
       existing.orderCount += 1
       existing.attributedIncome += incomePerProduct
-      existing.adSpend += adSpend
       if (hppInfo && (hppInfo.hpp > 0 || hppInfo.packaging_cost > 0)) {
         existing.hppCost += hppInfo.hpp + hppInfo.packaging_cost
         existing.hasHpp = true
       }
       productStats.set(pid, existing)
+    }
+  }
+
+  // Assign ad_spend once per product (not per-order — avoid double-counting).
+  // Also ensure products that only appear in ads (no orders yet) still show up.
+  for (const [pid, adSpend] of Array.from(adSpendMap.entries())) {
+    const existing = productStats.get(pid)
+    if (existing) {
+      existing.adSpend = adSpend
+    } else {
+      // Product has ads but no orders — include it so user can see ad waste
+      const hppInfo = hppMap.get(pid)
+      productStats.set(pid, {
+        name: hppInfo?.name ?? pid,
+        orderCount: 0,
+        attributedIncome: 0,
+        hppCost: 0,
+        adSpend,
+        hasHpp: !!hppInfo && (hppInfo.hpp > 0 || hppInfo.packaging_cost > 0),
+      })
     }
   }
 
