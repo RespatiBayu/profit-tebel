@@ -24,6 +24,7 @@ import {
   CheckCircle,
   ArrowUpDown,
   Upload,
+  Trash2,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { MasterProduct } from '@/types'
@@ -52,6 +53,7 @@ export default function ProductsPage() {
   const [editing, setEditing] = useState<Record<string, EditingProduct>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
+  const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
 
   const supabase = createClient()
@@ -145,6 +147,35 @@ export default function ProductsPage() {
       setTimeout(() => setSaved((prev) => { const n = { ...prev }; delete n[product.id]; return n }), 2000)
       // Invalidate server caches so dashboard pages re-fetch with new HPP
       router.refresh()
+    }
+  }
+
+  async function deleteProduct(productId: string) {
+    if (!confirm('Apakah kamu yakin ingin menghapus produk ini? Aksi ini tidak bisa dibatalkan.')) {
+      return
+    }
+
+    setDeleting((prev) => ({ ...prev, [productId]: true }))
+
+    try {
+      const response = await fetch(`/api/master-products/${productId}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        setError(data.error || 'Gagal menghapus produk')
+        setDeleting((prev) => ({ ...prev, [productId]: false }))
+        return
+      }
+
+      // Remove from state
+      setProducts((prev) => prev.filter((p) => p.id !== productId))
+      router.refresh()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      setError(`Gagal menghapus produk: ${message}`)
+      setDeleting((prev) => ({ ...prev, [productId]: false }))
     }
   }
 
@@ -386,14 +417,26 @@ export default function ProductsPage() {
                               </Button>
                             </div>
                           ) : (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 text-xs"
-                              onClick={() => startEdit(product.id, product)}
-                            >
-                              Edit
-                            </Button>
+                            <div className="flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs"
+                                onClick={() => startEdit(product.id, product)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => deleteProduct(product.id)}
+                                disabled={deleting[product.id]}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {deleting[product.id] ? 'Hapus...' : 'Hapus'}
+                              </Button>
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>
