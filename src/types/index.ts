@@ -267,6 +267,7 @@ export interface AdsKpis {
 export interface TrafficLightRow {
   productCode: string
   productName: string
+  reportPeriodStart: string | null
   impressions: number
   clicks: number
   conversions: number

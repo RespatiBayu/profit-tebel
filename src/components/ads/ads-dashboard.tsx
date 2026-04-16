@@ -218,7 +218,7 @@ function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasH
           <TableBody>
             {sorted.map((row) => (
               <TableRow
-                key={row.productCode}
+                key={`${row.productCode}-${row.reportPeriodStart ?? 'all'}`}
                 className={
                   row.signal === 'kill' ? 'bg-red-50/40' :
                   row.signal === 'scale' ? 'bg-green-50/40' : undefined
@@ -721,10 +721,15 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAds
-                  .filter((r) => r.product_code !== '-' && r.gmv > 0)
-                  .sort((a, b) => b.gmv - a.gmv)
-                  .slice(0, 15)
+                {(() => {
+                    // Dedupe by product_code (keep highest gmv row per product when all periods shown)
+                    const seen = new Set<string>()
+                    return filteredAds
+                      .filter((r) => r.product_code !== '-' && r.gmv > 0 && r.ad_spend > 0)
+                      .sort((a, b) => b.gmv - a.gmv)
+                      .filter((r) => { if (seen.has(r.product_code)) return false; seen.add(r.product_code); return true })
+                      .slice(0, 15)
+                  })()
                   .map((r) => {
                     const directPct = r.gmv > 0 ? (r.direct_gmv / r.gmv) * 100 : 0
                     return (

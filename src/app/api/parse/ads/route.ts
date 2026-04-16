@@ -91,6 +91,20 @@ export async function POST(request: NextRequest) {
     }
     const rows = Array.from(aggMap.values())
 
+    // Always recompute derived ratio metrics from final sums (single-campaign products
+    // keep the raw parser value otherwise — this ensures DB always stores consistent data)
+    for (const r of rows) {
+      r.roas = r.ad_spend > 0 ? r.gmv / r.ad_spend : 0
+      r.direct_roas = r.ad_spend > 0 ? r.direct_gmv / r.ad_spend : 0
+      r.acos = r.gmv > 0 ? r.ad_spend / r.gmv : 0
+      r.direct_acos = r.direct_gmv > 0 ? r.ad_spend / r.direct_gmv : 0
+      r.ctr = r.impressions > 0 ? r.clicks / r.impressions : 0
+      r.conversion_rate = r.clicks > 0 ? r.conversions / r.clicks : 0
+      r.direct_conversion_rate = r.clicks > 0 ? r.direct_conversions / r.clicks : 0
+      r.cost_per_conversion = r.conversions > 0 ? r.ad_spend / r.conversions : 0
+      r.cost_per_direct_conversion = r.direct_conversions > 0 ? r.ad_spend / r.direct_conversions : 0
+    }
+
     // Ensure profile row exists (safety net — use service client to bypass RLS)
     const serviceClient = await createServiceClient()
     const { error: profileError } = await serviceClient.from('profiles').upsert(

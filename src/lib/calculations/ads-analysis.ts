@@ -34,7 +34,8 @@ export function classifyProduct(roas: number, conversions: number): TrafficLight
 // ---------------------------------------------------------------------------
 
 export function calculateAdsOverview(rows: DbAdsRow[]): AdsKpis {
-  const productRows = rows.filter((r) => !isAggregate(r))
+  // Only count products that have actual individual ad spend for KPIs/signals
+  const productRows = rows.filter((r) => !isAggregate(r) && r.ad_spend > 0)
 
   let totalAdSpend = 0
   let totalGmv = 0
@@ -58,7 +59,10 @@ export function calculateAdsOverview(rows: DbAdsRow[]): AdsKpis {
   const overallRoas = totalAdSpend > 0 ? totalGmv / totalAdSpend : 0
   const avgCpa = totalConversions > 0 ? totalAdSpend / totalConversions : 0
 
-  const signals = productRows.map((r) => classifyProduct(r.roas, r.conversions))
+  // Deduplicate by product_code: take the row with highest ad_spend per product
+  // (handles multiple periods showing same product)
+  const dedupedSignalRows = dedupeByProductCode(productRows)
+  const signals = dedupedSignalRows.map((r) => classifyProduct(r.roas, r.conversions))
   const scaleCount = signals.filter((s) => s === 'scale').length
   const optimizeCount = signals.filter((s) => s === 'optimize').length
   const killCount = signals.filter((s) => s === 'kill').length
@@ -69,11 +73,23 @@ export function calculateAdsOverview(rows: DbAdsRow[]): AdsKpis {
     overallRoas,
     totalConversions,
     avgCpa,
-    productCount: productRows.length,
+    productCount: dedupedSignalRows.length,
     scaleCount,
     optimizeCount,
     killCount,
   }
+}
+
+/** Deduplicate rows by product_code — keep the row with the highest ad_spend per product */
+function dedupeByProductCode(rows: DbAdsRow[]): DbAdsRow[] {
+  const map = new Map<string, DbAdsRow>()
+  for (const r of rows) {
+    const existing = map.get(r.product_code)
+    if (!existing || r.ad_spend > existing.ad_spend) {
+      map.set(r.product_code, r)
+    }
+  }
+  return Array.from(map.values())
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +104,16 @@ export function buildTrafficLightRows(
     masterProducts.map((p) => [p.marketplace_product_id, p])
   )
 
-  return rows
-    .filter((r) => !isAggregate(r))
+  // Only show products with actual individual ad spend.
+  // Products with ad_spend=0 appear in CSV when covered by Shop GMV Max only
+  // — their ROAS would always be 0 which gives a false KILL classification.
+  // Also dedupe: when "all periods" selected, same product may appear multiple times;
+  // keep the row with the highest ad_spend per product.
+  const filteredRows = dedupeByProductCode(
+    rows.filter((r) => !isAggregate(r) && r.ad_spend > 0)
+  )
+
+  return filteredRows
     .map((r) => {
       const signal = classifyProduct(r.roas, r.conversions)
       const product = hppMap.get(r.product_code)
@@ -113,6 +137,7 @@ export function buildTrafficLightRows(
       return {
         productCode: r.product_code,
         productName: r.product_name ?? r.product_code,
+        reportPeriodStart: r.report_period_start,
         impressions: r.impressions,
         clicks: r.clicks,
         conversions: r.conversions,
@@ -142,8 +167,7 @@ export function buildTrafficLightRows(
 // ---------------------------------------------------------------------------
 
 export function buildFunnelData(rows: DbAdsRow[]): FunnelRow[] {
-  return rows
-    .filter((r) => !isAggregate(r))
+  return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .sort((a, b) => b.ad_spend - a.ad_spend)
     .slice(0, 10)
     .map((r) => ({
@@ -167,8 +191,7 @@ export function buildQuadrantData(
 ): QuadrantPoint[] {
   const profitMap = new Map(profitRows.map((p) => [p.productId, p]))
 
-  return rows
-    .filter((r) => !isAggregate(r) && r.ad_spend > 0)
+  return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .map((r) => {
       const profitRow = profitMap.get(r.product_code)
       const profitPerUnit =
@@ -195,8 +218,7 @@ export function buildQuadrantData(
 // ---------------------------------------------------------------------------
 
 export function buildRoasChartData(rows: DbAdsRow[]) {
-  return rows
-    .filter((r) => !isAggregate(r))
+  return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .sort((a, b) => b.roas - a.roas)
     .slice(0, 20) // top 20 for readability
     .map((r) => ({
