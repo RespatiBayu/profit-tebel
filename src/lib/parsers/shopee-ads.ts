@@ -1,31 +1,42 @@
 import Papa from 'papaparse'
 import type { AdsParseResult, ParsedAdsRow } from '@/types'
 
-// Column indices in data rows (0-based)
+// Column indices in NEW format data rows (0-based)
+// Format: Urutan | Nama Iklan | Status | Kode Produk | Mode Bidding | Penempatan Iklan |
+//         Tanggal Mulai | Tanggal Selesai | Dilihat | Jumlah Klik | Persentase Klik |
+//         Konversi | Konversi Langsung | Tingkat konversi | Tingkat Konversi Langsung |
+//         Biaya per Konversi | Biaya per Konversi Langsung | Produk Terjual | Terjual Langsung |
+//         Omzet Penjualan | Penjualan Langsung | Biaya | Efektifitas Iklan | Efektivitas Langsung |
+//         ACOS | ACOS Langsung | Voucher Amount | Vouchered Sales
 const COL = {
   RANK: 0,
-  PRODUCT_NAME: 1,
-  PRODUCT_CODE: 2,
-  IMPRESSIONS: 3,
-  CLICKS: 4,
-  CTR: 5,               // has "%" suffix
-  CONVERSIONS: 6,
-  DIRECT_CONVERSIONS: 7,
-  CONVERSION_RATE: 8,   // has "%" suffix
-  DIRECT_CONVERSION_RATE: 9, // has "%" suffix
-  COST_PER_CONVERSION: 10,
-  COST_PER_DIRECT_CONVERSION: 11,
-  UNITS_SOLD: 12,
-  DIRECT_UNITS_SOLD: 13,
-  GMV: 14,
-  DIRECT_GMV: 15,
-  AD_SPEND: 16,
-  ROAS: 17,
-  DIRECT_ROAS: 18,
-  ACOS: 19,             // has "%" suffix
-  DIRECT_ACOS: 20,      // has "%" suffix
-  VOUCHER_AMOUNT: 21,
-  VOUCHERED_SALES: 22,
+  AD_NAME: 1,
+  STATUS: 2,
+  PRODUCT_CODE: 3,
+  BIDDING_MODE: 4,
+  PLACEMENT: 5,
+  START_DATE: 6,
+  END_DATE: 7,
+  IMPRESSIONS: 8,
+  CLICKS: 9,
+  CTR: 10,
+  CONVERSIONS: 11,
+  DIRECT_CONVERSIONS: 12,
+  CONVERSION_RATE: 13,
+  DIRECT_CONVERSION_RATE: 14,
+  COST_PER_CONVERSION: 15,
+  COST_PER_DIRECT_CONVERSION: 16,
+  UNITS_SOLD: 17,
+  DIRECT_UNITS_SOLD: 18,
+  GMV: 19,
+  DIRECT_GMV: 20,
+  AD_SPEND: 21,
+  ROAS: 22,
+  DIRECT_ROAS: 23,
+  ACOS: 24,
+  DIRECT_ACOS: 25,
+  VOUCHER_AMOUNT: 26,
+  VOUCHERED_SALES: 27,
 } as const
 
 function parseNum(value: unknown): number {
@@ -36,11 +47,9 @@ function parseNum(value: unknown): number {
   str = str.replace(/%$/, '')
 
   // Handle Indonesian number format: 1.234,56 → 1234.56
-  // Detect if it's Indonesian format (period as thousands, comma as decimal)
   if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(str)) {
     str = str.replace(/\./g, '').replace(',', '.')
   } else {
-    // Regular format - just remove any non-numeric except dot and minus
     str = str.replace(/[^\d.-]/g, '')
   }
 
@@ -51,7 +60,6 @@ function parseNum(value: unknown): number {
 function parsePercent(value: unknown): number {
   if (value === null || value === undefined || value === '' || value === '-') return 0
   const str = String(value).replace(/%$/, '').trim()
-  // Indonesian format check
   let clean = str
   if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(str)) {
     clean = str.replace(/\./g, '').replace(',', '.')
@@ -68,36 +76,48 @@ function parseStr(value: unknown): string | null {
   return s || null
 }
 
-// Try to extract date range from metadata rows (rows 0-5)
-function extractPeriod(metaRows: string[][]): { start: string | null; end: string | null } {
-  const fullText = metaRows.flat().join(' ')
-
-  // Match patterns like "01/01/2024 - 31/01/2024" or "2024-01-01 - 2024-01-31"
-  const patterns = [
-    /(\d{2}\/\d{2}\/\d{4})\s*[-–]\s*(\d{2}\/\d{2}\/\d{4})/,
-    /(\d{4}-\d{2}-\d{2})\s*[-–]\s*(\d{4}-\d{2}-\d{2})/,
-  ]
-
-  for (const pattern of patterns) {
-    const match = fullText.match(pattern)
-    if (match) {
-      const parseDate = (s: string) => {
-        if (s.includes('/')) {
-          const [d, m, y] = s.split('/')
-          return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
-        }
-        return s
-      }
-      return { start: parseDate(match[1]), end: parseDate(match[2]) }
+// Extract period from row index 5 ("Periode,01/03/2026 - 31/03/2026")
+// Falls back to scanning all metadata rows if not found
+function extractPeriod(allRows: string[][]): { start: string | null; end: string | null } {
+  // Try dedicated row first (row 5 key = "Periode")
+  const periodRow = allRows[5]
+  if (periodRow) {
+    const key = String(periodRow[0] ?? '').trim()
+    const val = String(periodRow[1] ?? '').trim()
+    if (key === 'Periode' && val) {
+      const parsed = parsePeriodString(val)
+      if (parsed.start) return parsed
     }
   }
 
+  // Fallback: scan metadata rows 0-9 for any date range pattern
+  const metaText = (allRows.slice(0, 10) ?? []).flat().join(' ')
+  return parsePeriodString(metaText)
+}
+
+function parsePeriodString(text: string): { start: string | null; end: string | null } {
+  // DD/MM/YYYY - DD/MM/YYYY
+  const m1 = text.match(/(\d{2}\/\d{2}\/\d{4})\s*[-–]\s*(\d{2}\/\d{2}\/\d{4})/)
+  if (m1) {
+    return {
+      start: dmyToIso(m1[1]),
+      end: dmyToIso(m1[2]),
+    }
+  }
+  // YYYY-MM-DD - YYYY-MM-DD
+  const m2 = text.match(/(\d{4}-\d{2}-\d{2})\s*[-–]\s*(\d{4}-\d{2}-\d{2})/)
+  if (m2) return { start: m2[1], end: m2[2] }
   return { start: null, end: null }
+}
+
+function dmyToIso(dmy: string): string {
+  const [d, m, y] = dmy.split('/')
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
 }
 
 function rowToAdsRow(row: string[]): ParsedAdsRow {
   return {
-    product_name: parseStr(row[COL.PRODUCT_NAME]),
+    product_name: parseStr(row[COL.AD_NAME]),       // Nama Iklan (ad name)
     product_code: String(row[COL.PRODUCT_CODE] ?? '').trim(),
     impressions: Math.round(parseNum(row[COL.IMPRESSIONS])),
     clicks: Math.round(parseNum(row[COL.CLICKS])),
@@ -131,15 +151,13 @@ export function parseShopeeAds(csvText: string): AdsParseResult {
 
   const allRows = parseResult.data as string[][]
 
-  // Rows 0-5: metadata, Row 6: empty, Row 7: headers, Row 8+: data
-  const metaRows = allRows.slice(0, 6)
-  const { start: periodStart, end: periodEnd } = extractPeriod(metaRows)
+  // Metadata rows 0-7, row 8 = empty, row 9 = headers, row 10+ = data
+  const { start: periodStart, end: periodEnd } = extractPeriod(allRows)
 
-  // Data starts at row 8 (index 8)
-  const dataRows = allRows.slice(8).filter((row) => {
-    // Filter empty rows
-    return row.some((cell) => String(cell ?? '').trim() !== '')
-  })
+  // Data starts at row 10 (index 10)
+  const dataRows = allRows.slice(10).filter((row) =>
+    row.some((cell) => String(cell ?? '').trim() !== '')
+  )
 
   let shopAggregate: ParsedAdsRow | null = null
   const rows: ParsedAdsRow[] = []
@@ -149,12 +167,13 @@ export function parseShopeeAds(csvText: string): AdsParseResult {
 
     const code = String(row[COL.PRODUCT_CODE]).trim()
 
-    // First row with code "-" is the aggregate "Shop GMV Max" row
+    // Aggregate row (code = "-") — capture separately, skip from per-product
     if (code === '-') {
       shopAggregate = rowToAdsRow(row)
       continue
     }
 
+    // Only keep rows that have a real product code
     if (!code) continue
     rows.push(rowToAdsRow(row))
   }

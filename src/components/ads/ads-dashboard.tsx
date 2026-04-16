@@ -26,7 +26,14 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts'
-import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react'
+import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, Calendar } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   calculateAdsOverview,
   buildTrafficLightRows,
@@ -451,27 +458,69 @@ interface Props {
 }
 
 export default function AdsDashboard({ adsData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
-  const kpis = useMemo(() => calculateAdsOverview(adsData), [adsData])
+  const [selectedMonth, setSelectedMonth] = useState<string>('all')
+
+  // Derive available months from ads data report periods
+  const availableMonths = useMemo(() => {
+    const monthSet = new Set<string>()
+    for (const ad of adsData) {
+      if (ad.product_code === '-') continue
+      const date = ad.report_period_start ?? ad.report_period_end
+      if (date) monthSet.add(date.slice(0, 7))
+    }
+    return Array.from(monthSet).sort((a, b) => b.localeCompare(a)) // newest first
+  }, [adsData])
+
+  // Filter ads by selected month (based on report_period)
+  const filteredAds = useMemo(() => {
+    if (selectedMonth === 'all') return adsData
+    const monthStart = `${selectedMonth}-01`
+    const [y, m] = selectedMonth.split('-').map(Number)
+    const nextMonth = m === 12
+      ? `${y + 1}-01-01`
+      : `${y}-${String(m + 1).padStart(2, '0')}-01`
+    return adsData.filter((ad) => {
+      const end = ad.report_period_end ?? ad.report_period_start
+      const start = ad.report_period_start ?? ad.report_period_end
+      if (!end || !start) return true
+      return end >= monthStart && start < nextMonth
+    })
+  }, [adsData, selectedMonth])
+
+  // Period label for the selected month
+  const periodLabel = useMemo(() => {
+    if (selectedMonth === 'all') return null
+    const monthAds = filteredAds.filter((a) => a.product_code !== '-')
+    const starts = monthAds.map((a) => a.report_period_start).filter(Boolean) as string[]
+    const ends = monthAds.map((a) => a.report_period_end).filter(Boolean) as string[]
+    if (!starts.length) return null
+    const minStart = starts.sort()[0]
+    const maxEnd = ends.sort().reverse()[0]
+    const fmt = (d: string) => new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
+    return maxEnd ? `${fmt(minStart)} – ${fmt(maxEnd)}` : fmt(minStart)
+  }, [filteredAds, selectedMonth])
+
+  const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
 
   const trafficLightRows = useMemo(
-    () => buildTrafficLightRows(adsData, masterProducts),
-    [adsData, masterProducts]
+    () => buildTrafficLightRows(filteredAds, masterProducts),
+    [filteredAds, masterProducts]
   )
 
-  const funnelData = useMemo(() => buildFunnelData(adsData), [adsData])
+  const funnelData = useMemo(() => buildFunnelData(filteredAds), [filteredAds])
 
-  const roasChartData = useMemo(() => buildRoasChartData(adsData), [adsData])
+  const roasChartData = useMemo(() => buildRoasChartData(filteredAds), [filteredAds])
 
   // For quadrant + True ROAS, we need profit data from income
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
   const profitRows = useMemo(
-    () => hasIncomeData ? calculateProductProfit(orders, orderProducts, hppMap, adsData) : [],
-    [orders, orderProducts, hppMap, adsData, hasIncomeData]
+    () => hasIncomeData ? calculateProductProfit(orders, orderProducts, hppMap, filteredAds) : [],
+    [orders, orderProducts, hppMap, filteredAds, hasIncomeData]
   )
 
   const quadrantData = useMemo(
-    () => buildQuadrantData(adsData, profitRows),
-    [adsData, profitRows]
+    () => buildQuadrantData(filteredAds, profitRows),
+    [filteredAds, profitRows]
   )
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
@@ -479,11 +528,31 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Analisis Iklan</h1>
-        <p className="text-muted-foreground mt-0.5">
-          {kpis.productCount} produk diiklankan
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Analisis Iklan</h1>
+          <p className="text-muted-foreground mt-0.5">
+            {kpis.productCount} produk diiklankan
+            {periodLabel && <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full">{periodLabel}</span>}
+          </p>
+        </div>
+        {/* Month slicer */}
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+          <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
+            <SelectTrigger className="h-8 w-44 text-xs">
+              <SelectValue placeholder="Pilih periode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Periode</SelectItem>
+              {availableMonths.map((month) => (
+                <SelectItem key={month} value={month}>
+                  {new Date(`${month}-01`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -652,7 +721,7 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {adsData
+                {filteredAds
                   .filter((r) => r.product_code !== '-' && r.gmv > 0)
                   .sort((a, b) => b.gmv - a.gmv)
                   .slice(0, 15)

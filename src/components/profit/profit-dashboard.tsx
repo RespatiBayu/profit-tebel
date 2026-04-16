@@ -9,6 +9,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -316,35 +323,43 @@ interface Props {
 
 export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, noHppCount }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [selectedMonth, setSelectedMonth] = useState<string>('all') // 'all' | 'YYYY-MM'
 
   // Build lookup maps
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
   const orderProductMap = useMemo(() => buildOrderProductMap(orderProducts), [orderProducts])
 
-  // Filter orders by date range
-  const filteredOrders = useMemo(() => {
-    if (!dateFrom && !dateTo) return orders
-    return orders.filter((o) => {
-      if (!o.order_date) return false
-      if (dateFrom && o.order_date < dateFrom) return false
-      if (dateTo && o.order_date > dateTo) return false
-      return true
-    })
-  }, [orders, dateFrom, dateTo])
+  // Derive available months from orders
+  const availableMonths = useMemo(() => {
+    const monthSet = new Set<string>()
+    for (const o of orders) {
+      if (o.order_date) monthSet.add(o.order_date.slice(0, 7))
+    }
+    return Array.from(monthSet).sort((a, b) => b.localeCompare(a)) // newest first
+  }, [orders])
 
-  // Filter ads data by date range (match order period)
+  // Filter orders by selected month
+  const filteredOrders = useMemo(() => {
+    if (selectedMonth === 'all') return orders
+    return orders.filter((o) => o.order_date?.startsWith(selectedMonth))
+  }, [orders, selectedMonth])
+
+  // Filter ads data by selected month (match if report period overlaps the month)
   const filteredAdsData = useMemo(() => {
-    if (!dateFrom && !dateTo) return adsData
+    if (selectedMonth === 'all') return adsData
+    const monthStart = `${selectedMonth}-01`
+    const [y, m] = selectedMonth.split('-').map(Number)
+    const nextMonth = m === 12
+      ? `${y + 1}-01-01`
+      : `${y}-${String(m + 1).padStart(2, '0')}-01`
     return adsData.filter((ad) => {
-      // Match if ad report period overlaps with selected range
-      if (!ad.report_period_end) return true
-      if (dateFrom && ad.report_period_end < dateFrom) return false
-      if (dateTo && ad.report_period_start && ad.report_period_start > dateTo) return false
-      return true
+      const end = ad.report_period_end ?? ad.report_period_start
+      const start = ad.report_period_start ?? ad.report_period_end
+      if (!end || !start) return true
+      // Include if ad period overlaps with selected month
+      return end >= monthStart && start < nextMonth
     })
-  }, [adsData, dateFrom, dateTo])
+  }, [adsData, selectedMonth])
 
   // Calculate all metrics
   const kpis = useMemo(
@@ -379,17 +394,20 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
             {filteredOrders.length.toLocaleString('id-ID')} order
           </p>
         </div>
-        {/* Date filter */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 w-36 text-xs" />
-          <span className="text-muted-foreground text-sm">—</span>
-          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 w-36 text-xs" />
-          {(dateFrom || dateTo) && (
-            <Button variant="ghost" size="sm" className="h-8" onClick={() => { setDateFrom(''); setDateTo('') }}>
-              Reset
-            </Button>
-          )}
-        </div>
+        {/* Month filter */}
+        <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
+          <SelectTrigger className="h-8 w-44 text-xs">
+            <SelectValue placeholder="Pilih bulan" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Semua Periode</SelectItem>
+            {availableMonths.map((m) => (
+              <SelectItem key={m} value={m}>
+                {new Date(`${m}-01`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Alerts */}
