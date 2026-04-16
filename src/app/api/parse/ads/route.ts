@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 422 })
     }
 
-    const { rows, shopAggregate } = parseResult
+    const { rows: rawRows, shopAggregate } = parseResult
     // Validate dates — only pass valid ISO to DB, else null
     const isoDate = /^\d{4}-\d{2}-\d{2}$/
     const periodStart = parseResult.periodStart && isoDate.test(parseResult.periodStart)
@@ -50,12 +50,46 @@ export async function POST(request: NextRequest) {
       ? parseResult.periodEnd
       : null
 
-    if (rows.length === 0) {
+    if (rawRows.length === 0) {
       return NextResponse.json(
         { error: 'Tidak ada data iklan ditemukan dalam file. Pastikan file CSV iklan Shopee yang kamu upload.' },
         { status: 422 }
       )
     }
+
+    // Aggregate multiple campaigns for the same product_code into one row.
+    // A single product can appear in multiple campaigns (e.g. GMV Max ROAS + GMV Max Auto)
+    // with the same report period. Sum all numeric metrics and recompute derived ones.
+    const aggMap = new Map<string, typeof rawRows[0]>()
+    for (const row of rawRows) {
+      const existing = aggMap.get(row.product_code)
+      if (!existing) {
+        aggMap.set(row.product_code, { ...row })
+      } else {
+        existing.impressions += row.impressions
+        existing.clicks += row.clicks
+        existing.conversions += row.conversions
+        existing.direct_conversions += row.direct_conversions
+        existing.units_sold += row.units_sold
+        existing.direct_units_sold += row.direct_units_sold
+        existing.gmv += row.gmv
+        existing.direct_gmv += row.direct_gmv
+        existing.ad_spend += row.ad_spend
+        existing.voucher_amount += row.voucher_amount
+        existing.vouchered_sales += row.vouchered_sales
+        // Recompute derived metrics from the new sums
+        existing.ctr = existing.impressions > 0 ? existing.clicks / existing.impressions : 0
+        existing.roas = existing.ad_spend > 0 ? existing.gmv / existing.ad_spend : 0
+        existing.direct_roas = existing.ad_spend > 0 ? existing.direct_gmv / existing.ad_spend : 0
+        existing.conversion_rate = existing.clicks > 0 ? existing.conversions / existing.clicks : 0
+        existing.direct_conversion_rate = existing.clicks > 0 ? existing.direct_conversions / existing.clicks : 0
+        existing.cost_per_conversion = existing.conversions > 0 ? existing.ad_spend / existing.conversions : 0
+        existing.cost_per_direct_conversion = existing.direct_conversions > 0 ? existing.ad_spend / existing.direct_conversions : 0
+        existing.acos = existing.gmv > 0 ? existing.ad_spend / existing.gmv : 0
+        existing.direct_acos = existing.direct_gmv > 0 ? existing.ad_spend / existing.direct_gmv : 0
+      }
+    }
+    const rows = Array.from(aggMap.values())
 
     // Ensure profile row exists (safety net — use service client to bypass RLS)
     const serviceClient = await createServiceClient()
