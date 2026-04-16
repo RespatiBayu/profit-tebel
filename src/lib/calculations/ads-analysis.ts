@@ -46,6 +46,15 @@ export function calculateAdsOverview(rows: DbAdsRow[]): AdsKpis {
     totalConversions += r.conversions
   }
 
+  // Add Shop-level aggregate campaigns (e.g. Shop GMV Max) to totals.
+  // These are real spend/GMV/conversions but not attributed to a specific product.
+  // Including them makes Total Ad Spend match what Shopee reports.
+  for (const r of rows.filter(isAggregate)) {
+    totalAdSpend += r.ad_spend
+    totalGmv += r.gmv
+    totalConversions += r.conversions
+  }
+
   const overallRoas = totalAdSpend > 0 ? totalGmv / totalAdSpend : 0
   const avgCpa = totalConversions > 0 ? totalAdSpend / totalConversions : 0
 
