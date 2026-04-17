@@ -26,7 +26,7 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts'
-import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, Calendar } from 'lucide-react'
+import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Calendar, Package } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -459,82 +459,114 @@ function QuadrantMatrix({ data }: { data: ReturnType<typeof buildQuadrantData> }
 }
 
 // ---------------------------------------------------------------------------
-// Breakdown GMV Max Auto Tab
+// Shop GMV Max Auto drill-down (inline expandable row)
 // ---------------------------------------------------------------------------
 
-function BreakdownProductTab({ adsProductData }: { adsProductData: DbAdsRow[] }) {
-  const productRows = adsProductData.filter((r) => r.product_code !== '-')
-    .sort((a, b) => b.ad_spend - a.ad_spend)
+function GmvMaxAutoDrilldown({ adsProductData }: { adsProductData: DbAdsRow[] }) {
+  const [open, setOpen] = useState(false)
 
-  if (productRows.length === 0) {
+  // Filter per-product breakdown rows (exclude aggregate "-")
+  const productRows = useMemo(
+    () =>
+      adsProductData
+        .filter((r) => r.product_code !== '-')
+        .sort((a, b) => b.ad_spend - a.ad_spend),
+    [adsProductData]
+  )
+
+  const hasBreakdown = productRows.length > 0
+
+  // Aggregate metrics for the header summary row
+  const totalAdSpend = productRows.reduce((s, r) => s + r.ad_spend, 0)
+  const totalGmv = productRows.reduce((s, r) => s + r.gmv, 0)
+  const totalConversions = productRows.reduce((s, r) => s + r.conversions, 0)
+  const overallRoas = totalAdSpend > 0 ? totalGmv / totalAdSpend : 0
+
+  // If user hasn't uploaded the per-product file yet, show a compact hint
+  if (!hasBreakdown) {
     return (
-      <Card>
-        <CardContent className="p-8 flex flex-col items-center justify-center text-center gap-4">
-          <AlertCircle className="h-10 w-10 text-muted-foreground opacity-40" />
-          <div>
-            <p className="font-semibold text-base">Belum ada data breakdown produk</p>
-            <p className="text-sm text-muted-foreground mt-1 max-w-md">
-              Upload Data per Produk (GMV Max Auto) untuk melihat breakdown detail per produk.
-              Klik Upload Data di sidebar.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 flex items-center gap-3 text-sm">
+        <Package className="h-4 w-4 text-muted-foreground shrink-0" />
+        <div className="flex-1">
+          <p className="font-medium">Breakdown per Produk (Shop GMV Max Auto) belum tersedia</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Upload file &ldquo;Data per Produk (GMV Max Auto)&rdquo; untuk melihat detail per produk saat klik iklan Shop GMV Max.
+          </p>
+        </div>
+      </div>
     )
   }
 
-  // Compute KPIs from product rows (excluding aggregate)
-  const totalAdSpend = productRows.reduce((s, r) => s + r.ad_spend, 0)
-  const totalGmv = productRows.reduce((s, r) => s + r.gmv, 0)
-  const overallRoas = totalAdSpend > 0 ? totalGmv / totalAdSpend : 0
-
   return (
-    <div className="space-y-4">
-      {/* Source label */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs bg-purple-100 text-purple-800 border border-purple-200 rounded-full px-3 py-1 font-medium">
-          Sumber: Shop GMV Max Auto
-        </span>
-      </div>
-
-      {/* KPI mini cards */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Total Ad Spend</p>
-            <p className="text-lg font-bold">{formatRp(totalAdSpend)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Total GMV</p>
-            <p className="text-lg font-bold">{formatRp(totalGmv)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Overall ROAS</p>
-            <p className={`text-lg font-bold ${overallRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : overallRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+    <div className="rounded-lg border overflow-hidden">
+      {/* Clickable summary row */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
+        aria-expanded={open}
+      >
+        <ChevronRight
+          className={`h-4 w-4 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+        />
+        <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+          <Package className="h-4 w-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold">Shop GMV Max Auto</p>
+            <span className="text-[10px] bg-purple-100 text-purple-800 border border-purple-200 rounded-full px-2 py-0.5 font-medium">
+              {productRows.length} produk
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Klik untuk melihat breakdown per produk (dari file Data per Produk)
+          </p>
+        </div>
+        <div className="hidden sm:flex items-center gap-4 text-xs">
+          <div className="text-right">
+            <p className="text-muted-foreground">Ad Spend</p>
+            <p className="font-semibold">{formatRp(totalAdSpend)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-muted-foreground">GMV</p>
+            <p className="font-semibold">{formatRp(totalGmv)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-muted-foreground">ROAS</p>
+            <p
+              className={`font-semibold ${
+                overallRoas >= ROAS_THRESHOLDS.scale
+                  ? 'text-green-700'
+                  : overallRoas < ROAS_THRESHOLDS.kill
+                  ? 'text-red-600'
+                  : 'text-yellow-700'
+              }`}
+            >
               {overallRoas.toFixed(2)}x
             </p>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+          <div className="text-right">
+            <p className="text-muted-foreground">Konversi</p>
+            <p className="font-semibold">{totalConversions.toLocaleString('id-ID')}</p>
+          </div>
+        </div>
+      </button>
 
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto rounded-lg">
+      {/* Expanded per-product detail */}
+      {open && (
+        <div className="border-t bg-muted/20">
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-[160px]">Nama Produk</TableHead>
-                  <TableHead>Kode Produk</TableHead>
+                  <TableHead>Kode</TableHead>
                   <TableHead>Impressions</TableHead>
                   <TableHead>Klik</TableHead>
                   <TableHead>CTR</TableHead>
                   <TableHead>Konversi</TableHead>
-                  <TableHead>Unit Terjual</TableHead>
+                  <TableHead>Unit</TableHead>
                   <TableHead>GMV</TableHead>
                   <TableHead>Ad Spend</TableHead>
                   <TableHead>ROAS</TableHead>
@@ -544,44 +576,70 @@ function BreakdownProductTab({ adsProductData }: { adsProductData: DbAdsRow[] })
               <TableBody>
                 {productRows.map((row) => {
                   const roas = row.roas
-                  const signal: keyof typeof SIGNAL_CONFIG = roas >= ROAS_THRESHOLDS.scale
-                    ? 'scale'
-                    : roas < ROAS_THRESHOLDS.kill
-                    ? 'kill'
-                    : 'optimize'
+                  const signal: keyof typeof SIGNAL_CONFIG =
+                    roas >= ROAS_THRESHOLDS.scale
+                      ? 'scale'
+                      : roas < ROAS_THRESHOLDS.kill
+                      ? 'kill'
+                      : 'optimize'
                   return (
                     <TableRow
                       key={row.id}
                       className={
-                        signal === 'kill' ? 'bg-red-50/40' :
-                        signal === 'scale' ? 'bg-green-50/40' : undefined
+                        signal === 'kill'
+                          ? 'bg-red-50/40'
+                          : signal === 'scale'
+                          ? 'bg-green-50/40'
+                          : undefined
                       }
                     >
                       <TableCell>
-                        <p className="text-sm font-medium line-clamp-2">{row.product_name ?? '-'}</p>
+                        <p className="text-sm font-medium line-clamp-2">
+                          {row.product_name ?? '-'}
+                        </p>
                       </TableCell>
-                      <TableCell className="text-xs font-mono text-muted-foreground">{row.product_code}</TableCell>
-                      <TableCell className="text-sm">{row.impressions.toLocaleString('id-ID')}</TableCell>
-                      <TableCell className="text-sm">{row.clicks.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="text-xs font-mono text-muted-foreground">
+                        {row.product_code}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {row.impressions.toLocaleString('id-ID')}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {row.clicks.toLocaleString('id-ID')}
+                      </TableCell>
                       <TableCell className="text-sm">{formatPct(row.ctr)}</TableCell>
-                      <TableCell className="text-sm">{row.conversions.toLocaleString('id-ID')}</TableCell>
-                      <TableCell className="text-sm">{row.units_sold.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="text-sm">
+                        {row.conversions.toLocaleString('id-ID')}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {row.units_sold.toLocaleString('id-ID')}
+                      </TableCell>
                       <TableCell className="text-sm">{formatRp(row.gmv)}</TableCell>
                       <TableCell className="text-sm">{formatRp(row.ad_spend)}</TableCell>
                       <TableCell>
-                        <span className={`text-sm font-semibold ${roas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : roas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                        <span
+                          className={`text-sm font-semibold ${
+                            roas >= ROAS_THRESHOLDS.scale
+                              ? 'text-green-700'
+                              : roas < ROAS_THRESHOLDS.kill
+                              ? 'text-red-600'
+                              : 'text-yellow-700'
+                          }`}
+                        >
                           {roas.toFixed(2)}x
                         </span>
                       </TableCell>
-                      <TableCell><SignalBadge signal={signal} /></TableCell>
+                      <TableCell>
+                        <SignalBadge signal={signal} />
+                      </TableCell>
                     </TableRow>
                   )
                 })}
               </TableBody>
             </Table>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
     </div>
   )
 }
@@ -786,12 +844,6 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
           <TabsTrigger value="traffic">Traffic Light</TabsTrigger>
           <TabsTrigger value="roas">ROAS Chart</TabsTrigger>
           <TabsTrigger value="funnel">Funnel</TabsTrigger>
-          <TabsTrigger value="breakdown">
-            Breakdown GMV Max Auto
-            {adsProductData.filter((r) => r.product_code !== '-').length === 0 && (
-              <Badge variant="secondary" className="ml-1 text-xs">Belum ada data</Badge>
-            )}
-          </TabsTrigger>
           {hasIncomeData && (
             <TabsTrigger value="quadrant">
               Quadrant Matrix
@@ -807,14 +859,16 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <CardTitle className="text-base">Rekomendasi per Produk</CardTitle>
+                <CardTitle className="text-base">Rekomendasi per Iklan</CardTitle>
                 <div className="text-xs text-muted-foreground space-y-0.5">
                   <p>🟢 SCALE: ROAS ≥ {ROAS_THRESHOLDS.scale}x AND konversi ≥ {ROAS_THRESHOLDS.minConversions}</p>
                   <p>🔴 KILL: ROAS &lt; {ROAS_THRESHOLDS.kill}x</p>
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {/* Shop GMV Max Auto — expandable to reveal per-product breakdown */}
+              <GmvMaxAutoDrilldown adsProductData={adsProductData} />
               <TrafficLightTable rows={trafficLightRows} hasHppData={hasHppData} />
             </CardContent>
           </Card>
@@ -847,11 +901,6 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
               <FunnelChart data={funnelData} />
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* Breakdown GMV Max Auto */}
-        <TabsContent value="breakdown">
-          <BreakdownProductTab adsProductData={adsProductData} />
         </TabsContent>
 
         {/* Quadrant Matrix */}
