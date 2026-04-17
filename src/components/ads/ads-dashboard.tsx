@@ -459,18 +459,147 @@ function QuadrantMatrix({ data }: { data: ReturnType<typeof buildQuadrantData> }
 }
 
 // ---------------------------------------------------------------------------
+// Breakdown GMV Max Auto Tab
+// ---------------------------------------------------------------------------
+
+function BreakdownProductTab({ adsProductData }: { adsProductData: DbAdsRow[] }) {
+  const productRows = adsProductData.filter((r) => r.product_code !== '-')
+    .sort((a, b) => b.ad_spend - a.ad_spend)
+
+  if (productRows.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-8 flex flex-col items-center justify-center text-center gap-4">
+          <AlertCircle className="h-10 w-10 text-muted-foreground opacity-40" />
+          <div>
+            <p className="font-semibold text-base">Belum ada data breakdown produk</p>
+            <p className="text-sm text-muted-foreground mt-1 max-w-md">
+              Upload Data per Produk (GMV Max Auto) untuk melihat breakdown detail per produk.
+              Klik Upload Data di sidebar.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Compute KPIs from product rows (excluding aggregate)
+  const totalAdSpend = productRows.reduce((s, r) => s + r.ad_spend, 0)
+  const totalGmv = productRows.reduce((s, r) => s + r.gmv, 0)
+  const overallRoas = totalAdSpend > 0 ? totalGmv / totalAdSpend : 0
+
+  return (
+    <div className="space-y-4">
+      {/* Source label */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs bg-purple-100 text-purple-800 border border-purple-200 rounded-full px-3 py-1 font-medium">
+          Sumber: Shop GMV Max Auto
+        </span>
+      </div>
+
+      {/* KPI mini cards */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground mb-1">Total Ad Spend</p>
+            <p className="text-lg font-bold">{formatRp(totalAdSpend)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground mb-1">Total GMV</p>
+            <p className="text-lg font-bold">{formatRp(totalGmv)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground mb-1">Overall ROAS</p>
+            <p className={`text-lg font-bold ${overallRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : overallRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+              {overallRoas.toFixed(2)}x
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Table */}
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto rounded-lg">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[160px]">Nama Produk</TableHead>
+                  <TableHead>Kode Produk</TableHead>
+                  <TableHead>Impressions</TableHead>
+                  <TableHead>Klik</TableHead>
+                  <TableHead>CTR</TableHead>
+                  <TableHead>Konversi</TableHead>
+                  <TableHead>Unit Terjual</TableHead>
+                  <TableHead>GMV</TableHead>
+                  <TableHead>Ad Spend</TableHead>
+                  <TableHead>ROAS</TableHead>
+                  <TableHead>Sinyal</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {productRows.map((row) => {
+                  const roas = row.roas
+                  const signal: keyof typeof SIGNAL_CONFIG = roas >= ROAS_THRESHOLDS.scale
+                    ? 'scale'
+                    : roas < ROAS_THRESHOLDS.kill
+                    ? 'kill'
+                    : 'optimize'
+                  return (
+                    <TableRow
+                      key={row.id}
+                      className={
+                        signal === 'kill' ? 'bg-red-50/40' :
+                        signal === 'scale' ? 'bg-green-50/40' : undefined
+                      }
+                    >
+                      <TableCell>
+                        <p className="text-sm font-medium line-clamp-2">{row.product_name ?? '-'}</p>
+                      </TableCell>
+                      <TableCell className="text-xs font-mono text-muted-foreground">{row.product_code}</TableCell>
+                      <TableCell className="text-sm">{row.impressions.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="text-sm">{row.clicks.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="text-sm">{formatPct(row.ctr)}</TableCell>
+                      <TableCell className="text-sm">{row.conversions.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="text-sm">{row.units_sold.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="text-sm">{formatRp(row.gmv)}</TableCell>
+                      <TableCell className="text-sm">{formatRp(row.ad_spend)}</TableCell>
+                      <TableCell>
+                        <span className={`text-sm font-semibold ${roas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : roas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                          {roas.toFixed(2)}x
+                        </span>
+                      </TableCell>
+                      <TableCell><SignalBadge signal={signal} /></TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main Dashboard
 // ---------------------------------------------------------------------------
 
 interface Props {
   adsData: DbAdsRow[]
+  adsProductData: DbAdsRow[]
   masterProducts: MasterProduct[]
   orders: DbOrder[]
   orderProducts: DbOrderProduct[]
   hasIncomeData: boolean
 }
 
-export default function AdsDashboard({ adsData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
+export default function AdsDashboard({ adsData, adsProductData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
 
   // Derive available months from ALL data (including aggregate-only months like April
@@ -657,6 +786,12 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
           <TabsTrigger value="traffic">Traffic Light</TabsTrigger>
           <TabsTrigger value="roas">ROAS Chart</TabsTrigger>
           <TabsTrigger value="funnel">Funnel</TabsTrigger>
+          <TabsTrigger value="breakdown">
+            Breakdown GMV Max Auto
+            {adsProductData.filter((r) => r.product_code !== '-').length === 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">Belum ada data</Badge>
+            )}
+          </TabsTrigger>
           {hasIncomeData && (
             <TabsTrigger value="quadrant">
               Quadrant Matrix
@@ -712,6 +847,11 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
               <FunnelChart data={funnelData} />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Breakdown GMV Max Auto */}
+        <TabsContent value="breakdown">
+          <BreakdownProductTab adsProductData={adsProductData} />
         </TabsContent>
 
         {/* Quadrant Matrix */}

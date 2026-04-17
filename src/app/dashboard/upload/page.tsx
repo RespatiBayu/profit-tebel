@@ -30,7 +30,7 @@ import Link from 'next/link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import type { Store } from '@/types'
 
-type UploadType = 'income' | 'ads'
+type UploadType = 'income' | 'ads' | 'ads_product'
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
 
 interface UploadState {
@@ -75,12 +75,27 @@ function DropZone({
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const isIncome = type === 'income'
-  const Icon = isIncome ? FileSpreadsheet : FileText
-  const label = isIncome ? 'Data Penghasilan' : 'Data Iklan'
-  const desc = isIncome ? 'File .xlsx dari Shopee Income' : 'File .csv dari Shopee Ads'
-  const color = isIncome ? 'text-blue-600' : 'text-orange-600'
-  const bg = isIncome ? 'bg-blue-50' : 'bg-orange-50'
+  const Icon = type === 'income' ? FileSpreadsheet : FileText
+  const label = type === 'income'
+    ? 'Data Penghasilan'
+    : type === 'ads'
+    ? 'Data Iklan (Summary)'
+    : 'Data per Produk (GMV Max Auto)'
+  const desc = type === 'income'
+    ? 'File .xlsx dari Shopee Income'
+    : type === 'ads'
+    ? 'File .csv dari Shopee Ads'
+    : 'File .csv dari Shop GMV Max Detail Produk'
+  const color = type === 'income'
+    ? 'text-blue-600'
+    : type === 'ads'
+    ? 'text-orange-600'
+    : 'text-purple-600'
+  const bg = type === 'income'
+    ? 'bg-blue-50'
+    : type === 'ads'
+    ? 'bg-orange-50'
+    : 'bg-purple-50'
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -212,6 +227,9 @@ export default function UploadPage() {
   const [adsState, setAdsState] = useState<UploadState>({
     file: null, status: 'idle', progress: 0, result: null,
   })
+  const [adsProductState, setAdsProductState] = useState<UploadState>({
+    file: null, status: 'idle', progress: 0, result: null,
+  })
 
   // Load stores on mount
   useEffect(() => {
@@ -243,22 +261,26 @@ export default function UploadPage() {
   function setFile(type: UploadType, file: File) {
     if (type === 'income') {
       setIncomeState({ file, status: 'idle', progress: 0, result: null })
-    } else {
+    } else if (type === 'ads') {
       setAdsState({ file, status: 'idle', progress: 0, result: null })
+    } else {
+      setAdsProductState({ file, status: 'idle', progress: 0, result: null })
     }
   }
 
   function removeFile(type: UploadType) {
     if (type === 'income') {
       setIncomeState({ file: null, status: 'idle', progress: 0, result: null })
-    } else {
+    } else if (type === 'ads') {
       setAdsState({ file: null, status: 'idle', progress: 0, result: null })
+    } else {
+      setAdsProductState({ file: null, status: 'idle', progress: 0, result: null })
     }
   }
 
   async function uploadFile(type: UploadType) {
-    const state = type === 'income' ? incomeState : adsState
-    const setState = type === 'income' ? setIncomeState : setAdsState
+    const state = type === 'income' ? incomeState : type === 'ads' ? adsState : adsProductState
+    const setState = type === 'income' ? setIncomeState : type === 'ads' ? setAdsState : setAdsProductState
     if (!state.file) return
 
     setState((prev) => ({ ...prev, status: 'uploading', progress: 30 }))
@@ -268,7 +290,7 @@ export default function UploadPage() {
     formData.append('marketplace', marketplace)
     if (storeId) formData.append('storeId', storeId)
 
-    const endpoint = `/api/parse/${type}`
+    const endpoint = type === 'ads_product' ? '/api/parse/ads-product' : `/api/parse/${type}`
 
     try {
       setState((prev) => ({ ...prev, progress: 60 }))
@@ -308,10 +330,11 @@ export default function UploadPage() {
     }
   }
 
-  const hasFiles = incomeState.file || adsState.file
+  const hasFiles = incomeState.file || adsState.file || adsProductState.file
   const canUploadIncome = incomeState.file && incomeState.status === 'idle'
   const canUploadAds = adsState.file && adsState.status === 'idle'
-  const canUploadAny = canUploadIncome || canUploadAds
+  const canUploadAdsProduct = adsProductState.file && adsProductState.status === 'idle'
+  const canUploadAny = canUploadIncome || canUploadAds || canUploadAdsProduct
 
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-6">
@@ -408,7 +431,7 @@ export default function UploadPage() {
           <CardTitle className="text-base">File Upload</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid sm:grid-cols-3 gap-4">
             <DropZone
               type="income"
               accept=".xlsx"
@@ -423,10 +446,17 @@ export default function UploadPage() {
               onChange={(f) => setFile('ads', f)}
               onRemove={() => removeFile('ads')}
             />
+            <DropZone
+              type="ads_product"
+              accept=".csv"
+              state={adsProductState}
+              onChange={(f) => setFile('ads_product', f)}
+              onRemove={() => removeFile('ads_product')}
+            />
           </div>
 
           {hasFiles && (
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="flex flex-col sm:flex-row gap-2 pt-2 flex-wrap">
               {canUploadIncome && (
                 <Button
                   className="gap-2"
@@ -448,13 +478,25 @@ export default function UploadPage() {
                   Proses Data Iklan
                 </Button>
               )}
-              {canUploadAny && canUploadIncome && canUploadAds && (
+              {canUploadAdsProduct && (
+                <Button
+                  variant={canUploadIncome || canUploadAds ? 'outline' : 'default'}
+                  className="gap-2"
+                  onClick={() => uploadFile('ads_product')}
+                  disabled={adsProductState.status === 'uploading'}
+                >
+                  <Upload className="h-4 w-4" />
+                  Proses Data per Produk
+                </Button>
+              )}
+              {canUploadAny && [canUploadIncome, canUploadAds, canUploadAdsProduct].filter(Boolean).length > 1 && (
                 <Button
                   variant="secondary"
                   className="gap-2 sm:ml-auto"
                   onClick={async () => {
-                    await uploadFile('income')
-                    await uploadFile('ads')
+                    if (canUploadIncome) await uploadFile('income')
+                    if (canUploadAds) await uploadFile('ads')
+                    if (canUploadAdsProduct) await uploadFile('ads_product')
                   }}
                 >
                   Proses Semua
@@ -466,7 +508,7 @@ export default function UploadPage() {
       </Card>
 
       {/* Next steps after success */}
-      {(incomeState.status === 'success' || adsState.status === 'success') && (
+      {(incomeState.status === 'success' || adsState.status === 'success' || adsProductState.status === 'success') && (
         <Card className="border-green-200 bg-green-50/50">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center gap-2 text-green-700 font-medium">
@@ -486,6 +528,14 @@ export default function UploadPage() {
                 <Link href="/dashboard/ads">
                   <Button size="sm" variant={incomeState.status === 'success' ? 'outline' : 'default'} className="gap-2 w-full sm:w-auto">
                     Lihat Analisis Iklan
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              )}
+              {adsProductState.status === 'success' && (
+                <Link href="/dashboard/ads">
+                  <Button size="sm" variant={(incomeState.status === 'success' || adsState.status === 'success') ? 'outline' : 'default'} className="gap-2 w-full sm:w-auto">
+                    Lihat Breakdown per Produk
                     <ArrowRight className="h-4 w-4" />
                   </Button>
                 </Link>
@@ -513,6 +563,10 @@ export default function UploadPage() {
             <div>
               <span className="font-medium text-foreground">Data Iklan (.csv):</span>
               {' '}Shopee Ads → Laporan → Download Laporan Produk
+            </div>
+            <div>
+              <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv):</span>
+              {' '}Shopee Ads → Shop GMV Max → Laporan → Download Detail Produk
             </div>
           </div>
         </CardContent>

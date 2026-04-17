@@ -13,25 +13,54 @@ export default async function AdsPage({
   const { store: storeId } = await searchParams
   const supabase = await createClient()
 
-  const adsQ = supabase.from('ads_data').select('*').order('ad_spend', { ascending: false })
   const mpQ = supabase.from('master_products').select('*')
   const ordQ = supabase.from('orders').select('*')
   const opQ = supabase.from('order_products').select('*')
   if (storeId) {
-    adsQ.eq('store_id', storeId)
     mpQ.eq('store_id', storeId)
     ordQ.eq('store_id', storeId)
     opQ.eq('store_id', storeId)
   }
 
+  // Fetch batch IDs for each ads type separately
+  const [{ data: summaryBatchData }, { data: productBatchData }] = await Promise.all([
+    storeId
+      ? supabase.from('upload_batches').select('id').eq('file_type', 'ads').eq('store_id', storeId)
+      : supabase.from('upload_batches').select('id').eq('file_type', 'ads'),
+    storeId
+      ? supabase.from('upload_batches').select('id').eq('file_type', 'ads_product').eq('store_id', storeId)
+      : supabase.from('upload_batches').select('id').eq('file_type', 'ads_product'),
+  ])
+
+  const summaryBatchIds = (summaryBatchData ?? []).map((b) => b.id)
+  const productBatchIds = (productBatchData ?? []).map((b) => b.id)
+
+  // Build separate queries for summary and product ads data
+  const summaryQ = supabase.from('ads_data').select('*').order('ad_spend', { ascending: false })
+  const productQ = supabase.from('ads_data').select('*').order('ad_spend', { ascending: false })
+
+  if (summaryBatchIds.length > 0) {
+    summaryQ.in('upload_batch_id', summaryBatchIds)
+  } else {
+    summaryQ.eq('upload_batch_id', 'no-match') // return empty
+  }
+
+  if (productBatchIds.length > 0) {
+    productQ.in('upload_batch_id', productBatchIds)
+  } else {
+    productQ.eq('upload_batch_id', 'no-match') // return empty
+  }
+
   const [
     { data: adsData },
+    { data: adsProductData },
     { data: masterProducts },
     { data: orders },
     { data: orderProducts },
-  ] = await Promise.all([adsQ, mpQ, ordQ, opQ])
+  ] = await Promise.all([summaryQ, productQ, mpQ, ordQ, opQ])
 
   const typedAds = (adsData ?? []) as DbAdsRow[]
+  const typedAdsProduct = (adsProductData ?? []) as DbAdsRow[]
   const typedProducts = (masterProducts ?? []) as MasterProduct[]
   const typedOrders = (orders ?? []) as DbOrder[]
   const typedOrderProducts = (orderProducts ?? []) as DbOrderProduct[]
@@ -39,7 +68,7 @@ export default async function AdsPage({
   // Filter out aggregate row for display count
   const productAds = typedAds.filter((r) => r.product_code !== '-')
 
-  if (productAds.length === 0) {
+  if (productAds.length === 0 && typedAdsProduct.filter((r) => r.product_code !== '-').length === 0) {
     return (
       <div className="p-4 sm:p-6 flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
         <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center">
@@ -67,6 +96,7 @@ export default async function AdsPage({
   return (
     <AdsDashboard
       adsData={typedAds}
+      adsProductData={typedAdsProduct}
       masterProducts={typedProducts}
       orders={typedOrders}
       orderProducts={typedOrderProducts}
