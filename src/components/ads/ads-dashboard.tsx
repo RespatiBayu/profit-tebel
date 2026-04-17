@@ -473,13 +473,11 @@ interface Props {
 export default function AdsDashboard({ adsData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
 
-  // Derive available months — only months where at least 1 per-product row has ad_spend > 0
-  // (months with only Shop GMV Max aggregate or 0-spend products are excluded)
+  // Derive available months from ALL data (including aggregate-only months like April
+  // where only Shop GMV Max ran — still a valid period worth selecting)
   const availableMonths = useMemo(() => {
     const monthSet = new Set<string>()
     for (const ad of adsData) {
-      if (ad.product_code === '-') continue
-      if (ad.ad_spend <= 0) continue
       const date = ad.report_period_start ?? ad.report_period_end
       if (date) monthSet.add(date.slice(0, 7))
     }
@@ -502,17 +500,22 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
     })
   }, [adsData, selectedMonth])
 
-  // Period label — always show date range from the data
+  // Period label — derive from all filtered ads (including aggregate rows)
   const periodLabel = useMemo(() => {
-    const relevantAds = filteredAds.filter((a) => a.product_code !== '-' && a.ad_spend > 0)
-    const starts = relevantAds.map((a) => a.report_period_start).filter(Boolean) as string[]
-    const ends = relevantAds.map((a) => a.report_period_end).filter(Boolean) as string[]
+    const starts = filteredAds.map((a) => a.report_period_start).filter(Boolean) as string[]
+    const ends = filteredAds.map((a) => a.report_period_end).filter(Boolean) as string[]
     if (!starts.length) return null
     const minStart = [...starts].sort()[0]
     const maxEnd = [...ends].sort().reverse()[0]
     const fmt = (d: string) => new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
     return maxEnd ? `${fmt(minStart)} – ${fmt(maxEnd)}` : fmt(minStart)
   }, [filteredAds])
+
+  // Whether the selected period has any per-product campaigns with actual spend
+  const hasPerProductCampaigns = useMemo(
+    () => filteredAds.some((a) => a.product_code !== '-' && a.ad_spend > 0),
+    [filteredAds]
+  )
 
   const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
 
@@ -546,7 +549,9 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
         <div>
           <h1 className="text-2xl font-bold">Analisis Iklan</h1>
           <p className="text-muted-foreground mt-0.5">
-            {kpis.productCount} produk diiklankan
+            {hasPerProductCampaigns
+              ? `${kpis.productCount} produk diiklankan`
+              : 'Hanya kampanye toko (Shop GMV Max)'}
             {periodLabel && <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full">{periodLabel}</span>}
           </p>
         </div>
@@ -605,7 +610,22 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
         />
       </div>
 
+      {/* Banner: aggregate-only period notice */}
+      {!hasPerProductCampaigns && (
+        <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" />
+          <div>
+            <p className="font-medium">Periode ini hanya memiliki kampanye Shop GMV Max (tingkat toko)</p>
+            <p className="text-xs mt-0.5 text-blue-600">
+              Tidak ada kampanye per-produk aktif. KPI di atas berasal dari kampanye toko.
+              Analisis ROAS per-produk tidak tersedia untuk periode ini.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Traffic Light Summary */}
+      {hasPerProductCampaigns && (
       <div className="flex flex-wrap gap-3">
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2">
           <span className="text-xl">🟢</span>
@@ -629,6 +649,7 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
           </div>
         </div>
       </div>
+      )}
 
       {/* Tabs */}
       <Tabs defaultValue="traffic" className="space-y-4">
