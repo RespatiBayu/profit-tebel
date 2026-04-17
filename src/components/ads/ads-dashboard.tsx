@@ -162,6 +162,19 @@ function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasH
       return sortDir === 'asc' ? cmp : -cmp
     })
 
+  if (rows.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+        <AlertCircle className="h-8 w-8 mb-3 opacity-40" />
+        <p className="font-medium text-sm">Tidak ada kampanye per-produk di periode ini</p>
+        <p className="text-xs mt-1 max-w-sm">
+          Periode ini hanya memiliki kampanye Shop GMV Max (level toko), bukan kampanye per-produk.
+          Pilih periode lain untuk melihat analisis ROAS per produk.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
       <Input
@@ -460,11 +473,13 @@ interface Props {
 export default function AdsDashboard({ adsData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
 
-  // Derive available months from ads data report periods
+  // Derive available months — only months where at least 1 per-product row has ad_spend > 0
+  // (months with only Shop GMV Max aggregate or 0-spend products are excluded)
   const availableMonths = useMemo(() => {
     const monthSet = new Set<string>()
     for (const ad of adsData) {
       if (ad.product_code === '-') continue
+      if (ad.ad_spend <= 0) continue
       const date = ad.report_period_start ?? ad.report_period_end
       if (date) monthSet.add(date.slice(0, 7))
     }
@@ -487,18 +502,17 @@ export default function AdsDashboard({ adsData, masterProducts, orders, orderPro
     })
   }, [adsData, selectedMonth])
 
-  // Period label for the selected month
+  // Period label — always show date range from the data
   const periodLabel = useMemo(() => {
-    if (selectedMonth === 'all') return null
-    const monthAds = filteredAds.filter((a) => a.product_code !== '-')
-    const starts = monthAds.map((a) => a.report_period_start).filter(Boolean) as string[]
-    const ends = monthAds.map((a) => a.report_period_end).filter(Boolean) as string[]
+    const relevantAds = filteredAds.filter((a) => a.product_code !== '-' && a.ad_spend > 0)
+    const starts = relevantAds.map((a) => a.report_period_start).filter(Boolean) as string[]
+    const ends = relevantAds.map((a) => a.report_period_end).filter(Boolean) as string[]
     if (!starts.length) return null
-    const minStart = starts.sort()[0]
-    const maxEnd = ends.sort().reverse()[0]
+    const minStart = [...starts].sort()[0]
+    const maxEnd = [...ends].sort().reverse()[0]
     const fmt = (d: string) => new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
     return maxEnd ? `${fmt(minStart)} – ${fmt(maxEnd)}` : fmt(minStart)
-  }, [filteredAds, selectedMonth])
+  }, [filteredAds])
 
   const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
 
