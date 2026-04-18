@@ -165,24 +165,27 @@ function TrafficLightTable({
   }
 
   /** Returns Format 2 per-product rows that belong to this campaign.
-   *  Join logic (in priority order):
-   *  1. If Format 2 row has parent_iklan set → match by name (normalized)
-   *  2. If Format 2 row has parent_iklan = null → associate with the aggregate
-   *     campaign (product_code='-'), since Format 2 is always Shop GMV Max data */
-  function getBreakdownProducts(adName: string | null, productCode: string): DbAdsRow[] {
+   *  Strict join: parent_iklan (normalized) MUST match adName AND both period
+   *  fields must match. No fallback — a user can run multiple GMV Max Auto
+   *  campaigns, so an unjoined Format 2 row is ambiguous and must not be
+   *  attached to an arbitrary parent. */
+  function getBreakdownProducts(
+    adName: string | null,
+    periodStart: string | null,
+    periodEnd: string | null,
+  ): DbAdsRow[] {
     const base = normalizeAdName(adName)
+    if (!base) return []
+    const bn = base.toLowerCase()
     return adsProductData.filter((r) => {
-      if (r.product_code === '-') return false   // exclude aggregate row itself
-      if (r.parent_iklan) {
-        // Explicit parent_iklan set — match by name
-        if (!base) return false
-        const pi = r.parent_iklan.trim().toLowerCase()
-        const bn = base.toLowerCase()
-        return pi === bn || pi.includes(bn) || bn.includes(pi)
-      }
-      // parent_iklan is null (extraction from CSV failed) — associate all
-      // Format 2 rows with the Shop GMV Max aggregate campaign
-      return productCode === '-'
+      if (r.product_code === '-') return false            // exclude aggregate row
+      if (!r.parent_iklan) return false                   // strict: require parent_iklan
+      // Period must match (both start and end)
+      if (r.report_period_start !== periodStart) return false
+      if (r.report_period_end !== periodEnd) return false
+      const pi = normalizeAdName(r.parent_iklan).toLowerCase()
+      if (!pi) return false
+      return pi === bn || pi.includes(bn) || bn.includes(pi)
     })
   }
 
@@ -270,7 +273,7 @@ function TrafficLightTable({
             {sorted.flatMap((row) => {
               const rowKey = `${row.adName ?? row.productCode}-${row.reportPeriodStart ?? 'all'}`
               const isExpanded = expandedKey === rowKey
-              const breakdownProducts = getBreakdownProducts(row.adName, row.productCode)
+              const breakdownProducts = getBreakdownProducts(row.adName, row.reportPeriodStart, row.reportPeriodEnd)
               const hasBreakdown = breakdownProducts.length > 0
 
               const mainRow = (

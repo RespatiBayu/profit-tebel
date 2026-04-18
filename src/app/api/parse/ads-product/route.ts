@@ -285,6 +285,11 @@ export async function POST(request: NextRequest) {
     const CHUNK = 500
     let insertedCount = 0
     const warnings: string[] = []
+    if (!parentIklan) {
+      warnings.push(
+        'Parent Iklan tidak terdeteksi dari metadata file. Detail per produk tidak akan ter-link ke kampanye di Traffic Light — wipe lalu upload ulang file Format 2, atau pastikan baris "Parent Iklan: <Nama Kampanye>" ada di header CSV.'
+      )
+    }
     for (let i = 0; i < newAdsRows.length; i += CHUNK) {
       const chunk = newAdsRows.slice(i, i + CHUNK)
       const { error } = await supabase.from('ads_data').insert(chunk)

@@ -70,24 +70,44 @@ function parseStr(value: unknown): string | null {
   return s || null
 }
 
-// Extract "Parent Iklan" / "Parent Campaign" value from metadata rows
-// Scans ALL cells in rows 0-12 looking for the key (Shopee may vary the label)
+// Extract "Parent Iklan" / "Parent Campaign" / "Nama Iklan" value from metadata rows.
+// Scans ALL cells in rows 0-15 looking for the key (Shopee may vary the label
+// and the column position changes depending on export locale).
+//
+// IMPORTANT: there is NO generic fallback to "Shop GMV Max" — a seller can
+// have multiple GMV Max Auto campaigns with different names, so guessing a
+// parent name would incorrectly merge unrelated campaigns. If no key is
+// found we return null and the caller surfaces a warning to the user.
 function extractParentIklan(allRows: string[][]): string | null {
-  const KEYS = ['parent iklan', 'parent campaign', 'kampanye induk', 'iklan induk']
-  for (const row of allRows.slice(0, 14)) {
+  const KEYS = [
+    'parent iklan',
+    'parent campaign',
+    'kampanye induk',
+    'iklan induk',
+    'nama iklan',
+    'nama kampanye',
+    'campaign name',
+    'ad name',
+  ]
+  for (const row of allRows.slice(0, 15)) {
     for (let i = 0; i < row.length; i++) {
-      const cell = String(row[i] ?? '').trim().toLowerCase()
-      if (KEYS.some((k) => cell.includes(k))) {
-        // Value is in the next cell on the same row
-        const val = String(row[i + 1] ?? '').trim()
+      const raw = String(row[i] ?? '').trim()
+      const cell = raw.toLowerCase().replace(/\s*:\s*$/, '') // strip trailing colon
+      if (KEYS.some((k) => cell === k || cell.startsWith(k + ':') || cell === k + ':')) {
+        // Prefer same-row next cell; if empty try 2 cells ahead (some exports pad)
+        for (let j = i + 1; j <= i + 3 && j < row.length; j++) {
+          const val = String(row[j] ?? '').trim()
+          if (val) return val
+        }
+      }
+      // Handle "Key: Value" packed into a single cell
+      if (KEYS.some((k) => cell.startsWith(k + ':') || cell.startsWith(k + ' :'))) {
+        const val = raw.split(':').slice(1).join(':').trim()
         if (val) return val
       }
     }
   }
-  // Fallback: scan raw text for "Shop GMV Max" pattern (always the parent)
-  const metaText = allRows.slice(0, 14).flat().join(' ')
-  const m = metaText.match(/Shop GMV Max(?:\s*(?:Auto|ROAS))?/i)
-  return m ? m[0].trim() : null
+  return null
 }
 
 // Extract period from allRows[5][1]: "01/04/2026 - 14/04/2026"
