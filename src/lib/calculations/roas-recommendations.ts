@@ -1,5 +1,5 @@
 import { MARKETPLACE_FEES } from '@/lib/constants/marketplace-fees'
-import type { DbAdsRow, MasterProduct, TrafficLightRow } from '@/types'
+import type { MasterProduct, TrafficLightRow } from '@/types'
 
 // ---------------------------------------------------------------------------
 // ROAS Recommendation Engine

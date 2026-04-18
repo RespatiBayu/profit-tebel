@@ -32,8 +32,8 @@ import { StoreSwitcher } from './store-switcher'
 
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true },
-  { href: '/dashboard/profit', label: 'Analisis Profit', icon: TrendingUp },
-  { href: '/dashboard/ads', label: 'Analisis Iklan', icon: BarChart3 },
+  { href: '/dashboard/profit', label: 'Dashboard Analisis', icon: TrendingUp },
+  { href: '/dashboard/ads', label: 'Detail Iklan', icon: BarChart3 },
   { href: '/dashboard/roas-calculator', label: 'Kalkulator ROAS', icon: Calculator },
   { href: '/dashboard/products', label: 'Master Produk', icon: Package },
   { href: '/dashboard/stores', label: 'Toko Saya', icon: Store },

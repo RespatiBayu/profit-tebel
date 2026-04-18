@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -65,6 +64,25 @@ import {
   calculatePaymentDistribution,
   calculateCourierStats,
 } from '@/lib/calculations/profit'
+import { buildTrafficLightRows } from '@/lib/calculations/ads-analysis'
+import {
+  buildScaleRecommendations,
+  pickScalableCampaigns,
+} from '@/lib/calculations/roas-recommendations'
+import {
+  calculateBusyDays,
+  calculateTopProducts,
+  calculateTopBuyers,
+  calculateDailyDetail,
+} from '@/lib/calculations/dashboard-analytics'
+import {
+  ScaleRecommendationsSection,
+  RoasTargetsSection,
+  BusyDaysSection,
+  TopProductsSection,
+  TopBuyersSection,
+  DailyDetailSection,
+} from '@/components/profit/dashboard-sections'
 import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct, ProductProfitRow } from '@/types'
 
 // ---------------------------------------------------------------------------
@@ -379,17 +397,53 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   const paymentDist = useMemo(() => calculatePaymentDistribution(filteredOrders), [filteredOrders])
   const courierStats = useMemo(() => calculateCourierStats(filteredOrders), [filteredOrders])
 
+  // --- New unified-dashboard analytics ---
+  const trafficRows = useMemo(
+    () => buildTrafficLightRows(filteredAdsData, masterProducts),
+    [filteredAdsData, masterProducts]
+  )
+  const scaleRecs = useMemo(
+    () => buildScaleRecommendations(trafficRows, masterProducts),
+    [trafficRows, masterProducts]
+  )
+  const scalable = useMemo(() => pickScalableCampaigns(scaleRecs), [scaleRecs])
+  const busyDays = useMemo(() => calculateBusyDays(filteredOrders), [filteredOrders])
+  const topProducts = useMemo(
+    () => calculateTopProducts(filteredOrders, orderProducts, masterProducts),
+    [filteredOrders, orderProducts, masterProducts]
+  )
+  const topBuyers = useMemo(() => calculateTopBuyers(filteredOrders), [filteredOrders])
+  const dailyDetail = useMemo(() => calculateDailyDetail(filteredOrders), [filteredOrders])
+
+  // Derive avg selling price per product from ads data (most reliable — actual realized price)
+  const sellingPriceMap = useMemo(() => {
+    const m = new Map<string, number>()
+    const agg = new Map<string, { gmv: number; units: number }>()
+    for (const a of filteredAdsData) {
+      if (!a.product_code || a.product_code === '-') continue
+      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
+      e.gmv += a.gmv
+      e.units += a.units_sold
+      agg.set(a.product_code, e)
+    }
+    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
+      if (units > 0) m.set(code, gmv / units)
+    }
+    // Fallback: derive from orders if no ads data for a product
+    return m
+  }, [filteredAdsData])
+
   const negativeProducts = productRows.filter((r) => r.hasHpp && r.profit < 0)
   const totalProducts = masterProducts.length
   const hppFilled = totalProducts - noHppCount
   const hppProgress = totalProducts > 0 ? Math.round((hppFilled / totalProducts) * 100) : 0
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Analisis Profit</h1>
+          <h1 className="text-2xl font-bold">Dashboard Analisis</h1>
           <p className="text-muted-foreground mt-0.5">
             {filteredOrders.length.toLocaleString('id-ID')} order
           </p>
@@ -550,20 +604,18 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
         </Card>
       )}
 
-      {/* Charts Tabs */}
-      <Tabs defaultValue="trend" className="space-y-4">
-        <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="trend">Trend</TabsTrigger>
-          <TabsTrigger value="fees">Biaya</TabsTrigger>
-          <TabsTrigger value="products">Per Produk</TabsTrigger>
-          <TabsTrigger value="payment">Pembayaran</TabsTrigger>
-          <TabsTrigger value="courier">Kurir</TabsTrigger>
-          <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
-        </TabsList>
+      {/* === SECTION: Scale Recommendations (iklan yang bisa di-scale) === */}
+      {filteredAdsData.length > 0 && (
+        <ScaleRecommendationsSection scalable={scalable} allRecs={scaleRecs} />
+      )}
 
-        {/* Trend */}
-        <TabsContent value="trend">
-          <Card>
+      {/* === SECTION: ROAS Targets per Product === */}
+      {masterProducts.length > 0 && (
+        <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
+      )}
+
+      {/* === SECTION: Trend Chart === */}
+      <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="text-base">Trend Omzet & Profit</CardTitle>
               <div className="flex gap-1">
@@ -595,11 +647,19 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               )}
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* Fee Breakdown */}
-        <TabsContent value="fees">
-          <div className="grid sm:grid-cols-2 gap-4">
+      {/* === SECTION: Busy Days + Top Products + Top Buyers === */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <BusyDaysSection rows={busyDays} />
+        <TopProductsSection rows={topProducts} />
+      </div>
+      <TopBuyersSection rows={topBuyers} />
+
+      {/* === SECTION: Daily Detail Table === */}
+      <DailyDetailSection rows={dailyDetail} />
+
+      {/* === SECTION: Fee Breakdown === */}
+      <div className="grid sm:grid-cols-2 gap-4">
             <Card>
               <CardHeader className="pb-3"><CardTitle className="text-base">Breakdown Biaya</CardTitle></CardHeader>
               <CardContent>
@@ -643,21 +703,17 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
 
-        {/* Per Product */}
-        <TabsContent value="products">
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Profit per Produk</CardTitle></CardHeader>
-            <CardContent>
-              <ProductProfitTable rows={productRows} />
-            </CardContent>
-          </Card>
-        </TabsContent>
+      {/* === SECTION: Per Product === */}
+      <Card>
+        <CardHeader className="pb-3"><CardTitle className="text-base">Profit per Produk</CardTitle></CardHeader>
+        <CardContent>
+          <ProductProfitTable rows={productRows} />
+        </CardContent>
+      </Card>
 
-        {/* Payment Distribution */}
-        <TabsContent value="payment">
-          <div className="grid sm:grid-cols-2 gap-4">
+      {/* === SECTION: Payment Distribution === */}
+      <div className="grid sm:grid-cols-2 gap-4">
             <Card>
               <CardHeader className="pb-3"><CardTitle className="text-base">Metode Pembayaran</CardTitle></CardHeader>
               <CardContent>
@@ -697,11 +753,9 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
 
-        {/* Courier */}
-        <TabsContent value="courier">
-          <Card>
+      {/* === SECTION: Courier === */}
+      <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Analisis Kurir</CardTitle></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={280}>
@@ -737,11 +791,9 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* Cash Flow */}
-        <TabsContent value="cashflow">
-          <div className="grid sm:grid-cols-3 gap-4">
+      {/* === SECTION: Cash Flow === */}
+      <div className="grid sm:grid-cols-3 gap-4">
             <Card>
               <CardContent className="p-5">
                 <p className="text-sm text-muted-foreground mb-1">Rata-rata Gap</p>
@@ -763,8 +815,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
-      </Tabs>
     </div>
   )
 }
