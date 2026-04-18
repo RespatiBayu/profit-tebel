@@ -2,9 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table,
   TableBody,
@@ -657,11 +655,11 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Analisis Iklan</h1>
+          <h1 className="text-2xl font-bold">Detail Iklan</h1>
           <p className="text-muted-foreground mt-0.5">
             {hasPerProductCampaigns
               ? `${kpis.productCount} produk diiklankan`
@@ -765,95 +763,70 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
       </div>
       )}
 
-      {/* Tabs */}
-      <Tabs defaultValue="traffic" className="space-y-4">
-        <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="traffic">Traffic Light</TabsTrigger>
-          <TabsTrigger value="roas">ROAS Chart</TabsTrigger>
-          <TabsTrigger value="funnel">Funnel</TabsTrigger>
-          {hasIncomeData && (
-            <TabsTrigger value="quadrant">
-              Quadrant Matrix
+      {/* === SECTION: Traffic Light Table === */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-base">Rekomendasi per Iklan</CardTitle>
+            <div className="text-xs text-muted-foreground space-y-0.5">
+              <p>🟢 SCALE: ROAS ≥ {ROAS_THRESHOLDS.scale}x AND konversi ≥ {ROAS_THRESHOLDS.minConversions}</p>
+              <p>🔴 KILL: ROAS &lt; {ROAS_THRESHOLDS.kill}x</p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <TrafficLightTable
+            rows={trafficLightRows}
+            hasHppData={hasHppData}
+            adsProductData={adsProductData}
+          />
+        </CardContent>
+      </Card>
+
+      {/* === SECTION: ROAS Bar Chart === */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">ROAS per Produk (Top 20)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RoasBarChart data={roasChartData} />
+          <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.scale }} /> SCALE</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.optimize }} /> OPTIMIZE</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.kill }} /> KILL</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* === SECTION: Funnel === */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Funnel Iklan (Top 10 by Ad Spend)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <FunnelChart data={funnelData} />
+        </CardContent>
+      </Card>
+
+      {/* === SECTION: Quadrant Matrix === */}
+      {hasIncomeData && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-base">ROAS vs Profit Quadrant</CardTitle>
               {!hasHppData && (
-                <Badge variant="secondary" className="ml-1 text-xs">Perlu HPP</Badge>
+                <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  Isi HPP di Master Produk untuk melihat quadrant
+                </div>
               )}
-            </TabsTrigger>
-          )}
-        </TabsList>
-
-        {/* Traffic Light Table */}
-        <TabsContent value="traffic">
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <CardTitle className="text-base">Rekomendasi per Iklan</CardTitle>
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  <p>🟢 SCALE: ROAS ≥ {ROAS_THRESHOLDS.scale}x AND konversi ≥ {ROAS_THRESHOLDS.minConversions}</p>
-                  <p>🔴 KILL: ROAS &lt; {ROAS_THRESHOLDS.kill}x</p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <TrafficLightTable
-                rows={trafficLightRows}
-                hasHppData={hasHppData}
-                adsProductData={adsProductData}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ROAS Bar Chart */}
-        <TabsContent value="roas">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">ROAS per Produk (Top 20)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RoasBarChart data={roasChartData} />
-              <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.scale }} /> SCALE</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.optimize }} /> OPTIMIZE</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.kill }} /> KILL</span>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Funnel */}
-        <TabsContent value="funnel">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Funnel Iklan (Top 10 by Ad Spend)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <FunnelChart data={funnelData} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Quadrant Matrix */}
-        {hasIncomeData && (
-          <TabsContent value="quadrant">
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <CardTitle className="text-base">ROAS vs Profit Quadrant</CardTitle>
-                  {!hasHppData && (
-                    <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">
-                      <AlertCircle className="h-3.5 w-3.5" />
-                      Isi HPP di Master Produk untuk melihat quadrant
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <QuadrantMatrix data={quadrantData} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
-      </Tabs>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <QuadrantMatrix data={quadrantData} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Direct vs Indirect */}
       <Card>
