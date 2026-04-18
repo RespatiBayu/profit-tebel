@@ -142,11 +142,17 @@ function TrafficLightTable({
   rows,
   hasHppData,
   adsProductData,
+  masterProducts,
 }: {
   rows: TrafficLightRow[]
   hasHppData: boolean
   adsProductData: DbAdsRow[]
+  masterProducts: MasterProduct[]
 }) {
+  const hppMap = useMemo(
+    () => new Map(masterProducts.map((p) => [p.marketplace_product_id, p])),
+    [masterProducts]
+  )
   const [search, setSearch] = useState('')
   const [sortCol, setSortCol] = useState<SortCol>('roas')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -351,6 +357,16 @@ function TrafficLightTable({
                   const pSignal: keyof typeof SIGNAL_CONFIG =
                     pRoas >= ROAS_THRESHOLDS.scale ? 'scale' :
                     pRoas < ROAS_THRESHOLDS.kill ? 'kill' : 'optimize'
+                  // Per-child True ROAS: lookup HPP via master_products (relasi by kode produk).
+                  // Master produk berlaku general untuk semua periode, jadi selama HPP diisi
+                  // kita bisa hitung walaupun data anak datang dari satu periode aja.
+                  const mp = hppMap.get(p.product_code)
+                  const pHppTotal = mp ? mp.hpp + mp.packaging_cost : 0
+                  const pUnits = p.units_sold || 0
+                  const pTrueRoas =
+                    mp && pHppTotal > 0 && p.ad_spend > 0 && pUnits > 0
+                      ? (p.gmv - pHppTotal * pUnits) / p.ad_spend
+                      : null
                   return (
                     <TableRow key={p.id} className="bg-purple-50/50">
                       <TableCell />
@@ -366,7 +382,17 @@ function TrafficLightTable({
                           {pRoas.toFixed(2)}x
                         </span>
                       </TableCell>
-                      {hasHppData && <TableCell><span className="text-xs text-muted-foreground">-</span></TableCell>}
+                      {hasHppData && (
+                        <TableCell>
+                          {pTrueRoas !== null ? (
+                            <span className={`text-xs font-semibold ${pTrueRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : pTrueRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                              {pTrueRoas.toFixed(2)}x
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      )}
                       <TableCell className="text-xs">{p.conversions.toLocaleString('id-ID')}</TableCell>
                       <TableCell className="text-xs">{formatRp(p.ad_spend)}</TableCell>
                       <TableCell className="text-xs">{formatRp(p.gmv)}</TableCell>
@@ -796,6 +822,7 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
             rows={trafficLightRows}
             hasHppData={hasHppData}
             adsProductData={adsProductData}
+            masterProducts={masterProducts}
           />
         </CardContent>
       </Card>
