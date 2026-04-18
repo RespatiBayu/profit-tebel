@@ -3,7 +3,9 @@ import type { IncomeParseResult, ParsedOrder, ParsedOrderProduct } from '@/types
 
 // Column indices in Income sheet (0-based)
 const COL = {
+  BUYER_USERNAME: 0,        // A - Username (Pembeli)
   ORDER_NUMBER: 1,          // B - No. Pesanan
+  BUYER_NAME: 3,            // D - Nama Penerima
   ORDER_DATE: 4,            // E - Waktu Pesanan Dibuat
   PAYMENT_METHOD: 5,        // F - Metode Pembayaran
   RELEASE_DATE: 6,          // G - Tanggal Dana Dilepaskan
@@ -158,6 +160,8 @@ export function parseShopeeIncome(buffer: Buffer): IncomeParseResult {
 
     orders.push({
       order_number: orderNumber,
+      buyer_username: parseStr(row[COL.BUYER_USERNAME]),
+      buyer_name: parseStr(row[COL.BUYER_NAME]),
       order_date: orderDate,
       release_date: releaseDate,
       payment_method: parseStr(row[COL.PAYMENT_METHOD]),

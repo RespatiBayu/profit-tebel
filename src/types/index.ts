@@ -1,6 +1,8 @@
 // Parsed order from Shopee Income XLSX
 export interface ParsedOrder {
   order_number: string
+  buyer_username: string | null   // Shopee username of buyer
+  buyer_name: string | null       // Nama Penerima (recipient name)
   order_date: string | null       // ISO 8601 date string
   release_date: string | null
   payment_method: string | null
@@ -126,6 +128,8 @@ export interface DbOrder {
   upload_batch_id: string
   marketplace: string
   order_number: string
+  buyer_username: string | null
+  buyer_name: string | null
   order_date: string | null
   release_date: string | null
   payment_method: string | null
