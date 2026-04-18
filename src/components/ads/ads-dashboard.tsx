@@ -631,9 +631,26 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
 
   const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
 
+  // Filter Format 2 (per-produk detail) by same month — needed as HPP fallback
+  // source when Format 1 campaign product_code nggak match master langsung.
+  const filteredAdsProduct = useMemo(() => {
+    if (selectedMonth === 'all') return adsProductData
+    const monthStart = `${selectedMonth}-01`
+    const [y, m] = selectedMonth.split('-').map(Number)
+    const nextMonth = m === 12
+      ? `${y + 1}-01-01`
+      : `${y}-${String(m + 1).padStart(2, '0')}-01`
+    return adsProductData.filter((ad) => {
+      const end = ad.report_period_end ?? ad.report_period_start
+      const start = ad.report_period_start ?? ad.report_period_end
+      if (!end || !start) return true
+      return end >= monthStart && start < nextMonth
+    })
+  }, [adsProductData, selectedMonth])
+
   const trafficLightRows = useMemo(
-    () => buildTrafficLightRows(filteredAds, masterProducts),
-    [filteredAds, masterProducts]
+    () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct),
+    [filteredAds, masterProducts, filteredAdsProduct]
   )
 
   const funnelData = useMemo(() => buildFunnelData(filteredAds), [filteredAds])

@@ -18,6 +18,12 @@ function isAggregate(row: DbAdsRow) {
   return row.product_code === '-'
 }
 
+/** Normalize ad_name / parent_iklan for matching: strip trailing ★/* and whitespace. */
+function normalizeAdName(name: string | null): string {
+  if (!name) return ''
+  return name.replace(/[★\*]+/g, '').trim().toLowerCase()
+}
+
 /** Classify a product's ad performance */
 export function classifyProduct(roas: number, conversions: number): TrafficLight {
   if (roas >= ROAS_THRESHOLDS.scale && conversions >= ROAS_THRESHOLDS.minConversions) {
@@ -109,11 +115,24 @@ function dedupeByProductCode(rows: DbAdsRow[]): DbAdsRow[] {
 
 export function buildTrafficLightRows(
   rows: DbAdsRow[],
-  masterProducts: MasterProduct[]
+  masterProducts: MasterProduct[],
+  /** Optional Format 2 "GMV Max Detail Produk" rows. Dipakai sebagai fallback
+   *  untuk hitung True ROAS kalau Format 1 campaign product_code nggak ada di
+   *  master_products — lookup via parent_iklan → children → aggregate HPP. */
+  adsProductData: DbAdsRow[] = [],
 ): TrafficLightRow[] {
   const hppMap = new Map(
     masterProducts.map((p) => [p.marketplace_product_id, p])
   )
+
+  // Format 2 child rows: ad_name=null, punya parent_iklan, bukan aggregate.
+  // Dipakai untuk agregat HPP per campaign ketika Format 1 product_code nggak
+  // cukup untuk lookup langsung. Sumber bisa dari array terpisah (ads page)
+  // atau dari `rows` itu sendiri (profit page yang combine).
+  const childPool: DbAdsRow[] = [
+    ...adsProductData,
+    ...rows.filter((r) => r.ad_name === null && r.parent_iklan !== null),
+  ].filter((c) => c.product_code !== '-' && c.parent_iklan)
 
   // Include ALL Format 1 campaign rows (ad_name IS NOT NULL) including the Shop GMV Max
   // aggregate (product_code = '-'). Only filter out rows with zero ad_spend.
@@ -125,20 +144,55 @@ export function buildTrafficLightRows(
   return campaignRows
     .map((r) => {
       const signal = classifyProduct(r.roas, r.conversions)
-      // True ROAS and profitPerUnit only apply to per-product campaigns (not the aggregate)
-      const product = isAggregate(r) ? null : hppMap.get(r.product_code)
 
       let trueRoas: number | null = null
       let profitPerUnit: number | null = null
 
-      if (product && (product.hpp > 0 || product.packaging_cost > 0)) {
-        const hppTotal = product.hpp + product.packaging_cost
+      // ---- Strategy 1: Direct product_code lookup ----
+      // Works kalau Format 1 campaign row's product_code = specific product ID
+      // yang ada di master_products (produk tunggal per campaign)
+      const direct = isAggregate(r) ? null : hppMap.get(r.product_code)
+      if (direct && (direct.hpp > 0 || direct.packaging_cost > 0)) {
+        const hppTotal = direct.hpp + direct.packaging_cost
         const unitsSold = r.units_sold || 1
         const totalHppCost = hppTotal * unitsSold
         const netGmv = r.gmv - totalHppCost
         trueRoas = r.ad_spend > 0 ? netGmv / r.ad_spend : 0
         const avgSellingPrice = unitsSold > 0 ? r.gmv / unitsSold : 0
         profitPerUnit = avgSellingPrice - hppTotal
+      } else if (r.ad_name && childPool.length > 0) {
+        // ---- Strategy 2: Fallback via parent_iklan → Format 2 children ----
+        // Untuk campaign parent (GMV Max Auto/ROAS) yang cover banyak produk,
+        // cari anak produknya di Format 2. Match by parent_iklan == ad_name
+        // (normalized) dan same month-year. Sum HPP × units_sold dari tiap anak
+        // yang HPP-nya udah diisi di master_products.
+        const targetAd = normalizeAdName(r.ad_name)
+        const targetMonth = r.report_period_start?.slice(0, 7) ?? null
+        let totalHppCost = 0
+        let totalUnits = 0
+        let matchedChildren = 0
+        for (const c of childPool) {
+          if (targetMonth) {
+            const childMonth = (c.report_period_start ?? '').slice(0, 7)
+            if (childMonth !== targetMonth) continue
+          }
+          const pi = normalizeAdName(c.parent_iklan)
+          if (!pi) continue
+          if (!(pi === targetAd || pi.includes(targetAd) || targetAd.includes(pi))) continue
+          const mp = hppMap.get(c.product_code)
+          if (!mp || (mp.hpp <= 0 && mp.packaging_cost <= 0)) continue
+          const hppPerUnit = mp.hpp + mp.packaging_cost
+          const units = c.units_sold || 0
+          totalHppCost += hppPerUnit * units
+          totalUnits += units
+          matchedChildren += 1
+        }
+        if (matchedChildren > 0 && r.ad_spend > 0) {
+          trueRoas = (r.gmv - totalHppCost) / r.ad_spend
+          const avgPrice = totalUnits > 0 ? r.gmv / totalUnits : 0
+          const avgHpp = totalUnits > 0 ? totalHppCost / totalUnits : 0
+          profitPerUnit = avgPrice - avgHpp
+        }
       }
 
       return {
