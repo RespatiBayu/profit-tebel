@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { parseShopeeAdsProduct } from '@/lib/parsers/shopee-ads-product'
+import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
 import type { UploadSummary } from '@/types'
 
 export async function POST(request: NextRequest) {
@@ -331,6 +332,15 @@ export async function POST(request: NextRequest) {
         })
         if (!error) newProducts++
       }
+    }
+
+    // Cleanup orphan master_products dari upload sebelumnya.
+    const orphanCount = storeId
+      ? await cleanupOrphanMasterProducts(supabase, storeId)
+      : 0
+    if (orphanCount > 0) {
+      console.log(`Cleaned up ${orphanCount} orphan master_products`)
+      warnings.push(`${orphanCount} produk duplikat/orphan dihapus otomatis`)
     }
 
     const summary: UploadSummary = {
