@@ -70,43 +70,66 @@ function parseStr(value: unknown): string | null {
   return s || null
 }
 
-// Extract "Parent Iklan" / "Parent Campaign" / "Nama Iklan" value from metadata rows.
-// Scans ALL cells in rows 0-15 looking for the key (Shopee may vary the label
-// and the column position changes depending on export locale).
+// Extract the parent campaign name for this Format 2 file.
 //
-// IMPORTANT: there is NO generic fallback to "Shop GMV Max" — a seller can
-// have multiple GMV Max Auto campaigns with different names, so guessing a
-// parent name would incorrectly merge unrelated campaigns. If no key is
-// found we return null and the caller surfaces a warning to the user.
+// Shopee's "GMV Max Detail Produk" CSV does NOT include a "Parent Iklan"
+// key in metadata. The parent campaign name is only identifiable from:
+//   (1) the aggregate data row (Kode Produk = "-"), whose Nama Produk column
+//       contains the campaign name — e.g. "Shop GMV Max". This value matches
+//       exactly with ad_name in Format 1's "Summary per Iklan" export, making
+//       it the canonical join key.
+//   (2) row 0 title line — "Shop GMV Max - Shopee Indonesia" — used as a
+//       fallback when the aggregate row is absent.
+//   (3) legacy metadata keys (some older exports may include them).
+//
+// If the seller runs multiple GMV Max Auto campaigns, each campaign produces
+// a separate CSV with its own aggregate row / title carrying the distinct
+// campaign name, so this approach correctly distinguishes them.
 function extractParentIklan(allRows: string[][]): string | null {
+  // Strategy 1 (most reliable): aggregate row Nama Produk.
+  // Data starts at row index 8; the aggregate row is typically the first
+  // data row, but scan a few in case export order varies.
+  for (let i = 8; i < Math.min(13, allRows.length); i++) {
+    const row = allRows[i]
+    if (!row) continue
+    const code = String(row[COL.PRODUCT_CODE] ?? '').trim()
+    const name = String(row[COL.PRODUCT_NAME] ?? '').trim()
+    if (code === '-' && name) return name
+  }
+
+  // Strategy 2: legacy metadata keys ("Parent Iklan", etc.).
   const KEYS = [
     'parent iklan',
     'parent campaign',
     'kampanye induk',
     'iklan induk',
-    'nama iklan',
     'nama kampanye',
     'campaign name',
-    'ad name',
   ]
-  for (const row of allRows.slice(0, 15)) {
+  for (const row of allRows.slice(0, 8)) {
     for (let i = 0; i < row.length; i++) {
       const raw = String(row[i] ?? '').trim()
-      const cell = raw.toLowerCase().replace(/\s*:\s*$/, '') // strip trailing colon
-      if (KEYS.some((k) => cell === k || cell.startsWith(k + ':') || cell === k + ':')) {
-        // Prefer same-row next cell; if empty try 2 cells ahead (some exports pad)
+      const cell = raw.toLowerCase().replace(/\s*:\s*$/, '')
+      if (KEYS.some((k) => cell === k)) {
         for (let j = i + 1; j <= i + 3 && j < row.length; j++) {
           const val = String(row[j] ?? '').trim()
           if (val) return val
         }
       }
-      // Handle "Key: Value" packed into a single cell
       if (KEYS.some((k) => cell.startsWith(k + ':') || cell.startsWith(k + ' :'))) {
         const val = raw.split(':').slice(1).join(':').trim()
         if (val) return val
       }
     }
   }
+
+  // Strategy 3: title row "Shop GMV Max - Shopee Indonesia" → "Shop GMV Max"
+  const title = String(allRows[0]?.[0] ?? '').trim()
+  if (title) {
+    const m = title.match(/^(.+?)\s*[-–]\s*Shopee(?:\s+Indonesia)?$/i)
+    if (m && m[1].trim()) return m[1].trim()
+  }
+
   return null
 }
 
