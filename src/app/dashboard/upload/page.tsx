@@ -45,6 +45,7 @@ interface UploadState {
     periodStart?: string | null
     periodEnd?: string | null
     error?: string
+    warnings?: string[]
   } | null
 }
 
@@ -140,7 +141,7 @@ function DropZone({
             </div>
             <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground">
               <span>
-                <span className="text-green-700 font-medium">
+                <span className={`font-medium ${(state.result.insertedCount ?? 0) > 0 ? 'text-green-700' : 'text-amber-700'}`}>
                   +{(state.result.insertedCount ?? 0).toLocaleString('id-ID')} data baru
                 </span>
               </span>
@@ -163,6 +164,15 @@ function DropZone({
                 </span>
               )}
             </div>
+            {/* Show warnings/errors from server (e.g. DB insert failures) */}
+            {(state.result.warnings?.length ?? 0) > 0 && (
+              <Alert variant="destructive" className="py-2 mt-1">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs space-y-0.5">
+                  {state.result.warnings!.map((w, i) => <p key={i}>{w}</p>)}
+                </AlertDescription>
+              </Alert>
+            )}
             <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onRemove}>
               Upload ulang
             </Button>
@@ -318,6 +328,7 @@ export default function UploadPage() {
           newProducts: data.newProducts,
           periodStart: data.periodStart,
           periodEnd: data.periodEnd,
+          warnings: data.warnings,
         },
       }))
     } catch {
