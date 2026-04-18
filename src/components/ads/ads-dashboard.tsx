@@ -164,15 +164,25 @@ function TrafficLightTable({
     return sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
   }
 
-  /** Returns Format 2 per-product rows that belong to this campaign via parent_iklan. */
-  function getBreakdownProducts(adName: string | null): DbAdsRow[] {
+  /** Returns Format 2 per-product rows that belong to this campaign.
+   *  Join logic (in priority order):
+   *  1. If Format 2 row has parent_iklan set → match by name (normalized)
+   *  2. If Format 2 row has parent_iklan = null → associate with the aggregate
+   *     campaign (product_code='-'), since Format 2 is always Shop GMV Max data */
+  function getBreakdownProducts(adName: string | null, productCode: string): DbAdsRow[] {
     const base = normalizeAdName(adName)
-    if (!base) return []
     return adsProductData.filter((r) => {
-      if (!r.parent_iklan || r.product_code === '-') return false
-      const pi = r.parent_iklan.trim().toLowerCase()
-      const bn = base.toLowerCase()
-      return pi === bn || pi.includes(bn) || bn.includes(pi)
+      if (r.product_code === '-') return false   // exclude aggregate row itself
+      if (r.parent_iklan) {
+        // Explicit parent_iklan set — match by name
+        if (!base) return false
+        const pi = r.parent_iklan.trim().toLowerCase()
+        const bn = base.toLowerCase()
+        return pi === bn || pi.includes(bn) || bn.includes(pi)
+      }
+      // parent_iklan is null (extraction from CSV failed) — associate all
+      // Format 2 rows with the Shop GMV Max aggregate campaign
+      return productCode === '-'
     })
   }
 
@@ -260,7 +270,7 @@ function TrafficLightTable({
             {sorted.flatMap((row) => {
               const rowKey = `${row.adName ?? row.productCode}-${row.reportPeriodStart ?? 'all'}`
               const isExpanded = expandedKey === rowKey
-              const breakdownProducts = getBreakdownProducts(row.adName)
+              const breakdownProducts = getBreakdownProducts(row.adName, row.productCode)
               const hasBreakdown = breakdownProducts.length > 0
 
               const mainRow = (

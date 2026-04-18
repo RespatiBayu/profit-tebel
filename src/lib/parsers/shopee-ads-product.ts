@@ -70,17 +70,24 @@ function parseStr(value: unknown): string | null {
   return s || null
 }
 
-// Extract "Parent Iklan" value from metadata rows (e.g. "Shop GMV Max")
-// Scans rows 0-10 looking for a cell containing "parent iklan" (case-insensitive)
+// Extract "Parent Iklan" / "Parent Campaign" value from metadata rows
+// Scans ALL cells in rows 0-12 looking for the key (Shopee may vary the label)
 function extractParentIklan(allRows: string[][]): string | null {
-  for (const row of allRows.slice(0, 12)) {
-    const key = String(row[0] ?? '').trim().toLowerCase()
-    if (key.includes('parent iklan') || key.includes('parent campaign')) {
-      const val = String(row[1] ?? '').trim()
-      return val || null
+  const KEYS = ['parent iklan', 'parent campaign', 'kampanye induk', 'iklan induk']
+  for (const row of allRows.slice(0, 14)) {
+    for (let i = 0; i < row.length; i++) {
+      const cell = String(row[i] ?? '').trim().toLowerCase()
+      if (KEYS.some((k) => cell.includes(k))) {
+        // Value is in the next cell on the same row
+        const val = String(row[i + 1] ?? '').trim()
+        if (val) return val
+      }
     }
   }
-  return null
+  // Fallback: scan raw text for "Shop GMV Max" pattern (always the parent)
+  const metaText = allRows.slice(0, 14).flat().join(' ')
+  const m = metaText.match(/Shop GMV Max(?:\s*(?:Auto|ROAS))?/i)
+  return m ? m[0].trim() : null
 }
 
 // Extract period from allRows[5][1]: "01/04/2026 - 14/04/2026"
