@@ -116,8 +116,11 @@ function dmyToIso(dmy: string): string {
 }
 
 function rowToAdsRow(row: string[]): ParsedAdsRow {
+  const adName = parseStr(row[COL.AD_NAME])   // "Nama Iklan" — campaign identifier
   return {
-    product_name: parseStr(row[COL.AD_NAME]),       // Nama Iklan (ad name)
+    ad_name: adName,
+    parent_iklan: null,                        // Format 1 has no parent_iklan
+    product_name: adName,                      // keep product_name = ad_name for backward compat
     product_code: String(row[COL.PRODUCT_CODE] ?? '').trim(),
     impressions: Math.round(parseNum(row[COL.IMPRESSIONS])),
     clicks: Math.round(parseNum(row[COL.CLICKS])),
@@ -178,5 +181,5 @@ export function parseShopeeAds(csvText: string): AdsParseResult {
     rows.push(rowToAdsRow(row))
   }
 
-  return { rows, shopAggregate, periodStart, periodEnd }
+  return { rows, shopAggregate, periodStart, periodEnd, parentIklan: null }
 }

@@ -80,16 +80,27 @@ export function calculateAdsOverview(rows: DbAdsRow[]): AdsKpis {
   }
 }
 
-/** Deduplicate rows by product_code — keep the row with the highest ad_spend per product */
-function dedupeByProductCode(rows: DbAdsRow[]): DbAdsRow[] {
+/**
+ * Deduplicate Format 1 rows by ad_name — keep the row with highest ad_spend per campaign.
+ * When "all periods" view is shown, the same campaign may appear for multiple periods;
+ * we keep the most recent / highest-spend entry.
+ */
+function dedupeByCampaign(rows: DbAdsRow[]): DbAdsRow[] {
   const map = new Map<string, DbAdsRow>()
   for (const r of rows) {
-    const existing = map.get(r.product_code)
+    // Key by ad_name if available (Format 1); fall back to product_code (legacy/Format 2)
+    const key = r.ad_name ?? r.product_code
+    const existing = map.get(key)
     if (!existing || r.ad_spend > existing.ad_spend) {
-      map.set(r.product_code, r)
+      map.set(key, r)
     }
   }
   return Array.from(map.values())
+}
+
+/** @deprecated Use dedupeByCampaign instead */
+function dedupeByProductCode(rows: DbAdsRow[]): DbAdsRow[] {
+  return dedupeByCampaign(rows)
 }
 
 // ---------------------------------------------------------------------------
@@ -104,39 +115,36 @@ export function buildTrafficLightRows(
     masterProducts.map((p) => [p.marketplace_product_id, p])
   )
 
-  // Only show products with actual individual ad spend.
-  // Products with ad_spend=0 appear in CSV when covered by Shop GMV Max only
-  // — their ROAS would always be 0 which gives a false KILL classification.
-  // Also dedupe: when "all periods" selected, same product may appear multiple times;
-  // keep the row with the highest ad_spend per product.
-  const filteredRows = dedupeByProductCode(
-    rows.filter((r) => !isAggregate(r) && r.ad_spend > 0)
+  // Include ALL Format 1 campaign rows (ad_name IS NOT NULL) including the Shop GMV Max
+  // aggregate (product_code = '-'). Only filter out rows with zero ad_spend.
+  // Dedupe by campaign (ad_name) when "all periods" selected.
+  const campaignRows = dedupeByCampaign(
+    rows.filter((r) => r.ad_name !== null && r.ad_spend > 0)
   )
 
-  return filteredRows
+  return campaignRows
     .map((r) => {
       const signal = classifyProduct(r.roas, r.conversions)
-      const product = hppMap.get(r.product_code)
+      // True ROAS and profitPerUnit only apply to per-product campaigns (not the aggregate)
+      const product = isAggregate(r) ? null : hppMap.get(r.product_code)
 
       let trueRoas: number | null = null
       let profitPerUnit: number | null = null
 
       if (product && (product.hpp > 0 || product.packaging_cost > 0)) {
         const hppTotal = product.hpp + product.packaging_cost
-        // True ROAS = (GMV - HPP cost) / Ad Spend
         const unitsSold = r.units_sold || 1
         const totalHppCost = hppTotal * unitsSold
         const netGmv = r.gmv - totalHppCost
         trueRoas = r.ad_spend > 0 ? netGmv / r.ad_spend : 0
-
-        // Profit per unit = (GMV/units) - hpp - packaging
         const avgSellingPrice = unitsSold > 0 ? r.gmv / unitsSold : 0
         profitPerUnit = avgSellingPrice - hppTotal
       }
 
       return {
+        adName: r.ad_name,
         productCode: r.product_code,
-        productName: r.product_name ?? r.product_code,
+        productName: r.product_name ?? r.ad_name ?? r.product_code,
         reportPeriodStart: r.report_period_start,
         impressions: r.impressions,
         clicks: r.clicks,

@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 422 })
     }
 
-    const { rows: rawRows, shopAggregate } = parseResult
+    const { rows: rawRows, shopAggregate, parentIklan } = parseResult
     // Validate dates — only pass valid ISO to DB, else null
     const isoDate = /^\d{4}-\d{2}-\d{2}$/
     const periodStart = parseResult.periodStart && isoDate.test(parseResult.periodStart)
@@ -188,6 +188,8 @@ export async function POST(request: NextRequest) {
       store_id: storeId,
       upload_batch_id: batch.id,
       marketplace,
+      ad_name: null,                    // Format 2 has no individual ad name
+      parent_iklan: parentIklan,        // "Parent Iklan" from file metadata
       product_name: r.product_name,
       product_code: r.product_code,
       impressions: r.impressions,
@@ -221,7 +223,9 @@ export async function POST(request: NextRequest) {
         store_id: storeId,
         upload_batch_id: batch.id,
         marketplace,
-        product_name: 'Shop GMV Max (Agregat)',
+        ad_name: null,
+        parent_iklan: parentIklan,
+        product_name: 'Shop GMV Max (Total)',
         product_code: '-',
         impressions: shopAggregate.impressions,
         clicks: shopAggregate.clicks,
@@ -248,21 +252,18 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Dedup: check which (product_code, period) already exist for this user+marketplace
-    const adsKeys = adsRows.map((r) => ({
-      product_code: r.product_code,
-      period_start: r.report_period_start,
-      period_end: r.report_period_end,
-    }))
+    // Dedup: check which (product_code, period) already exist for Format 2 rows
+    // (ad_name IS NULL distinguishes Format 2 from Format 1 in the partial unique index)
     const existingSet = new Set<string>()
     const QUERY_CHUNK = 500
-    const uniqueCodes = Array.from(new Set(adsKeys.map((k) => k.product_code)))
+    const uniqueCodes = Array.from(new Set(adsRows.map((r) => r.product_code)))
     for (let i = 0; i < uniqueCodes.length; i += QUERY_CHUNK) {
       const slice = uniqueCodes.slice(i, i + QUERY_CHUNK)
       const { data: existingAds } = await supabase
         .from('ads_data')
         .select('product_code, report_period_start, report_period_end')
         .eq('store_id', storeId)
+        .is('ad_name', null)           // only check Format 2 rows
         .in('product_code', slice)
       if (existingAds) {
         for (const row of existingAds) {
@@ -286,11 +287,7 @@ export async function POST(request: NextRequest) {
     const warnings: string[] = []
     for (let i = 0; i < newAdsRows.length; i += CHUNK) {
       const chunk = newAdsRows.slice(i, i + CHUNK)
-      const { error } = await supabase.from('ads_data').upsert(chunk, {
-        onConflict:
-          'store_id,product_code,report_period_start,report_period_end',
-        ignoreDuplicates: true,
-      })
+      const { error } = await supabase.from('ads_data').insert(chunk)
       if (error) {
         console.error('Ads product insert error:', error.message)
         warnings.push(`Sebagian data produk gagal disimpan: ${error.message}`)

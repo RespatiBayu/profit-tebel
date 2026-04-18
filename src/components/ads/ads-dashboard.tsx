@@ -26,7 +26,7 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts'
-import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Calendar, Package } from 'lucide-react'
+import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Calendar } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -128,15 +128,31 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
 }
 
 // ---------------------------------------------------------------------------
-// Traffic Light Table
+// Traffic Light Table (campaign-level, with inline per-product drill-down)
 // ---------------------------------------------------------------------------
 
 type SortCol = 'name' | 'roas' | 'trueRoas' | 'conversions' | 'adSpend' | 'gmv' | 'cpa'
 
-function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasHppData: boolean }) {
+/** Normalize ad_name for matching against parent_iklan.
+ *  Strips trailing ★ / * / whitespace so "Shop GMV Max ★" matches "Shop GMV Max". */
+function normalizeAdName(name: string | null): string {
+  if (!name) return ''
+  return name.replace(/[★\*]+/g, '').trim()
+}
+
+function TrafficLightTable({
+  rows,
+  hasHppData,
+  adsProductData,
+}: {
+  rows: TrafficLightRow[]
+  hasHppData: boolean
+  adsProductData: DbAdsRow[]
+}) {
   const [search, setSearch] = useState('')
   const [sortCol, setSortCol] = useState<SortCol>('roas')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
   function toggleSort(col: SortCol) {
     if (sortCol === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -146,6 +162,18 @@ function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasH
   const SortIcon = ({ col }: { col: SortCol }) => {
     if (sortCol !== col) return <ArrowUpDown className="h-3 w-3 opacity-40" />
     return sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+  }
+
+  /** Returns Format 2 per-product rows that belong to this campaign via parent_iklan. */
+  function getBreakdownProducts(adName: string | null): DbAdsRow[] {
+    const base = normalizeAdName(adName)
+    if (!base) return []
+    return adsProductData.filter((r) => {
+      if (!r.parent_iklan || r.product_code === '-') return false
+      const pi = r.parent_iklan.trim().toLowerCase()
+      const bn = base.toLowerCase()
+      return pi === bn || pi.includes(bn) || bn.includes(pi)
+    })
   }
 
   const sorted = [...rows]
@@ -166,10 +194,9 @@ function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasH
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
         <AlertCircle className="h-8 w-8 mb-3 opacity-40" />
-        <p className="font-medium text-sm">Tidak ada kampanye per-produk di periode ini</p>
+        <p className="font-medium text-sm">Belum ada data iklan di periode ini</p>
         <p className="text-xs mt-1 max-w-sm">
-          Periode ini hanya memiliki kampanye Shop GMV Max (level toko), bukan kampanye per-produk.
-          Pilih periode lain untuk melihat analisis ROAS per produk.
+          Upload file CSV "Summary per Iklan" dari Shopee Ads untuk melihat daftar kampanye.
         </p>
       </div>
     )
@@ -178,7 +205,7 @@ function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasH
   return (
     <div className="space-y-3">
       <Input
-        placeholder="Cari produk..."
+        placeholder="Cari iklan..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="max-w-xs"
@@ -187,9 +214,10 @@ function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasH
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8" /> {/* expand chevron column */}
               <TableHead className="min-w-[160px]">
                 <button className="flex items-center gap-1" onClick={() => toggleSort('name')}>
-                  Produk <SortIcon col="name" />
+                  Nama Iklan <SortIcon col="name" />
                 </button>
               </TableHead>
               <TableHead>Sinyal</TableHead>
@@ -229,44 +257,113 @@ function TrafficLightTable({ rows, hasHppData }: { rows: TrafficLightRow[]; hasH
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sorted.map((row) => (
-              <TableRow
-                key={`${row.productCode}-${row.reportPeriodStart ?? 'all'}`}
-                className={
-                  row.signal === 'kill' ? 'bg-red-50/40' :
-                  row.signal === 'scale' ? 'bg-green-50/40' : undefined
-                }
-              >
-                <TableCell>
-                  <div>
-                    <p className="text-sm font-medium line-clamp-2">{row.productName}</p>
-                    <p className="text-xs text-muted-foreground font-mono">{row.productCode}</p>
-                  </div>
-                </TableCell>
-                <TableCell><SignalBadge signal={row.signal} /></TableCell>
-                <TableCell>
-                  <span className={`text-sm font-semibold ${row.roas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : row.roas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
-                    {row.roas.toFixed(2)}x
-                  </span>
-                </TableCell>
-                {hasHppData && (
-                  <TableCell>
-                    {row.trueRoas !== null ? (
-                      <span className={`text-sm font-semibold ${row.trueRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : row.trueRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
-                        {row.trueRoas.toFixed(2)}x
-                      </span>
+            {sorted.flatMap((row) => {
+              const rowKey = `${row.adName ?? row.productCode}-${row.reportPeriodStart ?? 'all'}`
+              const isExpanded = expandedKey === rowKey
+              const breakdownProducts = getBreakdownProducts(row.adName)
+              const hasBreakdown = breakdownProducts.length > 0
+
+              const mainRow = (
+                <TableRow
+                  key={rowKey}
+                  className={
+                    row.signal === 'kill' ? 'bg-red-50/40' :
+                    row.signal === 'scale' ? 'bg-green-50/40' : undefined
+                  }
+                >
+                  {/* Expand chevron */}
+                  <TableCell className="p-0 w-8 text-center">
+                    {hasBreakdown ? (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedKey(isExpanded ? null : rowKey)}
+                        className="p-2 hover:bg-muted rounded transition-colors"
+                        title="Lihat detail per produk"
+                        aria-expanded={isExpanded}
+                      >
+                        <ChevronRight
+                          className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                        />
+                      </button>
                     ) : (
-                      <span className="text-xs text-muted-foreground">-</span>
+                      <span className="w-8 block" />
                     )}
                   </TableCell>
-                )}
-                <TableCell className="text-sm">{row.conversions.toLocaleString('id-ID')}</TableCell>
-                <TableCell className="text-sm">{formatRp(row.adSpend)}</TableCell>
-                <TableCell className="text-sm">{formatRp(row.gmv)}</TableCell>
-                <TableCell className="text-sm">{formatRp(row.cpa)}</TableCell>
-                <TableCell className="text-sm">{formatPct(row.ctr)}</TableCell>
-              </TableRow>
-            ))}
+                  <TableCell>
+                    <div>
+                      <p className="text-sm font-medium line-clamp-2">{row.productName}</p>
+                      {row.productCode !== '-' && (
+                        <p className="text-xs text-muted-foreground font-mono">{row.productCode}</p>
+                      )}
+                      {hasBreakdown && (
+                        <span className="text-[10px] bg-purple-100 text-purple-700 rounded-full px-1.5 py-0.5 mt-0.5 inline-block">
+                          {breakdownProducts.length} produk
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell><SignalBadge signal={row.signal} /></TableCell>
+                  <TableCell>
+                    <span className={`text-sm font-semibold ${row.roas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : row.roas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                      {row.roas.toFixed(2)}x
+                    </span>
+                  </TableCell>
+                  {hasHppData && (
+                    <TableCell>
+                      {row.trueRoas !== null ? (
+                        <span className={`text-sm font-semibold ${row.trueRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : row.trueRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                          {row.trueRoas.toFixed(2)}x
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                  )}
+                  <TableCell className="text-sm">{row.conversions.toLocaleString('id-ID')}</TableCell>
+                  <TableCell className="text-sm">{formatRp(row.adSpend)}</TableCell>
+                  <TableCell className="text-sm">{formatRp(row.gmv)}</TableCell>
+                  <TableCell className="text-sm">{formatRp(row.cpa)}</TableCell>
+                  <TableCell className="text-sm">{formatPct(row.ctr)}</TableCell>
+                </TableRow>
+              )
+
+              if (!isExpanded || !hasBreakdown) return [mainRow]
+
+              // Expanded: show per-product breakdown rows inline
+              const detailRows = breakdownProducts
+                .sort((a, b) => b.ad_spend - a.ad_spend)
+                .map((p) => {
+                  const pRoas = p.roas
+                  const pSignal: keyof typeof SIGNAL_CONFIG =
+                    pRoas >= ROAS_THRESHOLDS.scale ? 'scale' :
+                    pRoas < ROAS_THRESHOLDS.kill ? 'kill' : 'optimize'
+                  return (
+                    <TableRow key={p.id} className="bg-purple-50/50">
+                      <TableCell />
+                      <TableCell>
+                        <div className="pl-4 border-l-2 border-purple-300">
+                          <p className="text-xs font-medium line-clamp-2">{p.product_name ?? '-'}</p>
+                          <p className="text-[10px] text-muted-foreground font-mono">{p.product_code}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell><SignalBadge signal={pSignal} /></TableCell>
+                      <TableCell>
+                        <span className={`text-xs font-semibold ${pRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : pRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                          {pRoas.toFixed(2)}x
+                        </span>
+                      </TableCell>
+                      {hasHppData && <TableCell><span className="text-xs text-muted-foreground">-</span></TableCell>}
+                      <TableCell className="text-xs">{p.conversions.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="text-xs">{formatRp(p.ad_spend)}</TableCell>
+                      <TableCell className="text-xs">{formatRp(p.gmv)}</TableCell>
+                      <TableCell className="text-xs">{formatRp(p.cost_per_conversion)}</TableCell>
+                      <TableCell className="text-xs">{formatPct(p.ctr)}</TableCell>
+                    </TableRow>
+                  )
+                })
+
+              return [mainRow, ...detailRows]
+            })}
           </TableBody>
         </Table>
       </div>
@@ -454,192 +551,6 @@ function QuadrantMatrix({ data }: { data: ReturnType<typeof buildQuadrantData> }
           </Scatter>
         </ScatterChart>
       </ResponsiveContainer>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Shop GMV Max Auto drill-down (inline expandable row)
-// ---------------------------------------------------------------------------
-
-function GmvMaxAutoDrilldown({ adsProductData }: { adsProductData: DbAdsRow[] }) {
-  const [open, setOpen] = useState(false)
-
-  // Filter per-product breakdown rows (exclude aggregate "-")
-  const productRows = useMemo(
-    () =>
-      adsProductData
-        .filter((r) => r.product_code !== '-')
-        .sort((a, b) => b.ad_spend - a.ad_spend),
-    [adsProductData]
-  )
-
-  const hasBreakdown = productRows.length > 0
-
-  // Aggregate metrics for the header summary row
-  const totalAdSpend = productRows.reduce((s, r) => s + r.ad_spend, 0)
-  const totalGmv = productRows.reduce((s, r) => s + r.gmv, 0)
-  const totalConversions = productRows.reduce((s, r) => s + r.conversions, 0)
-  const overallRoas = totalAdSpend > 0 ? totalGmv / totalAdSpend : 0
-
-  // If user hasn't uploaded the per-product file yet, show a compact hint
-  if (!hasBreakdown) {
-    return (
-      <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 flex items-center gap-3 text-sm">
-        <Package className="h-4 w-4 text-muted-foreground shrink-0" />
-        <div className="flex-1">
-          <p className="font-medium">Breakdown per Produk (Shop GMV Max Auto) belum tersedia</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Upload file &ldquo;Data per Produk (GMV Max Auto)&rdquo; untuk melihat detail per produk saat klik iklan Shop GMV Max.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-lg border overflow-hidden">
-      {/* Clickable summary row */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
-        aria-expanded={open}
-      >
-        <ChevronRight
-          className={`h-4 w-4 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
-        />
-        <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-          <Package className="h-4 w-4" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold">Shop GMV Max Auto</p>
-            <span className="text-[10px] bg-purple-100 text-purple-800 border border-purple-200 rounded-full px-2 py-0.5 font-medium">
-              {productRows.length} produk
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Klik untuk melihat breakdown per produk (dari file Data per Produk)
-          </p>
-        </div>
-        <div className="hidden sm:flex items-center gap-4 text-xs">
-          <div className="text-right">
-            <p className="text-muted-foreground">Ad Spend</p>
-            <p className="font-semibold">{formatRp(totalAdSpend)}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-muted-foreground">GMV</p>
-            <p className="font-semibold">{formatRp(totalGmv)}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-muted-foreground">ROAS</p>
-            <p
-              className={`font-semibold ${
-                overallRoas >= ROAS_THRESHOLDS.scale
-                  ? 'text-green-700'
-                  : overallRoas < ROAS_THRESHOLDS.kill
-                  ? 'text-red-600'
-                  : 'text-yellow-700'
-              }`}
-            >
-              {overallRoas.toFixed(2)}x
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-muted-foreground">Konversi</p>
-            <p className="font-semibold">{totalConversions.toLocaleString('id-ID')}</p>
-          </div>
-        </div>
-      </button>
-
-      {/* Expanded per-product detail */}
-      {open && (
-        <div className="border-t bg-muted/20">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="min-w-[160px]">Nama Produk</TableHead>
-                  <TableHead>Kode</TableHead>
-                  <TableHead>Impressions</TableHead>
-                  <TableHead>Klik</TableHead>
-                  <TableHead>CTR</TableHead>
-                  <TableHead>Konversi</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>GMV</TableHead>
-                  <TableHead>Ad Spend</TableHead>
-                  <TableHead>ROAS</TableHead>
-                  <TableHead>Sinyal</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {productRows.map((row) => {
-                  const roas = row.roas
-                  const signal: keyof typeof SIGNAL_CONFIG =
-                    roas >= ROAS_THRESHOLDS.scale
-                      ? 'scale'
-                      : roas < ROAS_THRESHOLDS.kill
-                      ? 'kill'
-                      : 'optimize'
-                  return (
-                    <TableRow
-                      key={row.id}
-                      className={
-                        signal === 'kill'
-                          ? 'bg-red-50/40'
-                          : signal === 'scale'
-                          ? 'bg-green-50/40'
-                          : undefined
-                      }
-                    >
-                      <TableCell>
-                        <p className="text-sm font-medium line-clamp-2">
-                          {row.product_name ?? '-'}
-                        </p>
-                      </TableCell>
-                      <TableCell className="text-xs font-mono text-muted-foreground">
-                        {row.product_code}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {row.impressions.toLocaleString('id-ID')}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {row.clicks.toLocaleString('id-ID')}
-                      </TableCell>
-                      <TableCell className="text-sm">{formatPct(row.ctr)}</TableCell>
-                      <TableCell className="text-sm">
-                        {row.conversions.toLocaleString('id-ID')}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {row.units_sold.toLocaleString('id-ID')}
-                      </TableCell>
-                      <TableCell className="text-sm">{formatRp(row.gmv)}</TableCell>
-                      <TableCell className="text-sm">{formatRp(row.ad_spend)}</TableCell>
-                      <TableCell>
-                        <span
-                          className={`text-sm font-semibold ${
-                            roas >= ROAS_THRESHOLDS.scale
-                              ? 'text-green-700'
-                              : roas < ROAS_THRESHOLDS.kill
-                              ? 'text-red-600'
-                              : 'text-yellow-700'
-                          }`}
-                        >
-                          {roas.toFixed(2)}x
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <SignalBadge signal={signal} />
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -866,10 +777,12 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Shop GMV Max Auto — expandable to reveal per-product breakdown */}
-              <GmvMaxAutoDrilldown adsProductData={adsProductData} />
-              <TrafficLightTable rows={trafficLightRows} hasHppData={hasHppData} />
+            <CardContent>
+              <TrafficLightTable
+                rows={trafficLightRows}
+                hasHppData={hasHppData}
+                adsProductData={adsProductData}
+              />
             </CardContent>
           </Card>
         </TabsContent>

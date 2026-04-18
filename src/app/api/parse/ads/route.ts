@@ -57,14 +57,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Aggregate multiple campaigns for the same product_code into one row.
-    // A single product can appear in multiple campaigns (e.g. GMV Max ROAS + GMV Max Auto)
-    // with the same report period. Sum all numeric metrics and recompute derived ones.
+    // Each row in Format 1 is one campaign (Nama Iklan = ad_name).
+    // Aggregate only rows that share the same ad_name (should be rare — safety net).
+    // We NO LONGER aggregate by product_code because two campaigns can target the
+    // same product (e.g. GMV Max ROAS + GMV Max Auto) and must stay as separate rows.
     const aggMap = new Map<string, typeof rawRows[0]>()
     for (const row of rawRows) {
-      const existing = aggMap.get(row.product_code)
+      // Key by ad_name (Nama Iklan). Fallback to product_code if ad_name is missing.
+      const key = row.ad_name ?? row.product_code
+      const existing = aggMap.get(key)
       if (!existing) {
-        aggMap.set(row.product_code, { ...row })
+        aggMap.set(key, { ...row })
       } else {
         existing.impressions += row.impressions
         existing.clicks += row.clicks
@@ -182,6 +185,8 @@ export async function POST(request: NextRequest) {
       store_id: storeId,
       upload_batch_id: batch.id,
       marketplace,
+      ad_name: r.ad_name,        // "Nama Iklan" — campaign identifier
+      parent_iklan: null,        // Format 1 has no parent_iklan
       product_name: r.product_name,
       product_code: r.product_code,
       impressions: r.impressions,
@@ -215,7 +220,9 @@ export async function POST(request: NextRequest) {
         store_id: storeId,
         upload_batch_id: batch.id,
         marketplace,
-        product_name: 'Shop GMV Max (Agregat)',
+        ad_name: shopAggregate.ad_name ?? 'Shop GMV Max (Agregat)',
+        parent_iklan: null,
+        product_name: shopAggregate.ad_name ?? 'Shop GMV Max (Agregat)',
         product_code: '-',
         impressions: shopAggregate.impressions,
         clicks: shopAggregate.clicks,
@@ -242,26 +249,23 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Dedup: check which (product_code, period) already exist for this user+marketplace
-    const adsKeys = adsRows.map((r) => ({
-      product_code: r.product_code,
-      period_start: r.report_period_start,
-      period_end: r.report_period_end,
-    }))
+    // Dedup: check which (ad_name, period) already exist for this store
+    // Format 1 rows are identified by ad_name (Nama Iklan), not product_code,
+    // because two campaigns can target the same product with different ad_names.
     const existingSet = new Set<string>()
     const QUERY_CHUNK = 500
-    const uniqueCodes = Array.from(new Set(adsKeys.map((k) => k.product_code)))
-    for (let i = 0; i < uniqueCodes.length; i += QUERY_CHUNK) {
-      const slice = uniqueCodes.slice(i, i + QUERY_CHUNK)
+    const uniqueAdNames = Array.from(new Set(adsRows.map((r) => r.ad_name).filter(Boolean))) as string[]
+    for (let i = 0; i < uniqueAdNames.length; i += QUERY_CHUNK) {
+      const slice = uniqueAdNames.slice(i, i + QUERY_CHUNK)
       const { data: existingAds } = await supabase
         .from('ads_data')
-        .select('product_code, report_period_start, report_period_end')
+        .select('ad_name, report_period_start, report_period_end')
         .eq('store_id', storeId)
-        .in('product_code', slice)
+        .in('ad_name', slice)
       if (existingAds) {
         for (const row of existingAds) {
           existingSet.add(
-            `${row.product_code}|${row.report_period_start}|${row.report_period_end}`
+            `${row.ad_name}|${row.report_period_start}|${row.report_period_end}`
           )
         }
       }
@@ -270,7 +274,7 @@ export async function POST(request: NextRequest) {
     const newAdsRows = adsRows.filter(
       (r) =>
         !existingSet.has(
-          `${r.product_code}|${r.report_period_start}|${r.report_period_end}`
+          `${r.ad_name}|${r.report_period_start}|${r.report_period_end}`
         )
     )
     const duplicateCount = adsRows.length - newAdsRows.length
@@ -280,11 +284,9 @@ export async function POST(request: NextRequest) {
     const warnings: string[] = []
     for (let i = 0; i < newAdsRows.length; i += CHUNK) {
       const chunk = newAdsRows.slice(i, i + CHUNK)
-      const { error } = await supabase.from('ads_data').upsert(chunk, {
-        onConflict:
-          'store_id,product_code,report_period_start,report_period_end',
-        ignoreDuplicates: true,
-      })
+      // Use insert (not upsert) — client-side dedup already filtered duplicates.
+      // The partial unique index (ads_data_format1_unique) acts as DB-level safety net.
+      const { error } = await supabase.from('ads_data').insert(chunk)
       if (error) {
         console.error('Ads insert error:', error.message)
         warnings.push(`Sebagian data iklan gagal disimpan: ${error.message}`)

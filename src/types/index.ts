@@ -39,6 +39,8 @@ export interface ParsedOrderProduct {
 
 // Parsed Shopee Ads row from CSV
 export interface ParsedAdsRow {
+  ad_name: string | null        // "Nama Iklan" from Format 1 (null for Format 2)
+  parent_iklan: string | null   // "Parent Iklan" from Format 2 (null for Format 1)
   product_name: string | null
   product_code: string
   impressions: number
@@ -77,6 +79,7 @@ export interface AdsParseResult {
   shopAggregate: ParsedAdsRow | null   // "Shop GMV Max" row
   periodStart: string | null
   periodEnd: string | null
+  parentIklan: string | null           // Format 2 only: "Parent Iklan" metadata value
 }
 
 // Upload batch summary returned to client
@@ -223,6 +226,8 @@ export interface DbAdsRow {
   id: string
   upload_batch_id: string
   marketplace: string
+  ad_name: string | null        // "Nama Iklan" from Format 1 (null for Format 2)
+  parent_iklan: string | null   // "Parent Iklan" from Format 2 (null for Format 1)
   product_name: string | null
   product_code: string
   impressions: number
@@ -265,6 +270,7 @@ export interface AdsKpis {
 }
 
 export interface TrafficLightRow {
+  adName: string | null          // "Nama Iklan" from Format 1 — campaign identifier
   productCode: string
   productName: string
   reportPeriodStart: string | null

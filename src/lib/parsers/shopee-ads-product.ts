@@ -70,6 +70,19 @@ function parseStr(value: unknown): string | null {
   return s || null
 }
 
+// Extract "Parent Iklan" value from metadata rows (e.g. "Shop GMV Max")
+// Scans rows 0-10 looking for a cell containing "parent iklan" (case-insensitive)
+function extractParentIklan(allRows: string[][]): string | null {
+  for (const row of allRows.slice(0, 12)) {
+    const key = String(row[0] ?? '').trim().toLowerCase()
+    if (key.includes('parent iklan') || key.includes('parent campaign')) {
+      const val = String(row[1] ?? '').trim()
+      return val || null
+    }
+  }
+  return null
+}
+
 // Extract period from allRows[5][1]: "01/04/2026 - 14/04/2026"
 function extractPeriod(allRows: string[][]): { start: string | null; end: string | null } {
   // Row 5 contains the period value at index 1
@@ -107,8 +120,10 @@ function dmyToIso(dmy: string): string {
   return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
 }
 
-function rowToAdsRow(row: string[]): ParsedAdsRow {
+function rowToAdsRow(row: string[], parentIklan: string | null): ParsedAdsRow {
   return {
+    ad_name: null,                              // Format 2 has no campaign name per row
+    parent_iklan: parentIklan,                  // populated from file metadata
     product_name: parseStr(row[COL.PRODUCT_NAME]), // Nama Produk (actual product name)
     product_code: String(row[COL.PRODUCT_CODE] ?? '').trim(),
     impressions: Math.round(parseNum(row[COL.IMPRESSIONS])),
@@ -144,8 +159,9 @@ export function parseShopeeAdsProduct(csvText: string): AdsParseResult {
   const allRows = parseResult.data as string[][]
 
   // Row 0: "Shop GMV Max - Shopee Indonesia"
-  // Rows 1-5: metadata, Row 6: empty, Row 7: headers, Data from row 8
+  // Rows 1-5: metadata (Toko, Periode, Parent Iklan, etc.), Row 6: empty, Row 7: headers, Data from row 8
   const { start: periodStart, end: periodEnd } = extractPeriod(allRows)
+  const parentIklan = extractParentIklan(allRows)
 
   // Data starts at row 8 (index 8)
   const dataRows = allRows.slice(8).filter((row) =>
@@ -162,13 +178,13 @@ export function parseShopeeAdsProduct(csvText: string): AdsParseResult {
 
     // Aggregate row (code = "-") — capture separately, skip from per-product
     if (code === '-') {
-      shopAggregate = rowToAdsRow(row)
+      shopAggregate = rowToAdsRow(row, parentIklan)
       continue
     }
 
     // Only keep rows that have a real product code
     if (!code) continue
-    rows.push(rowToAdsRow(row))
+    rows.push(rowToAdsRow(row, parentIklan))
   }
 
   // Recompute all derived metrics from raw sums for consistency
@@ -184,5 +200,5 @@ export function parseShopeeAdsProduct(csvText: string): AdsParseResult {
     r.cost_per_direct_conversion = r.direct_conversions > 0 ? r.ad_spend / r.direct_conversions : 0
   }
 
-  return { rows, shopAggregate, periodStart, periodEnd }
+  return { rows, shopAggregate, periodStart, periodEnd, parentIklan }
 }
