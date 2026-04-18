@@ -60,10 +60,19 @@ export function buildOrderProductMap(
   return map
 }
 
-// Build: product_code → total ad_spend from ads_data
+/** Keep only Format 1 rows ("Summary per Iklan" — ad_name IS NOT NULL).
+ *  Format 2 per-produk rows are the breakdown of the same Shop GMV Max
+ *  campaigns already counted in Format 1, so summing both double-counts
+ *  ad spend. Ads-Analisis dashboard uses Format 1 as the source of truth
+ *  for "Total Ad Spend" — Analisis Profit must match. */
+function summaryRowsOnly(adsData: DbAdsRow[]): DbAdsRow[] {
+  return adsData.filter((ad) => ad.ad_name !== null)
+}
+
+// Build: product_code → total ad_spend from ads_data (Summary/Format 1 only)
 export function buildAdSpendMap(adsData: DbAdsRow[]): Map<string, number> {
   const map = new Map<string, number>()
-  for (const ad of adsData) {
+  for (const ad of summaryRowsOnly(adsData)) {
     const existing = map.get(ad.product_code) ?? 0
     map.set(ad.product_code, existing + (ad.ad_spend ?? 0))
   }
@@ -132,11 +141,12 @@ export function calculateKpis(
     if (hpp > 0) hasHppData = true
   }
 
-  // Ad spend is independent of orders — sum directly from ads report data.
-  // (Previous per-order attribution was broken: it multiplied each product's total
-  //  ad_spend by the number of orders containing that product.)
+  // Ad spend is independent of orders — sum directly from Summary per Iklan
+  // (Format 1) rows only. Format 2 per-produk rows are the breakdown of the
+  // same campaigns and would double-count. This keeps Analisis Profit in
+  // sync with the "Total Ad Spend" shown on the Analisis Iklan dashboard.
   let totalAdSpend = 0
-  for (const ad of adsData) {
+  for (const ad of summaryRowsOnly(adsData)) {
     totalAdSpend += ad.ad_spend ?? 0
   }
 
@@ -207,10 +217,11 @@ export function calculateFeeBreakdown(orders: DbOrder[]): FeeBreakdownItem[] {
 // 3. Trend (daily or weekly)
 // ---------------------------------------------------------------------------
 
-// Distribute each ads row's ad_spend evenly across the days in its report period
+// Distribute each ads row's ad_spend evenly across the days in its report period.
+// Only Format 1 (Summary per Iklan) rows are counted — see summaryRowsOnly note.
 function buildDailyAdSpend(adsData: DbAdsRow[]): Map<string, number> {
   const map = new Map<string, number>() // ISO date → total ad_spend for that day
-  for (const ad of adsData) {
+  for (const ad of summaryRowsOnly(adsData)) {
     const amount = ad.ad_spend ?? 0
     if (!amount) continue
     const start = ad.report_period_start
