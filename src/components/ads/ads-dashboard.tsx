@@ -196,7 +196,7 @@ function TrafficLightTable({
         <AlertCircle className="h-8 w-8 mb-3 opacity-40" />
         <p className="font-medium text-sm">Belum ada data iklan di periode ini</p>
         <p className="text-xs mt-1 max-w-sm">
-          Upload file CSV "Summary per Iklan" dari Shopee Ads untuk melihat daftar kampanye.
+          Upload file CSV &ldquo;Summary per Iklan&rdquo; dari Shopee Ads untuk melihat daftar kampanye.
         </p>
       </div>
     )
