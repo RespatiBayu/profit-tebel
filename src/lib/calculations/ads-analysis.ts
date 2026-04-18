@@ -146,7 +146,6 @@ export function buildTrafficLightRows(
         productCode: r.product_code,
         productName: r.product_name ?? r.ad_name ?? r.product_code,
         reportPeriodStart: r.report_period_start,
-        reportPeriodEnd: r.report_period_end,
         impressions: r.impressions,
         clicks: r.clicks,
         conversions: r.conversions,

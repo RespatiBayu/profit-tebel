@@ -274,7 +274,6 @@ export interface TrafficLightRow {
   productCode: string
   productName: string
   reportPeriodStart: string | null
-  reportPeriodEnd: string | null
   impressions: number
   clicks: number
   conversions: number

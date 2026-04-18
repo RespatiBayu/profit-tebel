@@ -165,24 +165,27 @@ function TrafficLightTable({
   }
 
   /** Returns Format 2 per-product rows that belong to this campaign.
-   *  Strict join: parent_iklan (normalized) MUST match adName AND both period
-   *  fields must match. No fallback — a user can run multiple GMV Max Auto
-   *  campaigns, so an unjoined Format 2 row is ambiguous and must not be
-   *  attached to an arbitrary parent. */
+   *  Strict join: parent_iklan (normalized) MUST match adName AND the period
+   *  month-year must match (YYYY-MM of report_period_start). Month-year is
+   *  used instead of exact start/end because the dashboard slicer operates
+   *  at month granularity — exact day boundaries may differ between the two
+   *  CSV exports while still representing the same month's campaign. */
   function getBreakdownProducts(
     adName: string | null,
     periodStart: string | null,
-    periodEnd: string | null,
   ): DbAdsRow[] {
     const base = normalizeAdName(adName)
     if (!base) return []
     const bn = base.toLowerCase()
+    const targetMonth = periodStart ? periodStart.slice(0, 7) : null // YYYY-MM
     return adsProductData.filter((r) => {
       if (r.product_code === '-') return false            // exclude aggregate row
       if (!r.parent_iklan) return false                   // strict: require parent_iklan
-      // Period must match (both start and end)
-      if (r.report_period_start !== periodStart) return false
-      if (r.report_period_end !== periodEnd) return false
+      // Month-year must match (use parent's period start as reference)
+      if (targetMonth) {
+        const rowMonth = (r.report_period_start ?? '').slice(0, 7)
+        if (rowMonth !== targetMonth) return false
+      }
       const pi = normalizeAdName(r.parent_iklan).toLowerCase()
       if (!pi) return false
       return pi === bn || pi.includes(bn) || bn.includes(pi)
@@ -273,7 +276,7 @@ function TrafficLightTable({
             {sorted.flatMap((row) => {
               const rowKey = `${row.adName ?? row.productCode}-${row.reportPeriodStart ?? 'all'}`
               const isExpanded = expandedKey === rowKey
-              const breakdownProducts = getBreakdownProducts(row.adName, row.reportPeriodStart, row.reportPeriodEnd)
+              const breakdownProducts = getBreakdownProducts(row.adName, row.reportPeriodStart)
               const hasBreakdown = breakdownProducts.length > 0
 
               const mainRow = (
