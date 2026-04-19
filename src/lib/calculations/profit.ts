@@ -5,6 +5,7 @@ import type {
   MasterProduct,
   ProfitKpis,
   FeeBreakdownItem,
+  OmzetDeductionItem,
   TrendPoint,
   ProductProfitRow,
   PaymentDistItem,
@@ -211,6 +212,99 @@ export function calculateFeeBreakdown(orders: DbOrder[]): FeeBreakdownItem[] {
     { name: 'Cashback', value: Math.abs(sellerCashback), color: '#ec4899' },
     { name: 'Lainnya', value: Math.abs(other), color: '#94a3b8' },
   ].filter((item) => item.value > 0)
+}
+
+// ---------------------------------------------------------------------------
+// 2b. Omzet → Net Income breakdown (exhaustive)
+// ---------------------------------------------------------------------------
+//
+// Berdasarkan formula Shopee "Total Penghasilan" (kolom AG sheet Income):
+//
+//   Total Penghasilan = Harga Asli Produk
+//     − Total Diskon Produk
+//     − Jumlah Pengembalian Dana
+//     − Voucher Seller (sponsor + co-fund)
+//     − Cashback Koin (sponsor seller)
+//     + Ongkir Dibayar Pembeli
+//     + Gratis Ongkir dari Shopee (subsidi)
+//     − Ongkir Diteruskan ke Jasa Kirim (actual shipping)
+//     − Ongkos Kirim Pengembalian
+//     − Komisi AMS
+//     − Biaya Admin
+//     − Biaya Layanan
+//     − Biaya Proses Pesanan
+//     − Premi
+//     − Biaya Program Hemat Biaya Kirim
+//     − Biaya Transaksi
+//     − Biaya Kampanye
+//     − Promo Gratis Ongkir Penjual
+//
+// Untuk breakdown di UI, ongkir tiga-field digabung jadi satu "Ongkir (nett)":
+// Math.max(0, actual − buyer_paid − shopee_subsidy). Selisih = ongkir yang
+// seller harus tanggung sendiri.
+
+export function calculateOmzetToNetIncomeBreakdown(
+  orders: DbOrder[]
+): OmzetDeductionItem[] {
+  let productDiscount = 0
+  let refundAmount = 0
+  let sellerVoucher = 0
+  let sellerCashback = 0
+  let sellerFreeShippingPromo = 0
+  let shippingNet = 0
+  let returnShipping = 0
+  let adminFee = 0
+  let serviceFee = 0
+  let amsCommission = 0
+  let processingFee = 0
+  let premiumFee = 0
+  let shippingProgramFee = 0
+  let transactionFee = 0
+  let campaignFee = 0
+
+  for (const o of orders) {
+    productDiscount += Math.abs(o.product_discount)
+    refundAmount += Math.abs(o.refund_amount)
+    sellerVoucher += Math.abs(o.seller_voucher) + Math.abs(o.seller_voucher_cofund)
+    sellerCashback += Math.abs(o.seller_cashback)
+    sellerFreeShippingPromo += Math.abs(o.seller_free_shipping_promo)
+    shippingNet += Math.max(
+      0,
+      o.actual_shipping_cost - o.buyer_shipping_fee - o.shopee_shipping_subsidy
+    )
+    returnShipping += Math.abs(o.return_shipping_cost)
+    adminFee += Math.abs(o.admin_fee)
+    serviceFee += Math.abs(o.service_fee)
+    amsCommission += Math.abs(o.ams_commission)
+    processingFee += Math.abs(o.processing_fee)
+    premiumFee += Math.abs(o.premium_fee)
+    shippingProgramFee += Math.abs(o.shipping_program_fee)
+    transactionFee += Math.abs(o.transaction_fee)
+    campaignFee += Math.abs(o.campaign_fee)
+  }
+
+  const items: OmzetDeductionItem[] = [
+    // Diskon / pengembalian / promo penjual
+    { name: 'Diskon Produk', value: productDiscount, color: '#fb923c', group: 'discount', hint: 'Diskon harga yang kamu kasih ke pembeli' },
+    { name: 'Voucher Seller', value: sellerVoucher, color: '#f43f5e', group: 'discount', hint: 'Voucher sponsor + co-fund penjual' },
+    { name: 'Cashback Koin', value: sellerCashback, color: '#ec4899', group: 'discount', hint: 'Cashback koin yang kamu sponsori' },
+    { name: 'Promo Gratis Ongkir Penjual', value: sellerFreeShippingPromo, color: '#e11d48', group: 'discount', hint: 'Gratis ongkir yang kamu tanggung' },
+    { name: 'Pengembalian Dana', value: refundAmount, color: '#dc2626', group: 'discount', hint: 'Refund ke pembeli (pesanan retur)' },
+    // Biaya marketplace
+    { name: 'Biaya Admin', value: adminFee, color: '#3b82f6', group: 'marketplace_fee' },
+    { name: 'Biaya Layanan', value: serviceFee, color: '#8b5cf6', group: 'marketplace_fee' },
+    { name: 'Komisi AMS', value: amsCommission, color: '#f59e0b', group: 'marketplace_fee', hint: 'Komisi affiliate marketing Shopee' },
+    { name: 'Biaya Proses Pesanan', value: processingFee, color: '#10b981', group: 'marketplace_fee' },
+    { name: 'Biaya Transaksi', value: transactionFee, color: '#06b6d4', group: 'marketplace_fee' },
+    { name: 'Biaya Kampanye', value: campaignFee, color: '#0ea5e9', group: 'marketplace_fee' },
+    { name: 'Premi', value: premiumFee, color: '#14b8a6', group: 'marketplace_fee' },
+    { name: 'Biaya Program Hemat Ongkir', value: shippingProgramFee, color: '#6366f1', group: 'marketplace_fee' },
+    // Ongkir
+    { name: 'Ongkir Ditanggung Seller', value: shippingNet, color: '#0891b2', group: 'shipping', hint: 'Selisih ongkir setelah dipotong bayaran pembeli & subsidi Shopee' },
+    { name: 'Ongkos Kirim Pengembalian', value: returnShipping, color: '#0284c7', group: 'shipping' },
+  ]
+
+  return items.filter((it) => it.value > 0)
 }
 
 // ---------------------------------------------------------------------------

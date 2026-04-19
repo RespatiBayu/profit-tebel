@@ -58,6 +58,7 @@ import {
   buildOrderProductMap,
   calculateKpis,
   calculateFeeBreakdown,
+  calculateOmzetToNetIncomeBreakdown,
   calculateTrend,
   calculateProductProfit,
   calculateCashFlowGap,
@@ -385,6 +386,10 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     [filteredOrders, orderProductMap, hppMap, filteredAdsData]
   )
   const feeBreakdown = useMemo(() => calculateFeeBreakdown(filteredOrders), [filteredOrders])
+  const omzetDeductions = useMemo(
+    () => calculateOmzetToNetIncomeBreakdown(filteredOrders),
+    [filteredOrders]
+  )
   const trendData = useMemo(
     () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData),
     [filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData]
@@ -587,46 +592,69 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               const pct = (v: number) => (omzet > 0 ? (v / omzet) * 100 : 0)
 
               type Row =
-                | { kind: 'total'; label: string; value: number; tone: 'neutral' | 'profit' | 'loss' }
-                | { kind: 'cost'; label: string; value: number; indent?: boolean; color?: string }
+                | { kind: 'total'; label: string; value: number; tone: 'neutral' | 'profit' | 'loss'; sub?: string }
+                | { kind: 'cost'; label: string; value: number; color?: string; hint?: string }
+                | { kind: 'group'; label: string; subtotal: number }
                 | { kind: 'divider' }
 
-              const rows: Row[] = [
-                { kind: 'total', label: 'Total Omzet', value: omzet, tone: 'neutral' },
-                { kind: 'divider' },
-                ...feeBreakdown.map<Row>((f) => ({
-                  kind: 'cost',
-                  label: f.name,
-                  value: f.value,
-                  indent: true,
-                  color: f.color,
-                })),
-                { kind: 'divider' },
-                {
-                  kind: 'total',
-                  label: 'Net Income (dana diterima dari marketplace)',
-                  value: kpis.totalNetIncome,
-                  tone: 'neutral',
-                },
+              // Group deductions berdasarkan kategori
+              const groups = [
+                { id: 'discount' as const, label: 'Diskon & Promo yang Kamu Tanggung' },
+                { id: 'marketplace_fee' as const, label: 'Biaya Marketplace (Shopee)' },
+                { id: 'shipping' as const, label: 'Ongkir' },
+                { id: 'other' as const, label: 'Lainnya' },
               ]
 
-              if (kpis.hasHppData) {
+              const rows: Row[] = []
+              rows.push({ kind: 'total', label: 'Total Omzet (Harga Asli Produk)', value: omzet, tone: 'neutral' })
+
+              let totalDeducted = 0
+              for (const g of groups) {
+                const items = omzetDeductions.filter((d) => d.group === g.id)
+                if (items.length === 0) continue
+                const subtotal = items.reduce((a, b) => a + b.value, 0)
+                totalDeducted += subtotal
                 rows.push({ kind: 'divider' })
-                if (kpis.totalHppCost > 0) {
-                  rows.push({
-                    kind: 'cost',
-                    label: 'HPP + Packaging',
-                    value: kpis.totalHppCost,
-                    color: '#f97316',
-                  })
+                rows.push({ kind: 'group', label: g.label, subtotal })
+                for (const it of items) {
+                  rows.push({ kind: 'cost', label: it.name, value: it.value, color: it.color, hint: it.hint })
                 }
-                if (kpis.totalAdSpend > 0) {
-                  rows.push({
-                    kind: 'cost',
-                    label: 'Biaya Iklan',
-                    value: kpis.totalAdSpend,
-                    color: '#ef4444',
-                  })
+              }
+
+              // Rekonsiliasi: kalau masih ada gap antara (omzet − totalDeducted) dan netIncome,
+              // tampilkan sebagai "Penyesuaian Lain" — biar angka selalu balance.
+              const computedNet = omzet - totalDeducted
+              const diff = computedNet - kpis.totalNetIncome
+              if (Math.abs(diff) > 1) {
+                rows.push({ kind: 'divider' })
+                rows.push({
+                  kind: 'cost',
+                  label: diff > 0 ? 'Penyesuaian Lain' : 'Penambahan Lain',
+                  value: Math.abs(diff),
+                  color: '#94a3b8',
+                  hint: 'Selisih rekonsiliasi dari field Shopee yang belum dirinci',
+                })
+              }
+
+              rows.push({ kind: 'divider' })
+              rows.push({
+                kind: 'total',
+                label: 'Net Income',
+                value: kpis.totalNetIncome,
+                tone: 'neutral',
+                sub: 'Total Penghasilan dari Shopee',
+              })
+
+              if (kpis.hasHppData) {
+                if (kpis.totalHppCost > 0 || kpis.totalAdSpend > 0) {
+                  rows.push({ kind: 'divider' })
+                  rows.push({ kind: 'group', label: 'Biaya Kamu Sendiri', subtotal: kpis.totalHppCost + kpis.totalAdSpend })
+                  if (kpis.totalHppCost > 0) {
+                    rows.push({ kind: 'cost', label: 'HPP + Packaging', value: kpis.totalHppCost, color: '#f97316' })
+                  }
+                  if (kpis.totalAdSpend > 0) {
+                    rows.push({ kind: 'cost', label: 'Biaya Iklan', value: kpis.totalAdSpend, color: '#ef4444' })
+                  }
                 }
                 rows.push({ kind: 'divider' })
                 rows.push({
@@ -641,6 +669,26 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 if (r.kind === 'divider') {
                   return <div key={`div-${i}`} className="border-t border-dashed my-1" />
                 }
+                if (r.kind === 'group') {
+                  return (
+                    <div
+                      key={`g-${i}`}
+                      className="flex items-center justify-between gap-3 py-1 mt-1"
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {r.label}
+                      </span>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground tabular-nums">
+                          −{formatRp(r.subtotal)}
+                        </span>
+                        <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
+                          {pct(r.subtotal).toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  )
+                }
                 if (r.kind === 'total') {
                   const color =
                     r.tone === 'profit'
@@ -653,7 +701,10 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                       key={`t-${i}`}
                       className="flex items-center justify-between gap-3 py-1.5"
                     >
-                      <span className="text-sm font-semibold">{r.label}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{r.label}</p>
+                        {r.sub && <p className="text-[11px] text-muted-foreground">{r.sub}</p>}
+                      </div>
                       <div className="flex items-center gap-3 shrink-0">
                         <span className={`text-sm font-bold tabular-nums ${color}`}>
                           {formatRp(r.value)}
@@ -668,7 +719,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 return (
                   <div
                     key={`c-${i}`}
-                    className={`flex items-center justify-between gap-3 py-0.5 ${r.indent ? 'pl-6' : ''}`}
+                    className="flex items-center justify-between gap-3 py-0.5 pl-6"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       {r.color && (
@@ -677,8 +728,9 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                           style={{ backgroundColor: r.color }}
                         />
                       )}
-                      <span className="text-sm text-muted-foreground truncate">
+                      <span className="text-sm text-muted-foreground truncate" title={r.hint}>
                         − {r.label}
+                        {r.hint && <span className="hidden sm:inline text-[11px] text-muted-foreground/70 ml-1">· {r.hint}</span>}
                       </span>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">

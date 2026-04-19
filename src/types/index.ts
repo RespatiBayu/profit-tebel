@@ -186,6 +186,18 @@ export interface FeeBreakdownItem {
   color: string
 }
 
+/** Satu baris pengurang dari Total Omzet (Harga Asli Produk) ke Net Income
+ *  (Total Penghasilan Shopee). Value selalu positif magnitude.
+ *  `group` dipakai untuk sub-heading di UI.  */
+export interface OmzetDeductionItem {
+  name: string
+  value: number
+  color: string
+  group: 'discount' | 'marketplace_fee' | 'shipping' | 'other'
+  /** Optional hint keterangan (contoh: "kamu tanggung sendiri") */
+  hint?: string
+}
+
 export interface TrendPoint {
   date: string
   omzet: number
