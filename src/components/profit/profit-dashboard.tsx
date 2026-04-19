@@ -112,6 +112,61 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
 }
 
+/** Geser YYYY-MM sebanyak N bulan (boleh negatif). Lebar bulan konstan, tahan
+ *  overflow tahun. */
+function shiftMonth(ym: string, delta: number): string {
+  const y = parseInt(ym.slice(0, 4), 10)
+  const m = parseInt(ym.slice(5, 7), 10)
+  const total = y * 12 + (m - 1) + delta
+  const ny = Math.floor(total / 12)
+  const nm = (total % 12 + 12) % 12 + 1
+  return `${ny}-${String(nm).padStart(2, '0')}`
+}
+
+/** Panah naik/turun + persentase delta current vs prev, berwarna sesuai konteks.
+ *  context 'income' → naik = hijau. context 'cost' → naik = merah. */
+function DeltaBadge({
+  current,
+  prev,
+  context,
+}: {
+  current: number
+  prev: number
+  context: 'income' | 'cost'
+}) {
+  if (prev === 0 && current === 0) {
+    return <span className="text-[11px] text-muted-foreground/60 w-20 text-right tabular-nums">—</span>
+  }
+  if (prev === 0) {
+    const isGood = context === 'income'
+    return (
+      <span
+        className={`text-[11px] w-20 text-right inline-flex items-center justify-end gap-0.5 ${
+          isGood ? 'text-green-600' : 'text-red-600'
+        }`}
+      >
+        <TrendingUp className="h-3 w-3" /> baru
+      </span>
+    )
+  }
+  const delta = ((current - prev) / Math.abs(prev)) * 100
+  if (Math.abs(delta) < 0.1) {
+    return <span className="text-[11px] text-muted-foreground w-20 text-right tabular-nums">0%</span>
+  }
+  const up = delta > 0
+  const isGood = context === 'income' ? up : !up
+  const color = isGood ? 'text-green-600' : 'text-red-600'
+  const Arrow = up ? TrendingUp : TrendingDown
+  return (
+    <span
+      className={`text-[11px] w-20 text-right inline-flex items-center justify-end gap-0.5 tabular-nums ${color}`}
+    >
+      <Arrow className="h-3 w-3" />
+      {Math.abs(delta).toFixed(1)}%
+    </span>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // KPI Cards
 // ---------------------------------------------------------------------------
@@ -411,6 +466,49 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     () => calculateOmzetToNetIncomeBreakdown(filteredOrders),
     [filteredOrders]
   )
+
+  // --- Previous period: geser semua bulan yang aktif mundur 1 bulan ---
+  const prevWindow = useMemo(() => {
+    const currentMonths = new Set<string>()
+    for (const o of filteredOrders) {
+      if (o.order_date) currentMonths.add(o.order_date.slice(0, 7))
+    }
+    const prevMonths = new Set<string>()
+    for (const m of Array.from(currentMonths)) prevMonths.add(shiftMonth(m, -1))
+    const inPrev = (iso: string | null | undefined) =>
+      !!iso && prevMonths.has(iso.slice(0, 7))
+    return {
+      orders: orders.filter((o) => inPrev(o.order_date)),
+      ads: adsData.filter((a) => inPrev(a.report_period_start ?? a.report_period_end)),
+      months: Array.from(prevMonths).sort(),
+    }
+  }, [filteredOrders, orders, adsData])
+
+  const prevKpis = useMemo(
+    () => calculateKpis(prevWindow.orders, orderProductMap, hppMap, prevWindow.ads),
+    [prevWindow, orderProductMap, hppMap]
+  )
+  const prevDeductions = useMemo(
+    () => calculateOmzetToNetIncomeBreakdown(prevWindow.orders),
+    [prevWindow]
+  )
+  const prevDeductionMap = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of prevDeductions) m.set(d.name, d.value)
+    return m
+  }, [prevDeductions])
+  const prevPeriodLabel = useMemo(() => {
+    if (prevWindow.months.length === 0) return null
+    const fmt = (ym: string) => {
+      const [y, m] = ym.split('-')
+      return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString('id-ID', {
+        month: 'short',
+        year: 'numeric',
+      })
+    }
+    if (prevWindow.months.length === 1) return fmt(prevWindow.months[0])
+    return `${fmt(prevWindow.months[0])} – ${fmt(prevWindow.months[prevWindow.months.length - 1])}`
+  }, [prevWindow])
   const trendData = useMemo(
     () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData),
     [filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData]
@@ -611,19 +709,28 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 <CardTitle className="text-base">Alur Dana: Omzet → Real Profit</CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Rincian semua pengurangan dari omzet kotor sampai profit bersih
+                  {prevPeriodLabel && (
+                    <span className="ml-1">· dibanding <strong>{prevPeriodLabel}</strong></span>
+                  )}
                 </p>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-1">
+            {/* Column header */}
+            <div className="flex items-center justify-end gap-3 pb-1 border-b mb-1">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-[72px] text-right">Nilai</span>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-14 text-right">% Omzet</span>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-20 text-right">vs Bln Lalu</span>
+            </div>
             {(() => {
               const omzet = kpis.totalOmzet
               const pct = (v: number) => (omzet > 0 ? (v / omzet) * 100 : 0)
 
               type Row =
-                | { kind: 'total'; label: string; value: number; tone: 'neutral' | 'profit' | 'loss'; sub?: string }
-                | { kind: 'cost'; label: string; value: number; color?: string; hint?: string }
-                | { kind: 'group'; label: string; subtotal: number }
+                | { kind: 'total'; label: string; value: number; prev: number; context: 'income' | 'cost'; tone: 'neutral' | 'profit' | 'loss'; sub?: string }
+                | { kind: 'cost'; label: string; value: number; prev: number; color?: string; hint?: string }
+                | { kind: 'group'; label: string; subtotal: number; prevSubtotal: number }
                 | { kind: 'divider' }
 
               // Group deductions berdasarkan kategori
@@ -635,18 +742,35 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               ]
 
               const rows: Row[] = []
-              rows.push({ kind: 'total', label: 'Total Omzet (Harga Asli Produk)', value: omzet, tone: 'neutral' })
+              rows.push({
+                kind: 'total',
+                label: 'Total Omzet (Harga Asli Produk)',
+                value: omzet,
+                prev: prevKpis.totalOmzet,
+                context: 'income',
+                tone: 'neutral',
+              })
 
               let totalDeducted = 0
               for (const g of groups) {
                 const items = omzetDeductions.filter((d) => d.group === g.id)
                 if (items.length === 0) continue
                 const subtotal = items.reduce((a, b) => a + b.value, 0)
+                const prevSubtotal = prevDeductions
+                  .filter((d) => d.group === g.id)
+                  .reduce((a, b) => a + b.value, 0)
                 totalDeducted += subtotal
                 rows.push({ kind: 'divider' })
-                rows.push({ kind: 'group', label: g.label, subtotal })
+                rows.push({ kind: 'group', label: g.label, subtotal, prevSubtotal })
                 for (const it of items) {
-                  rows.push({ kind: 'cost', label: it.name, value: it.value, color: it.color, hint: it.hint })
+                  rows.push({
+                    kind: 'cost',
+                    label: it.name,
+                    value: it.value,
+                    prev: prevDeductionMap.get(it.name) ?? 0,
+                    color: it.color,
+                    hint: it.hint,
+                  })
                 }
               }
 
@@ -660,6 +784,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                   kind: 'cost',
                   label: diff > 0 ? 'Penyesuaian Lain' : 'Penambahan Lain',
                   value: Math.abs(diff),
+                  prev: 0,
                   color: '#94a3b8',
                   hint: 'Selisih rekonsiliasi dari field Shopee yang belum dirinci',
                 })
@@ -670,6 +795,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 kind: 'total',
                 label: 'Net Income',
                 value: kpis.totalNetIncome,
+                prev: prevKpis.totalNetIncome,
+                context: 'income',
                 tone: 'neutral',
                 sub: 'Total Penghasilan dari Shopee',
               })
@@ -677,12 +804,29 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               if (kpis.hasHppData) {
                 if (kpis.totalHppCost > 0 || kpis.totalAdSpend > 0) {
                   rows.push({ kind: 'divider' })
-                  rows.push({ kind: 'group', label: 'Biaya Kamu Sendiri', subtotal: kpis.totalHppCost + kpis.totalAdSpend })
+                  rows.push({
+                    kind: 'group',
+                    label: 'Biaya Kamu Sendiri',
+                    subtotal: kpis.totalHppCost + kpis.totalAdSpend,
+                    prevSubtotal: prevKpis.totalHppCost + prevKpis.totalAdSpend,
+                  })
                   if (kpis.totalHppCost > 0) {
-                    rows.push({ kind: 'cost', label: 'HPP + Packaging', value: kpis.totalHppCost, color: '#f97316' })
+                    rows.push({
+                      kind: 'cost',
+                      label: 'HPP + Packaging',
+                      value: kpis.totalHppCost,
+                      prev: prevKpis.totalHppCost,
+                      color: '#f97316',
+                    })
                   }
                   if (kpis.totalAdSpend > 0) {
-                    rows.push({ kind: 'cost', label: 'Biaya Iklan', value: kpis.totalAdSpend, color: '#ef4444' })
+                    rows.push({
+                      kind: 'cost',
+                      label: 'Biaya Iklan',
+                      value: kpis.totalAdSpend,
+                      prev: prevKpis.totalAdSpend,
+                      color: '#ef4444',
+                    })
                   }
                 }
                 rows.push({ kind: 'divider' })
@@ -690,6 +834,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                   kind: 'total',
                   label: 'Real Profit',
                   value: kpis.realProfit,
+                  prev: prevKpis.realProfit,
+                  context: 'income',
                   tone: kpis.realProfit >= 0 ? 'profit' : 'loss',
                 })
               }
@@ -714,6 +860,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                         <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
                           {pct(r.subtotal).toFixed(1)}%
                         </span>
+                        <DeltaBadge current={r.subtotal} prev={r.prevSubtotal} context="cost" />
                       </div>
                     </div>
                   )
@@ -741,6 +888,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                         <span className="text-xs font-medium text-muted-foreground w-14 text-right tabular-nums">
                           {pct(r.value).toFixed(1)}%
                         </span>
+                        <DeltaBadge current={r.value} prev={r.prev} context={r.context} />
                       </div>
                     </div>
                   )
@@ -769,6 +917,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                       <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
                         {pct(r.value).toFixed(1)}%
                       </span>
+                      <DeltaBadge current={r.value} prev={r.prev} context="cost" />
                     </div>
                   </div>
                 )
