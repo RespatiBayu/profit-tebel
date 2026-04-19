@@ -230,15 +230,21 @@ function KpiCard({
         <p className={`text-xl sm:text-2xl font-bold ${colors[accent ?? 'default']}`}>{value}</p>
         {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
         {(pctOmzet != null || delta) && (
-          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t">
-            {pctOmzet != null ? (
-              <span className="text-[11px] text-muted-foreground tabular-nums">
-                {pctOmzet.toFixed(1)}% <span className="text-muted-foreground/70">dari Omzet</span>
-              </span>
-            ) : (
-              <span />
+          <div className="mt-2 pt-2 border-t space-y-1">
+            {pctOmzet != null && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">% dari Omzet</span>
+                <span className="text-[11px] font-medium text-foreground tabular-nums">
+                  {pctOmzet.toFixed(1)}%
+                </span>
+              </div>
             )}
-            {delta && <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} />}
+            {delta && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">vs Bulan Lalu</span>
+                <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} />
+              </div>
+            )}
           </div>
         )}
         {cta && (
@@ -665,7 +671,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
           .reduce((a, b) => a + b.value, 0)
         const pct = (v: number) => (kpis.totalOmzet > 0 ? (v / kpis.totalOmzet) * 100 : 0)
         return (
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <KpiCard
               label="Total Omzet"
               value={formatRp(kpis.totalOmzet)}
@@ -695,6 +701,27 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               tooltip="Biaya marketplace murni: komisi AMS, biaya admin, layanan, proses pesanan, transaksi, kampanye, premi, dan program hemat ongkir."
               pctOmzet={pct(kpis.totalFees)}
               delta={{ current: kpis.totalFees, prev: prevKpis.totalFees, context: 'cost' }}
+            />
+            <KpiCard
+              label="HPP + Packaging"
+              value={kpis.hasHppData ? formatRp(kpis.totalHppCost) : '—'}
+              sub={
+                kpis.hasHppData
+                  ? noHppCount > 0
+                    ? `${noHppCount} produk belum HPP`
+                    : 'Harga pokok + packaging'
+                  : 'Isi HPP dulu'
+              }
+              accent={kpis.hasHppData ? 'orange' : 'muted'}
+              icon={Package}
+              tooltip="Total harga pokok produksi (HPP) + biaya packaging untuk semua produk yang terjual di periode ini."
+              pctOmzet={kpis.hasHppData ? pct(kpis.totalHppCost) : null}
+              delta={
+                kpis.hasHppData
+                  ? { current: kpis.totalHppCost, prev: prevKpis.totalHppCost, context: 'cost' }
+                  : undefined
+              }
+              cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
             />
             <KpiCard
               label="Biaya Iklan"
