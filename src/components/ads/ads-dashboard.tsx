@@ -609,34 +609,53 @@ interface Props {
 }
 
 export default function AdsDashboard({ adsData, adsProductData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
+  // Slicer terpisah: Tahun + Bulan
+  const [selectedYear, setSelectedYear] = useState<string>('all')
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
 
-  // Derive available months from ALL data (including aggregate-only months like April
-  // where only Shop GMV Max ran — still a valid period worth selecting)
-  const availableMonths = useMemo(() => {
-    const monthSet = new Set<string>()
+  // Derive available years + months from ALL ads data
+  const { availableYears, availableMonthsForYear } = useMemo(() => {
+    const yearMonthMap = new Map<string, Set<string>>()
     for (const ad of adsData) {
       const date = ad.report_period_start ?? ad.report_period_end
-      if (date) monthSet.add(date.slice(0, 7))
+      if (!date) continue
+      const y = date.slice(0, 4)
+      const m = date.slice(5, 7)
+      const ms = yearMonthMap.get(y) ?? new Set<string>()
+      ms.add(m)
+      yearMonthMap.set(y, ms)
     }
-    return Array.from(monthSet).sort((a, b) => b.localeCompare(a)) // newest first
-  }, [adsData])
+    const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a))
+    let months: string[]
+    if (selectedYear === 'all') {
+      const all = new Set<string>()
+      for (const set of Array.from(yearMonthMap.values())) for (const m of Array.from(set)) all.add(m)
+      months = Array.from(all).sort()
+    } else {
+      months = Array.from(yearMonthMap.get(selectedYear) ?? new Set<string>()).sort()
+    }
+    return { availableYears: years, availableMonthsForYear: months }
+  }, [adsData, selectedYear])
 
-  // Filter ads by selected month (based on report_period)
+  const monthValidForYear =
+    selectedMonth === 'all' || availableMonthsForYear.includes(selectedMonth)
+  const effectiveMonth = monthValidForYear ? selectedMonth : 'all'
+
+  const matchesPeriod = (iso: string | null | undefined): boolean => {
+    if (!iso) return selectedYear === 'all' && effectiveMonth === 'all'
+    const y = iso.slice(0, 4)
+    const m = iso.slice(5, 7)
+    if (selectedYear !== 'all' && y !== selectedYear) return false
+    if (effectiveMonth !== 'all' && m !== effectiveMonth) return false
+    return true
+  }
+
+  // Filter ads berdasarkan slicer (pakai report_period_start sebagai reference)
   const filteredAds = useMemo(() => {
-    if (selectedMonth === 'all') return adsData
-    const monthStart = `${selectedMonth}-01`
-    const [y, m] = selectedMonth.split('-').map(Number)
-    const nextMonth = m === 12
-      ? `${y + 1}-01-01`
-      : `${y}-${String(m + 1).padStart(2, '0')}-01`
-    return adsData.filter((ad) => {
-      const end = ad.report_period_end ?? ad.report_period_start
-      const start = ad.report_period_start ?? ad.report_period_end
-      if (!end || !start) return true
-      return end >= monthStart && start < nextMonth
-    })
-  }, [adsData, selectedMonth])
+    if (selectedYear === 'all' && effectiveMonth === 'all') return adsData
+    return adsData.filter((ad) => matchesPeriod(ad.report_period_start ?? ad.report_period_end))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adsData, selectedYear, effectiveMonth])
 
   // Period label — derive from all filtered ads (including aggregate rows)
   const periodLabel = useMemo(() => {
@@ -658,30 +677,21 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
         (a) =>
           a.product_code !== '-' &&
           a.ad_spend > 0 &&
-          (selectedMonth === 'all' ||
-            (a.report_period_start ?? '').slice(0, 7) === selectedMonth)
+          matchesPeriod(a.report_period_start)
       ),
-    [filteredAds, adsProductData, selectedMonth]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredAds, adsProductData, selectedYear, effectiveMonth]
   )
 
   const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
 
-  // Filter Format 2 (per-produk detail) by same month — needed as HPP fallback
-  // source when Format 1 campaign product_code nggak match master langsung.
+  // Filter Format 2 (per-produk detail) sesuai slicer — sumber HPP fallback
+  // saat Format 1 campaign product_code nggak match master langsung.
   const filteredAdsProduct = useMemo(() => {
-    if (selectedMonth === 'all') return adsProductData
-    const monthStart = `${selectedMonth}-01`
-    const [y, m] = selectedMonth.split('-').map(Number)
-    const nextMonth = m === 12
-      ? `${y + 1}-01-01`
-      : `${y}-${String(m + 1).padStart(2, '0')}-01`
-    return adsProductData.filter((ad) => {
-      const end = ad.report_period_end ?? ad.report_period_start
-      const start = ad.report_period_start ?? ad.report_period_end
-      if (!end || !start) return true
-      return end >= monthStart && start < nextMonth
-    })
-  }, [adsProductData, selectedMonth])
+    if (selectedYear === 'all' && effectiveMonth === 'all') return adsProductData
+    return adsProductData.filter((ad) => matchesPeriod(ad.report_period_start ?? ad.report_period_end))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adsProductData, selectedYear, effectiveMonth])
 
   const trafficLightRows = useMemo(
     () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct),
@@ -729,18 +739,29 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
             {periodLabel && <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full">{periodLabel}</span>}
           </p>
         </div>
-        {/* Month slicer */}
+        {/* Period slicer: Tahun + Bulan terpisah */}
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-          <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
-            <SelectTrigger className="h-8 w-44 text-xs">
-              <SelectValue placeholder="Pilih periode" />
+          <Select value={selectedYear} onValueChange={(v) => v && setSelectedYear(v)}>
+            <SelectTrigger className="h-8 w-28 text-xs">
+              <SelectValue placeholder="Tahun" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Semua Periode</SelectItem>
-              {availableMonths.map((month) => (
-                <SelectItem key={month} value={month}>
-                  {new Date(`${month}-01`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+              <SelectItem value="all">Semua Tahun</SelectItem>
+              {availableYears.map((y) => (
+                <SelectItem key={y} value={y}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={effectiveMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
+            <SelectTrigger className="h-8 w-32 text-xs">
+              <SelectValue placeholder="Bulan" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Bulan</SelectItem>
+              {availableMonthsForYear.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' })}
                 </SelectItem>
               ))}
             </SelectContent>

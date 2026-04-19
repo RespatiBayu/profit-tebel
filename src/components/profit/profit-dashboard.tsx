@@ -342,43 +342,69 @@ interface Props {
 
 export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, noHppCount }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
-  const [selectedMonth, setSelectedMonth] = useState<string>('all') // 'all' | 'YYYY-MM'
+  // Slicer terpisah: Tahun + Bulan, keduanya opsional.
+  // selectedYear: 'all' | 'YYYY'     selectedMonth: 'all' | 'MM'
+  const [selectedYear, setSelectedYear] = useState<string>('all')
+  const [selectedMonth, setSelectedMonth] = useState<string>('all')
 
   // Build lookup maps
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
   const orderProductMap = useMemo(() => buildOrderProductMap(orderProducts), [orderProducts])
 
-  // Derive available months from orders
-  const availableMonths = useMemo(() => {
-    const monthSet = new Set<string>()
+  // Derive available years + months per year dari orders
+  const { availableYears, availableMonthsForYear } = useMemo(() => {
+    const yearMonthMap = new Map<string, Set<string>>()
     for (const o of orders) {
-      if (o.order_date) monthSet.add(o.order_date.slice(0, 7))
+      if (!o.order_date) continue
+      const y = o.order_date.slice(0, 4)
+      const m = o.order_date.slice(5, 7)
+      const ms = yearMonthMap.get(y) ?? new Set<string>()
+      ms.add(m)
+      yearMonthMap.set(y, ms)
     }
-    return Array.from(monthSet).sort((a, b) => b.localeCompare(a)) // newest first
-  }, [orders])
+    const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a)) // desc
+    let months: string[]
+    if (selectedYear === 'all') {
+      const all = new Set<string>()
+      for (const set of Array.from(yearMonthMap.values())) for (const m of Array.from(set)) all.add(m)
+      months = Array.from(all).sort() // asc 01..12
+    } else {
+      months = Array.from(yearMonthMap.get(selectedYear) ?? new Set<string>()).sort()
+    }
+    return { availableYears: years, availableMonthsForYear: months }
+  }, [orders, selectedYear])
 
-  // Filter orders by selected month
+  // Kalau user ganti tahun dan bulan yang lagi dipilih gak valid untuk tahun itu, reset bulan.
+  const monthValidForYear =
+    selectedMonth === 'all' || availableMonthsForYear.includes(selectedMonth)
+  const effectiveMonth = monthValidForYear ? selectedMonth : 'all'
+
+  /** Test apakah tanggal ISO (YYYY-MM-DD) match filter tahun/bulan yang aktif. */
+  const matchesPeriod = (iso: string | null | undefined): boolean => {
+    if (!iso) return selectedYear === 'all' && effectiveMonth === 'all'
+    const y = iso.slice(0, 4)
+    const m = iso.slice(5, 7)
+    if (selectedYear !== 'all' && y !== selectedYear) return false
+    if (effectiveMonth !== 'all' && m !== effectiveMonth) return false
+    return true
+  }
+
+  // Filter orders sesuai slicer
   const filteredOrders = useMemo(() => {
-    if (selectedMonth === 'all') return orders
-    return orders.filter((o) => o.order_date?.startsWith(selectedMonth))
-  }, [orders, selectedMonth])
+    if (selectedYear === 'all' && effectiveMonth === 'all') return orders
+    return orders.filter((o) => matchesPeriod(o.order_date))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, selectedYear, effectiveMonth])
 
-  // Filter ads data by selected month (match if report period overlaps the month)
+  // Filter ads data — pakai YYYY-MM dari report_period_start sebagai bucket
   const filteredAdsData = useMemo(() => {
-    if (selectedMonth === 'all') return adsData
-    const monthStart = `${selectedMonth}-01`
-    const [y, m] = selectedMonth.split('-').map(Number)
-    const nextMonth = m === 12
-      ? `${y + 1}-01-01`
-      : `${y}-${String(m + 1).padStart(2, '0')}-01`
+    if (selectedYear === 'all' && effectiveMonth === 'all') return adsData
     return adsData.filter((ad) => {
-      const end = ad.report_period_end ?? ad.report_period_start
-      const start = ad.report_period_start ?? ad.report_period_end
-      if (!end || !start) return true
-      // Include if ad period overlaps with selected month
-      return end >= monthStart && start < nextMonth
+      const ref = ad.report_period_start ?? ad.report_period_end
+      return matchesPeriod(ref)
     })
-  }, [adsData, selectedMonth])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adsData, selectedYear, effectiveMonth])
 
   // Calculate all metrics
   const kpis = useMemo(
@@ -453,20 +479,33 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
             {filteredOrders.length.toLocaleString('id-ID')} order
           </p>
         </div>
-        {/* Month filter */}
-        <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
-          <SelectTrigger className="h-8 w-44 text-xs">
-            <SelectValue placeholder="Pilih bulan" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Semua Periode</SelectItem>
-            {availableMonths.map((m) => (
-              <SelectItem key={m} value={m}>
-                {new Date(`${m}-01`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Period filter: Tahun + Bulan terpisah */}
+        <div className="flex items-center gap-2">
+          <Select value={selectedYear} onValueChange={(v) => v && setSelectedYear(v)}>
+            <SelectTrigger className="h-8 w-28 text-xs">
+              <SelectValue placeholder="Tahun" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Tahun</SelectItem>
+              {availableYears.map((y) => (
+                <SelectItem key={y} value={y}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={effectiveMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
+            <SelectTrigger className="h-8 w-32 text-xs">
+              <SelectValue placeholder="Bulan" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Bulan</SelectItem>
+              {availableMonthsForYear.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Alerts */}
