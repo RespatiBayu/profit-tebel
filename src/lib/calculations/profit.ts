@@ -119,8 +119,11 @@ export function calculateKpis(
     totalOmzet += o.original_price
     totalNetIncome += o.total_income
 
-    // Shopee reports fees/vouchers as negative values — take abs so "Total Biaya"
-    // is always a positive magnitude (matches calculateFeeBreakdown).
+    // "Total Biaya" KPI = biaya marketplace murni saja (admin, layanan, komisi,
+    // proses, premi, program hemat ongkir, transaksi, kampanye). Voucher/cashback/
+    // ongkir tetap muncul di waterfall "Alur Dana" tapi di grup berbeda
+    // (discount / shipping). Dengan begini angka KPI "Total Biaya" selaras
+    // dengan subtotal "BIAYA MARKETPLACE (SHOPEE)" di Alur Dana.
     const fees =
       Math.abs(o.ams_commission) +
       Math.abs(o.admin_fee) +
@@ -129,12 +132,7 @@ export function calculateKpis(
       Math.abs(o.premium_fee) +
       Math.abs(o.shipping_program_fee) +
       Math.abs(o.transaction_fee) +
-      Math.abs(o.campaign_fee) +
-      Math.abs(o.seller_voucher) +
-      Math.abs(o.seller_voucher_cofund) +
-      Math.abs(o.seller_cashback) +
-      Math.abs(o.seller_free_shipping_promo) +
-      Math.max(0, o.actual_shipping_cost - o.buyer_shipping_fee - o.shopee_shipping_subsidy)
+      Math.abs(o.campaign_fee)
     totalFees += fees
 
     const hpp = orderHppCost(o, orderProductMap, hppMap)
