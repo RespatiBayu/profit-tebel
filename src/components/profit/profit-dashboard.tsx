@@ -84,16 +84,12 @@ import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct, ProductProfitRow
 // ---------------------------------------------------------------------------
 
 function formatRp(n: number) {
-  if (Math.abs(n) >= 1_000_000_000) return `Rp ${(n / 1_000_000_000).toFixed(1)}M`
-  if (Math.abs(n) >= 1_000_000) return `Rp ${(n / 1_000_000).toFixed(1)}jt`
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  })
-    .format(n)
-    .replace('IDR', 'Rp')
-    .replace('\u00a0', ' ')
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (abs >= 1_000_000_000) return `${sign}Rp ${(abs / 1_000_000_000).toFixed(1)}M`
+  if (abs >= 1_000_000) return `${sign}Rp ${(abs / 1_000_000).toFixed(1)}jt`
+  if (abs >= 1_000) return `${sign}Rp ${(abs / 1_000).toFixed(1)}rb`
+  return `${sign}Rp ${abs.toLocaleString('id-ID')}`
 }
 
 function formatRpFull(n: number) {
