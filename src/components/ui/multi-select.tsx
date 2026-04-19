@@ -96,7 +96,8 @@ export function MultiSelect({
           return (
             <DropdownMenuItem
               key={opt.value}
-              onSelect={(e) => {
+              closeOnClick={false}
+              onClick={(e) => {
                 e.preventDefault()
                 toggle(opt.value)
               }}
