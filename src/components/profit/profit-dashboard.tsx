@@ -565,41 +565,140 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
         />
       </div>
 
-      {/* Summary formula card — shows how Real Profit is calculated */}
-      {kpis.hasHppData && (
-        <Card className="bg-muted/30 border-dashed">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
+      {/* Alur Dana: Omzet → Real Profit (waterfall) */}
+      {kpis.totalOmzet > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <Info className="h-4 w-4" />
               </div>
-              <div className="flex-1 space-y-1.5 text-sm">
-                <p className="font-medium">Cara menghitung Real Profit:</p>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono">
-                    <span className="text-blue-600">{formatRp(kpis.totalNetIncome)}</span>
-                    <span className="text-muted-foreground">(Net Income)</span>
-                    <span className="text-muted-foreground">−</span>
-                    <span className="text-orange-600">{formatRp(kpis.totalHppCost)}</span>
-                    <span className="text-muted-foreground">(HPP + Packaging)</span>
-                  </div>
-                  {kpis.totalAdSpend > 0 && (
-                    <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono ml-4">
-                      <span className="text-muted-foreground">−</span>
-                      <span className="text-red-600">{formatRp(kpis.totalAdSpend)}</span>
-                      <span className="text-muted-foreground">(Biaya Iklan)</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 flex-wrap text-xs sm:text-sm font-mono">
-                    <span className="text-muted-foreground">=</span>
-                    <span className={kpis.realProfit >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
-                      {formatRp(kpis.realProfit)}
-                    </span>
-                    <span className="text-muted-foreground font-normal">(Real Profit)</span>
-                  </div>
-                </div>
+              <div>
+                <CardTitle className="text-base">Alur Dana: Omzet → Real Profit</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Rincian semua pengurangan dari omzet kotor sampai profit bersih
+                </p>
               </div>
             </div>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            {(() => {
+              const omzet = kpis.totalOmzet
+              const pct = (v: number) => (omzet > 0 ? (v / omzet) * 100 : 0)
+
+              type Row =
+                | { kind: 'total'; label: string; value: number; tone: 'neutral' | 'profit' | 'loss' }
+                | { kind: 'cost'; label: string; value: number; indent?: boolean; color?: string }
+                | { kind: 'divider' }
+
+              const rows: Row[] = [
+                { kind: 'total', label: 'Total Omzet', value: omzet, tone: 'neutral' },
+                { kind: 'divider' },
+                ...feeBreakdown.map<Row>((f) => ({
+                  kind: 'cost',
+                  label: f.name,
+                  value: f.value,
+                  indent: true,
+                  color: f.color,
+                })),
+                { kind: 'divider' },
+                {
+                  kind: 'total',
+                  label: 'Net Income (dana diterima dari marketplace)',
+                  value: kpis.totalNetIncome,
+                  tone: 'neutral',
+                },
+              ]
+
+              if (kpis.hasHppData) {
+                rows.push({ kind: 'divider' })
+                if (kpis.totalHppCost > 0) {
+                  rows.push({
+                    kind: 'cost',
+                    label: 'HPP + Packaging',
+                    value: kpis.totalHppCost,
+                    color: '#f97316',
+                  })
+                }
+                if (kpis.totalAdSpend > 0) {
+                  rows.push({
+                    kind: 'cost',
+                    label: 'Biaya Iklan',
+                    value: kpis.totalAdSpend,
+                    color: '#ef4444',
+                  })
+                }
+                rows.push({ kind: 'divider' })
+                rows.push({
+                  kind: 'total',
+                  label: 'Real Profit',
+                  value: kpis.realProfit,
+                  tone: kpis.realProfit >= 0 ? 'profit' : 'loss',
+                })
+              }
+
+              return rows.map((r, i) => {
+                if (r.kind === 'divider') {
+                  return <div key={`div-${i}`} className="border-t border-dashed my-1" />
+                }
+                if (r.kind === 'total') {
+                  const color =
+                    r.tone === 'profit'
+                      ? 'text-green-600'
+                      : r.tone === 'loss'
+                      ? 'text-red-600'
+                      : 'text-foreground'
+                  return (
+                    <div
+                      key={`t-${i}`}
+                      className="flex items-center justify-between gap-3 py-1.5"
+                    >
+                      <span className="text-sm font-semibold">{r.label}</span>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className={`text-sm font-bold tabular-nums ${color}`}>
+                          {formatRp(r.value)}
+                        </span>
+                        <span className="text-xs font-medium text-muted-foreground w-14 text-right tabular-nums">
+                          {pct(r.value).toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  )
+                }
+                return (
+                  <div
+                    key={`c-${i}`}
+                    className={`flex items-center justify-between gap-3 py-0.5 ${r.indent ? 'pl-6' : ''}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {r.color && (
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: r.color }}
+                        />
+                      )}
+                      <span className="text-sm text-muted-foreground truncate">
+                        − {r.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-sm tabular-nums">
+                        −{formatRp(r.value)}
+                      </span>
+                      <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
+                        {pct(r.value).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                )
+              })
+            })()}
+            {!kpis.hasHppData && (
+              <div className="flex items-start gap-2 mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md px-3 py-2">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>Isi HPP di Master Produk untuk melihat Real Profit setelah dikurangi HPP + Biaya Iklan.</span>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
