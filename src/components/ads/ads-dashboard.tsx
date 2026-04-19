@@ -649,10 +649,19 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
     return maxEnd ? `${fmt(minStart)} – ${fmt(maxEnd)}` : fmt(minStart)
   }, [filteredAds])
 
-  // Whether the selected period has any per-product campaigns with actual spend
+  // Whether the selected period has any per-product data with actual spend — either
+  // from Format 1 per-product campaigns OR Format 2 GMV Max detail breakdown.
   const hasPerProductCampaigns = useMemo(
-    () => filteredAds.some((a) => a.product_code !== '-' && a.ad_spend > 0),
-    [filteredAds]
+    () =>
+      filteredAds.some((a) => a.product_code !== '-' && a.ad_spend > 0) ||
+      adsProductData.some(
+        (a) =>
+          a.product_code !== '-' &&
+          a.ad_spend > 0 &&
+          (selectedMonth === 'all' ||
+            (a.report_period_start ?? '').slice(0, 7) === selectedMonth)
+      ),
+    [filteredAds, adsProductData, selectedMonth]
   )
 
   const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
@@ -679,9 +688,19 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
     [filteredAds, masterProducts, filteredAdsProduct]
   )
 
-  const funnelData = useMemo(() => buildFunnelData(filteredAds), [filteredAds])
+  // Per-product rows untuk funnel/quadrant/bar chart. Prefer Format 1 (Summary per Iklan)
+  // yang ada row per-produk ber-ad_spend. Kalau periode itu cuma punya aggregate Shop GMV Max
+  // di Format 1 (misal April), fallback ke Format 2 "GMV Max Detail Produk" yang punya
+  // breakdown per-produk dengan ad_spend attribusi.
+  const perProductAdRows = useMemo(() => {
+    const f1 = filteredAds.filter((a) => a.product_code !== '-' && a.ad_spend > 0)
+    if (f1.length > 0) return f1
+    return filteredAdsProduct.filter((a) => a.product_code !== '-' && a.ad_spend > 0)
+  }, [filteredAds, filteredAdsProduct])
 
-  const roasChartData = useMemo(() => buildRoasChartData(filteredAds), [filteredAds])
+  const funnelData = useMemo(() => buildFunnelData(perProductAdRows), [perProductAdRows])
+
+  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows), [perProductAdRows])
 
   // For quadrant + True ROAS, we need profit data from income
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
@@ -691,8 +710,8 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
   )
 
   const quadrantData = useMemo(
-    () => buildQuadrantData(filteredAds, profitRows),
-    [filteredAds, profitRows]
+    () => buildQuadrantData(perProductAdRows, profitRows),
+    [perProductAdRows, profitRows]
   )
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
