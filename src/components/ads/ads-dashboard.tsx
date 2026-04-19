@@ -25,13 +25,7 @@ import {
   Cell,
 } from 'recharts'
 import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Calendar } from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { MultiSelect } from '@/components/ui/multi-select'
 import {
   calculateAdsOverview,
   buildTrafficLightRows,
@@ -609,9 +603,9 @@ interface Props {
 }
 
 export default function AdsDashboard({ adsData, adsProductData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
-  // Slicer terpisah: Tahun + Bulan
-  const [selectedYear, setSelectedYear] = useState<string>('all')
-  const [selectedMonth, setSelectedMonth] = useState<string>('all')
+  // Slicer multi-select: Tahun + Bulan
+  const [selectedYears, setSelectedYears] = useState<string[]>([])
+  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
 
   // Derive available years + months from ALL ads data
   const { availableYears, availableMonthsForYear } = useMemo(() => {
@@ -626,36 +620,36 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
       yearMonthMap.set(y, ms)
     }
     const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a))
-    let months: string[]
-    if (selectedYear === 'all') {
-      const all = new Set<string>()
-      for (const set of Array.from(yearMonthMap.values())) for (const m of Array.from(set)) all.add(m)
-      months = Array.from(all).sort()
-    } else {
-      months = Array.from(yearMonthMap.get(selectedYear) ?? new Set<string>()).sort()
+    const relevantYears = selectedYears.length > 0 ? selectedYears : years
+    const allMonths = new Set<string>()
+    for (const y of relevantYears) {
+      const ms = yearMonthMap.get(y)
+      if (ms) for (const m of Array.from(ms)) allMonths.add(m)
     }
+    const months = Array.from(allMonths).sort()
     return { availableYears: years, availableMonthsForYear: months }
-  }, [adsData, selectedYear])
+  }, [adsData, selectedYears])
 
-  const monthValidForYear =
-    selectedMonth === 'all' || availableMonthsForYear.includes(selectedMonth)
-  const effectiveMonth = monthValidForYear ? selectedMonth : 'all'
+  const effectiveMonths = useMemo(
+    () => selectedMonths.filter((m) => availableMonthsForYear.includes(m)),
+    [selectedMonths, availableMonthsForYear]
+  )
 
   const matchesPeriod = (iso: string | null | undefined): boolean => {
-    if (!iso) return selectedYear === 'all' && effectiveMonth === 'all'
+    if (!iso) return selectedYears.length === 0 && effectiveMonths.length === 0
     const y = iso.slice(0, 4)
     const m = iso.slice(5, 7)
-    if (selectedYear !== 'all' && y !== selectedYear) return false
-    if (effectiveMonth !== 'all' && m !== effectiveMonth) return false
+    if (selectedYears.length > 0 && !selectedYears.includes(y)) return false
+    if (effectiveMonths.length > 0 && !effectiveMonths.includes(m)) return false
     return true
   }
 
   // Filter ads berdasarkan slicer (pakai report_period_start sebagai reference)
   const filteredAds = useMemo(() => {
-    if (selectedYear === 'all' && effectiveMonth === 'all') return adsData
+    if (selectedYears.length === 0 && effectiveMonths.length === 0) return adsData
     return adsData.filter((ad) => matchesPeriod(ad.report_period_start ?? ad.report_period_end))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adsData, selectedYear, effectiveMonth])
+  }, [adsData, selectedYears, effectiveMonths])
 
   // Period label — derive from all filtered ads (including aggregate rows)
   const periodLabel = useMemo(() => {
@@ -680,7 +674,7 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
           matchesPeriod(a.report_period_start)
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredAds, adsProductData, selectedYear, effectiveMonth]
+    [filteredAds, adsProductData, selectedYears, effectiveMonths]
   )
 
   const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
@@ -688,10 +682,10 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
   // Filter Format 2 (per-produk detail) sesuai slicer — sumber HPP fallback
   // saat Format 1 campaign product_code nggak match master langsung.
   const filteredAdsProduct = useMemo(() => {
-    if (selectedYear === 'all' && effectiveMonth === 'all') return adsProductData
+    if (selectedYears.length === 0 && effectiveMonths.length === 0) return adsProductData
     return adsProductData.filter((ad) => matchesPeriod(ad.report_period_start ?? ad.report_period_end))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adsProductData, selectedYear, effectiveMonth])
+  }, [adsProductData, selectedYears, effectiveMonths])
 
   const trafficLightRows = useMemo(
     () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct),
@@ -739,33 +733,28 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
             {periodLabel && <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full">{periodLabel}</span>}
           </p>
         </div>
-        {/* Period slicer: Tahun + Bulan terpisah */}
+        {/* Period slicer: Tahun + Bulan multi-select */}
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-          <Select value={selectedYear} onValueChange={(v) => v && setSelectedYear(v)}>
-            <SelectTrigger className="h-8 w-28 text-xs">
-              <SelectValue placeholder="Tahun" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Semua Tahun</SelectItem>
-              {availableYears.map((y) => (
-                <SelectItem key={y} value={y}>{y}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={effectiveMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
-            <SelectTrigger className="h-8 w-32 text-xs">
-              <SelectValue placeholder="Bulan" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Semua Bulan</SelectItem>
-              {availableMonthsForYear.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' })}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <MultiSelect
+            className="w-32"
+            allLabel="Semua Tahun"
+            placeholder="Tahun"
+            options={availableYears.map((y) => ({ value: y, label: y }))}
+            selected={selectedYears}
+            onChange={setSelectedYears}
+          />
+          <MultiSelect
+            className="w-36"
+            allLabel="Semua Bulan"
+            placeholder="Bulan"
+            options={availableMonthsForYear.map((m) => ({
+              value: m,
+              label: new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' }),
+            }))}
+            selected={effectiveMonths}
+            onChange={setSelectedMonths}
+          />
         </div>
       </div>
 

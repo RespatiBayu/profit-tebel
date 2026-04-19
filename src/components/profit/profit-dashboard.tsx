@@ -7,13 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { MultiSelect } from '@/components/ui/multi-select'
 import {
   Table,
   TableBody,
@@ -342,16 +336,15 @@ interface Props {
 
 export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, noHppCount }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
-  // Slicer terpisah: Tahun + Bulan, keduanya opsional.
-  // selectedYear: 'all' | 'YYYY'     selectedMonth: 'all' | 'MM'
-  const [selectedYear, setSelectedYear] = useState<string>('all')
-  const [selectedMonth, setSelectedMonth] = useState<string>('all')
+  // Slicer multi-select: Tahun + Bulan. Array kosong = "semua".
+  const [selectedYears, setSelectedYears] = useState<string[]>([])
+  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
 
   // Build lookup maps
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
   const orderProductMap = useMemo(() => buildOrderProductMap(orderProducts), [orderProducts])
 
-  // Derive available years + months per year dari orders
+  // Derive available years + months from orders
   const { availableYears, availableMonthsForYear } = useMemo(() => {
     const yearMonthMap = new Map<string, Set<string>>()
     for (const o of orders) {
@@ -363,48 +356,50 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       yearMonthMap.set(y, ms)
     }
     const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a)) // desc
-    let months: string[]
-    if (selectedYear === 'all') {
-      const all = new Set<string>()
-      for (const set of Array.from(yearMonthMap.values())) for (const m of Array.from(set)) all.add(m)
-      months = Array.from(all).sort() // asc 01..12
-    } else {
-      months = Array.from(yearMonthMap.get(selectedYear) ?? new Set<string>()).sort()
+    // Kalau tahun spesifik terpilih, munculin bulan yang ada di tahun-tahun itu aja;
+    // selain itu gabungkan semua bulan.
+    const relevantYears = selectedYears.length > 0 ? selectedYears : years
+    const allMonths = new Set<string>()
+    for (const y of relevantYears) {
+      const ms = yearMonthMap.get(y)
+      if (ms) for (const m of Array.from(ms)) allMonths.add(m)
     }
+    const months = Array.from(allMonths).sort() // asc 01..12
     return { availableYears: years, availableMonthsForYear: months }
-  }, [orders, selectedYear])
+  }, [orders, selectedYears])
 
-  // Kalau user ganti tahun dan bulan yang lagi dipilih gak valid untuk tahun itu, reset bulan.
-  const monthValidForYear =
-    selectedMonth === 'all' || availableMonthsForYear.includes(selectedMonth)
-  const effectiveMonth = monthValidForYear ? selectedMonth : 'all'
+  // Drop selected months that aren't valid anymore setelah tahun berubah
+  const effectiveMonths = useMemo(
+    () => selectedMonths.filter((m) => availableMonthsForYear.includes(m)),
+    [selectedMonths, availableMonthsForYear]
+  )
 
-  /** Test apakah tanggal ISO (YYYY-MM-DD) match filter tahun/bulan yang aktif. */
+  /** Test ISO (YYYY-MM-DD) apakah lulus filter slicer saat ini. */
   const matchesPeriod = (iso: string | null | undefined): boolean => {
-    if (!iso) return selectedYear === 'all' && effectiveMonth === 'all'
+    if (!iso) return selectedYears.length === 0 && effectiveMonths.length === 0
     const y = iso.slice(0, 4)
     const m = iso.slice(5, 7)
-    if (selectedYear !== 'all' && y !== selectedYear) return false
-    if (effectiveMonth !== 'all' && m !== effectiveMonth) return false
+    if (selectedYears.length > 0 && !selectedYears.includes(y)) return false
+    if (effectiveMonths.length > 0 && !effectiveMonths.includes(m)) return false
     return true
   }
 
   // Filter orders sesuai slicer
   const filteredOrders = useMemo(() => {
-    if (selectedYear === 'all' && effectiveMonth === 'all') return orders
+    if (selectedYears.length === 0 && effectiveMonths.length === 0) return orders
     return orders.filter((o) => matchesPeriod(o.order_date))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, selectedYear, effectiveMonth])
+  }, [orders, selectedYears, effectiveMonths])
 
   // Filter ads data — pakai YYYY-MM dari report_period_start sebagai bucket
   const filteredAdsData = useMemo(() => {
-    if (selectedYear === 'all' && effectiveMonth === 'all') return adsData
+    if (selectedYears.length === 0 && effectiveMonths.length === 0) return adsData
     return adsData.filter((ad) => {
       const ref = ad.report_period_start ?? ad.report_period_end
       return matchesPeriod(ref)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adsData, selectedYear, effectiveMonth])
+  }, [adsData, selectedYears, effectiveMonths])
 
   // Calculate all metrics
   const kpis = useMemo(
@@ -479,32 +474,27 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
             {filteredOrders.length.toLocaleString('id-ID')} order
           </p>
         </div>
-        {/* Period filter: Tahun + Bulan terpisah */}
+        {/* Period filter: Tahun + Bulan multi-select */}
         <div className="flex items-center gap-2">
-          <Select value={selectedYear} onValueChange={(v) => v && setSelectedYear(v)}>
-            <SelectTrigger className="h-8 w-28 text-xs">
-              <SelectValue placeholder="Tahun" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Semua Tahun</SelectItem>
-              {availableYears.map((y) => (
-                <SelectItem key={y} value={y}>{y}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={effectiveMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
-            <SelectTrigger className="h-8 w-32 text-xs">
-              <SelectValue placeholder="Bulan" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Semua Bulan</SelectItem>
-              {availableMonthsForYear.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' })}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <MultiSelect
+            className="w-32"
+            allLabel="Semua Tahun"
+            placeholder="Tahun"
+            options={availableYears.map((y) => ({ value: y, label: y }))}
+            selected={selectedYears}
+            onChange={setSelectedYears}
+          />
+          <MultiSelect
+            className="w-36"
+            allLabel="Semua Bulan"
+            placeholder="Bulan"
+            options={availableMonthsForYear.map((m) => ({
+              value: m,
+              label: new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' }),
+            }))}
+            selected={effectiveMonths}
+            onChange={setSelectedMonths}
+          />
         </div>
       </div>
 
@@ -719,7 +709,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                       </span>
                       <div className="flex items-center gap-3 shrink-0">
                         <span className="text-xs font-medium text-muted-foreground tabular-nums">
-                          −{formatRp(r.subtotal)}
+                          {formatRp(r.subtotal)}
                         </span>
                         <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
                           {pct(r.subtotal).toFixed(1)}%
@@ -768,13 +758,13 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                         />
                       )}
                       <span className="text-sm text-muted-foreground truncate" title={r.hint}>
-                        − {r.label}
+                        {r.label}
                         {r.hint && <span className="hidden sm:inline text-[11px] text-muted-foreground/70 ml-1">· {r.hint}</span>}
                       </span>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       <span className="text-sm tabular-nums">
-                        −{formatRp(r.value)}
+                        {formatRp(r.value)}
                       </span>
                       <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
                         {pct(r.value).toFixed(1)}%
