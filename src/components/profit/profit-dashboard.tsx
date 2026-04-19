@@ -41,11 +41,10 @@ import {
   ChevronUp,
   ChevronDown,
   Info,
-  Wallet,
   Receipt,
-  Percent,
   ShoppingBag,
   Zap,
+  Tag,
 } from 'lucide-react'
 import {
   buildHppMap,
@@ -179,6 +178,8 @@ function KpiCard({
   icon: Icon,
   tooltip,
   cta,
+  pctOmzet,
+  delta,
 }: {
   label: string
   value: string
@@ -187,6 +188,10 @@ function KpiCard({
   icon?: React.ComponentType<{ className?: string }>
   tooltip?: string
   cta?: { label: string; href: string }
+  /** Persentase nilai terhadap Omzet. Kalau null, nggak ditampilkan. */
+  pctOmzet?: number | null
+  /** Data untuk panah MoM. */
+  delta?: { current: number; prev: number; context: 'income' | 'cost' }
 }) {
   const colors = {
     green: 'text-green-600',
@@ -224,6 +229,18 @@ function KpiCard({
         </div>
         <p className={`text-xl sm:text-2xl font-bold ${colors[accent ?? 'default']}`}>{value}</p>
         {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+        {(pctOmzet != null || delta) && (
+          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t">
+            {pctOmzet != null ? (
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                {pctOmzet.toFixed(1)}% <span className="text-muted-foreground/70">dari Omzet</span>
+              </span>
+            ) : (
+              <span />
+            )}
+            {delta && <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} />}
+          </div>
+        )}
         {cta && (
           <Link href={cta.href} className="mt-2 inline-block">
             <span className="text-xs text-primary hover:underline font-medium">{cta.label} →</span>
@@ -639,63 +656,80 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-        <KpiCard
-          label="Total Omzet"
-          value={formatRp(kpis.totalOmzet)}
-          sub={`${kpis.orderCount.toLocaleString('id-ID')} order`}
-          accent="blue"
-          icon={ShoppingBag}
-          tooltip="Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee)."
-        />
-        <KpiCard
-          label="Net Income"
-          value={formatRp(kpis.totalNetIncome)}
-          sub="Dana yang kamu terima"
-          icon={Wallet}
-          accent="blue"
-          tooltip="Total Penghasilan dari Shopee setelah dipotong semua fee marketplace (komisi, admin, layanan, voucher, dll). Ini yang dana cair ke rekening kamu."
-        />
-        <KpiCard
-          label="Total Biaya"
-          value={formatRp(kpis.totalFees)}
-          sub="Fee marketplace"
-          accent="red"
-          icon={Receipt}
-          tooltip="Total potongan Shopee: komisi AMS, biaya admin, layanan, voucher seller, cashback, selisih ongkir, dll."
-        />
-        <KpiCard
-          label="Biaya Iklan"
-          value={formatRp(kpis.totalAdSpend)}
-          sub={kpis.totalAdSpend > 0 ? 'Ad spend' : 'Belum ada'}
-          accent={kpis.totalAdSpend > 0 ? 'orange' : 'muted'}
-          icon={Zap}
-          tooltip="Total biaya iklan yang dikeluarkan untuk mempromosikan produk di platform."
-        />
-        <KpiCard
-          label="Real Profit"
-          value={kpis.hasHppData ? formatRp(kpis.realProfit) : '—'}
-          accent={kpis.hasHppData ? (kpis.realProfit >= 0 ? 'green' : 'red') : 'muted'}
-          sub={
-            kpis.hasHppData
-              ? noHppCount > 0
-                ? `Estimasi (${noHppCount} produk belum HPP)`
-                : 'Net Income − HPP & packaging − iklan'
-              : 'Isi HPP dulu untuk melihat'
-          }
-          icon={TrendingUp}
-          tooltip="Profit sebenarnya setelah memperhitungkan HPP (harga pokok), biaya packaging, dan biaya iklan. Rumus: Net Income − HPP − Packaging − Biaya Iklan."
-          cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
-        />
-        <KpiCard
-          label="Profit Margin"
-          value={kpis.profitMargin !== null ? `${kpis.profitMargin.toFixed(1)}%` : '—'}
-          accent={kpis.profitMargin !== null ? (kpis.profitMargin >= 0 ? 'green' : 'red') : 'muted'}
-          sub={kpis.profitMargin !== null ? 'Profit / Omzet' : 'Perlu HPP lengkap'}
-          icon={Percent}
-          tooltip="Persentase profit terhadap total omzet. Semakin tinggi, semakin efisien bisnis kamu."
-        />
-      </div>
+      {(() => {
+        const totalDiskonPromo = omzetDeductions
+          .filter((d) => d.group === 'discount')
+          .reduce((a, b) => a + b.value, 0)
+        const prevDiskonPromo = prevDeductions
+          .filter((d) => d.group === 'discount')
+          .reduce((a, b) => a + b.value, 0)
+        const pct = (v: number) => (kpis.totalOmzet > 0 ? (v / kpis.totalOmzet) * 100 : 0)
+        return (
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <KpiCard
+              label="Total Omzet"
+              value={formatRp(kpis.totalOmzet)}
+              sub={`${kpis.orderCount.toLocaleString('id-ID')} order`}
+              accent="blue"
+              icon={ShoppingBag}
+              tooltip="Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee)."
+              pctOmzet={kpis.totalOmzet > 0 ? 100 : null}
+              delta={{ current: kpis.totalOmzet, prev: prevKpis.totalOmzet, context: 'income' }}
+            />
+            <KpiCard
+              label="Total Diskon & Promo"
+              value={formatRp(totalDiskonPromo)}
+              sub="Diskon produk + voucher + cashback + refund"
+              accent="orange"
+              icon={Tag}
+              tooltip="Total pengurang yang kamu tanggung sendiri: diskon produk, voucher seller, cashback koin, promo gratis ongkir penjual, dan pengembalian dana."
+              pctOmzet={pct(totalDiskonPromo)}
+              delta={{ current: totalDiskonPromo, prev: prevDiskonPromo, context: 'cost' }}
+            />
+            <KpiCard
+              label="Total Biaya"
+              value={formatRp(kpis.totalFees)}
+              sub="Fee marketplace (Shopee)"
+              accent="red"
+              icon={Receipt}
+              tooltip="Biaya marketplace murni: komisi AMS, biaya admin, layanan, proses pesanan, transaksi, kampanye, premi, dan program hemat ongkir."
+              pctOmzet={pct(kpis.totalFees)}
+              delta={{ current: kpis.totalFees, prev: prevKpis.totalFees, context: 'cost' }}
+            />
+            <KpiCard
+              label="Biaya Iklan"
+              value={formatRp(kpis.totalAdSpend)}
+              sub={kpis.totalAdSpend > 0 ? 'Ad spend' : 'Belum ada'}
+              accent={kpis.totalAdSpend > 0 ? 'orange' : 'muted'}
+              icon={Zap}
+              tooltip="Total biaya iklan yang dikeluarkan untuk mempromosikan produk di platform."
+              pctOmzet={pct(kpis.totalAdSpend)}
+              delta={{ current: kpis.totalAdSpend, prev: prevKpis.totalAdSpend, context: 'cost' }}
+            />
+            <KpiCard
+              label="Real Profit"
+              value={kpis.hasHppData ? formatRp(kpis.realProfit) : '—'}
+              accent={kpis.hasHppData ? (kpis.realProfit >= 0 ? 'green' : 'red') : 'muted'}
+              sub={
+                kpis.hasHppData
+                  ? noHppCount > 0
+                    ? `Estimasi (${noHppCount} produk belum HPP)`
+                    : 'Net Income − HPP & packaging − iklan'
+                  : 'Isi HPP dulu untuk melihat'
+              }
+              icon={TrendingUp}
+              tooltip="Profit sebenarnya setelah memperhitungkan HPP (harga pokok), biaya packaging, dan biaya iklan. Rumus: Net Income − HPP − Packaging − Biaya Iklan."
+              pctOmzet={kpis.hasHppData ? pct(kpis.realProfit) : null}
+              delta={
+                kpis.hasHppData
+                  ? { current: kpis.realProfit, prev: prevKpis.realProfit, context: 'income' }
+                  : undefined
+              }
+              cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
+            />
+          </div>
+        )
+      })()}
 
       {/* Alur Dana: Omzet → Real Profit (waterfall) */}
       {kpis.totalOmzet > 0 && (
