@@ -12,12 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Calculator, Plus, Trash2, Info } from 'lucide-react'
+import { Calculator, Plus, Trash2, Info, TrendingUp } from 'lucide-react'
 import {
-  SHOP_TYPES,
+  PLATFORMS,
   CATEGORIES,
-  SHOPEE_DEFAULTS_2026,
   getAdminFeeRate,
+  type Platform,
   type ShopType,
 } from '@/lib/constants/shopee-fees-2026'
 import { calculateRoasBudget } from '@/lib/calculations/roas-budget'
@@ -32,18 +32,22 @@ interface Variant {
   hpp: number
   hargaJual: number
   estimasiRoas: number
+  estimasiUnits: number  // untuk simulasi profit toko
 }
 
 function uid() {
   return Math.random().toString(36).slice(2, 9)
 }
 
-function makeDefaultVariants(): Variant[] {
-  return [
-    { id: uid(), name: 'Regular 30ml', hpp: 22064, hargaJual: 59000, estimasiRoas: 3 },
-    { id: uid(), name: 'Regular 2ml', hpp: 3966, hargaJual: 10000, estimasiRoas: 4 },
-    { id: uid(), name: 'Hampers', hpp: 28530, hargaJual: 89000, estimasiRoas: 4 },
-  ]
+function emptyVariant(idx: number): Variant {
+  return {
+    id: uid(),
+    name: `Produk ${idx}`,
+    hpp: 0,
+    hargaJual: 0,
+    estimasiRoas: 0,
+    estimasiUnits: 0,
+  }
 }
 
 function formatRp(n: number) {
@@ -118,39 +122,64 @@ function NumCell({
 // ---------------------------------------------------------------------------
 
 export default function RoasCalculatorPage() {
-  // Shop & category → auto-fill admin fee
-  const [shopType, setShopType] = useState<ShopType>('star')
-  const [category, setCategory] = useState<string>('beauty')
+  // Platform → menentukan shop type list & default fee
+  const [platform, setPlatform] = useState<Platform>('shopee')
+  const platformCfg = PLATFORMS[platform]
 
-  // Fee overrides (user bisa edit kalau ga match preset)
-  const presetAdminFee = useMemo(() => getAdminFeeRate(shopType, category), [shopType, category])
-  const [adminFeeRate, setAdminFeeRate] = useState<number>(presetAdminFee)
-  const [ongkirExtraRate, setOngkirExtraRate] = useState<number>(SHOPEE_DEFAULTS_2026.ongkirExtraRate)
-  const [promoExtraRate, setPromoExtraRate] = useState<number>(SHOPEE_DEFAULTS_2026.promoExtraRate)
-  const [biayaPerPesanan, setBiayaPerPesanan] = useState<number>(SHOPEE_DEFAULTS_2026.biayaPerPesanan)
+  const [shopType, setShopType] = useState<ShopType>(platformCfg.shopTypes[0].value)
+  const [category, setCategory] = useState<string>('other')
 
-  // Sync admin fee setiap kali shop/category berubah (replace manual override)
-  const [feeLock, setFeeLock] = useState(false) // kalau user ngedit manual, stop auto-sync
+  // Default fee state — akan di-reset tiap ganti platform
+  const [adminFeeRate, setAdminFeeRate] = useState<number>(() =>
+    getAdminFeeRate(platform, platformCfg.shopTypes[0].value, 'other')
+  )
+  const [ongkirExtraRate, setOngkirExtraRate] = useState<number>(platformCfg.defaults.ongkirExtraRate)
+  const [promoExtraRate, setPromoExtraRate] = useState<number>(platformCfg.defaults.promoExtraRate)
+  const [biayaPerPesanan, setBiayaPerPesanan] = useState<number>(platformCfg.defaults.biayaPerPesanan)
+  const [feeLock, setFeeLock] = useState(false)
+
+  // Preset admin fee dari kombinasi platform × shopType × category
+  const presetAdminFee = useMemo(
+    () => getAdminFeeRate(platform, shopType, category),
+    [platform, shopType, category]
+  )
+
+  // Auto-sync admin fee pas preset berubah (kecuali user lock manual)
   useEffect(() => {
     if (!feeLock) setAdminFeeRate(presetAdminFee)
   }, [presetAdminFee, feeLock])
 
-  // Variants (kolom di tabel)
-  const [variants, setVariants] = useState<Variant[]>(makeDefaultVariants())
+  // Ganti platform → reset shopType & default fee lainnya ke default platform baru
+  function handlePlatformChange(p: Platform) {
+    setPlatform(p)
+    const cfg = PLATFORMS[p]
+    setShopType(cfg.shopTypes[0].value)
+    setOngkirExtraRate(cfg.defaults.ongkirExtraRate)
+    setPromoExtraRate(cfg.defaults.promoExtraRate)
+    setBiayaPerPesanan(cfg.defaults.biayaPerPesanan)
+    setFeeLock(false)
+  }
+
+  // Variants — mulai 3 baris kosong (user tinggal isi)
+  const [variants, setVariants] = useState<Variant[]>([
+    emptyVariant(1),
+    emptyVariant(2),
+    emptyVariant(3),
+  ])
 
   function updateVariant(id: string, patch: Partial<Variant>) {
     setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)))
   }
 
   function addVariant() {
-    setVariants((vs) => [...vs, { id: uid(), name: `Produk ${vs.length + 1}`, hpp: 0, hargaJual: 0, estimasiRoas: 0 }])
+    setVariants((vs) => [...vs, emptyVariant(vs.length + 1)])
   }
 
   function removeVariant(id: string) {
     setVariants((vs) => (vs.length > 1 ? vs.filter((v) => v.id !== id) : vs))
   }
 
-  // Per-variant calculation
+  // Per-variant budgeting calculation
   const results = useMemo(() => {
     return variants.map((v) =>
       calculateRoasBudget({
@@ -165,6 +194,34 @@ export default function RoasCalculatorPage() {
     )
   }, [variants, adminFeeRate, ongkirExtraRate, promoExtraRate, biayaPerPesanan])
 
+  // Per-variant SIMULASI (pakai estimasiUnits)
+  const simulations = useMemo(() => {
+    return variants.map((v, i) => {
+      const r = results[i]
+      const units = v.estimasiUnits
+      const omzet = v.hargaJual * units
+      const biayaMarketplace = r.totalPajak * units
+      const totalHpp = v.hpp * units
+      const biayaIklan = r.estBiayaIklan !== null ? r.estBiayaIklan * units : 0
+      const profitBersih = omzet - biayaMarketplace - totalHpp - biayaIklan
+      return { units, omzet, biayaMarketplace, totalHpp, biayaIklan, profitBersih, hasIklan: r.estBiayaIklan !== null }
+    })
+  }, [variants, results])
+
+  const simTotal = useMemo(() => {
+    return simulations.reduce(
+      (acc, s) => ({
+        units: acc.units + s.units,
+        omzet: acc.omzet + s.omzet,
+        biayaMarketplace: acc.biayaMarketplace + s.biayaMarketplace,
+        totalHpp: acc.totalHpp + s.totalHpp,
+        biayaIklan: acc.biayaIklan + s.biayaIklan,
+        profitBersih: acc.profitBersih + s.profitBersih,
+      }),
+      { units: 0, omzet: 0, biayaMarketplace: 0, totalHpp: 0, biayaIklan: 0, profitBersih: 0 }
+    )
+  }, [simulations])
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -174,24 +231,54 @@ export default function RoasCalculatorPage() {
           Kalkulator ROAS
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Budgeting produk & target ROAS — biaya admin otomatis sesuai tipe toko & kategori (preset Shopee 2026).
+          Budgeting produk, target ROAS, dan simulasi profit toko — fee otomatis sesuai platform & kategori.
         </p>
       </div>
 
-      {/* Shop / Category / Fee config */}
+      {/* Platform selector */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Konfigurasi Toko & Biaya</CardTitle>
+          <CardTitle className="text-base">1. Pilih Platform</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2 flex-wrap">
+            {(Object.keys(PLATFORMS) as Platform[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => handlePlatformChange(p)}
+                className={`py-2 px-5 rounded-md border text-sm font-medium transition-colors ${
+                  platform === p
+                    ? 'bg-orange-500 text-white border-orange-500'
+                    : 'bg-background hover:bg-muted border-border'
+                }`}
+              >
+                {PLATFORMS[p].label}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Shop type / Category / Fee config */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">2. Konfigurasi Toko & Biaya</CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Biaya otomatis terisi dari preset {platformCfg.label} 2026 — bisa di-override manual.
+          </p>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs">Tipe Toko</Label>
-            <Select value={shopType} onValueChange={(v) => { if (v) { setShopType(v as ShopType); setFeeLock(false) } }}>
+            <Select
+              value={shopType}
+              onValueChange={(v) => { if (v) { setShopType(v as ShopType); setFeeLock(false) } }}
+            >
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SHOP_TYPES.map((s) => (
+                {platformCfg.shopTypes.map((s) => (
                   <SelectItem key={s.value} value={s.value}>
                     {s.label}
                   </SelectItem>
@@ -199,13 +286,16 @@ export default function RoasCalculatorPage() {
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              {SHOP_TYPES.find((s) => s.value === shopType)?.description}
+              {platformCfg.shopTypes.find((s) => s.value === shopType)?.description}
             </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs">Kategori Produk</Label>
-            <Select value={category} onValueChange={(v) => { if (v) { setCategory(v); setFeeLock(false) } }}>
+            <Select
+              value={category}
+              onValueChange={(v) => { if (v) { setCategory(v); setFeeLock(false) } }}
+            >
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue />
               </SelectTrigger>
@@ -218,14 +308,14 @@ export default function RoasCalculatorPage() {
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              Menentukan preset Biaya Admin di Shopee 2026.
+              Menentukan preset {platformCfg.labels.adminFee} tahun 2026.
             </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs flex items-center gap-1">
-              Biaya Admin
-              <span className="text-[10px] text-orange-600 font-normal">(auto dari toko × kategori)</span>
+              {platformCfg.labels.adminFee}
+              <span className="text-[10px] text-orange-600 font-normal">(auto)</span>
             </Label>
             <div className="flex items-center gap-2">
               <Input
@@ -247,17 +337,17 @@ export default function RoasCalculatorPage() {
                   className="h-7 text-[11px]"
                   onClick={() => { setFeeLock(false); setAdminFeeRate(presetAdminFee) }}
                 >
-                  Reset preset
+                  Reset
                 </Button>
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Preset: {(presetAdminFee * 100).toFixed(2)}% — bisa di-override manual.
+              Preset: {(presetAdminFee * 100).toFixed(2)}%
             </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Ongkir Extra (Gratis Ongkir XTRA)</Label>
+            <Label className="text-xs">{platformCfg.labels.ongkirExtra}</Label>
             <div className="flex items-center gap-2">
               <Input
                 type="number"
@@ -268,11 +358,13 @@ export default function RoasCalculatorPage() {
               />
               <span className="text-xs text-muted-foreground">%</span>
             </div>
-            <p className="text-[11px] text-muted-foreground">Default Shopee: 4%</p>
+            <p className="text-[11px] text-muted-foreground">
+              Default: {(platformCfg.defaults.ongkirExtraRate * 100).toFixed(1)}%
+            </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Promo Extra (Cashback Extra)</Label>
+            <Label className="text-xs">{platformCfg.labels.promoExtra}</Label>
             <div className="flex items-center gap-2">
               <Input
                 type="number"
@@ -283,7 +375,9 @@ export default function RoasCalculatorPage() {
               />
               <span className="text-xs text-muted-foreground">%</span>
             </div>
-            <p className="text-[11px] text-muted-foreground">Default Shopee: 4.5%</p>
+            <p className="text-[11px] text-muted-foreground">
+              Default: {(platformCfg.defaults.promoExtraRate * 100).toFixed(1)}%
+            </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -297,18 +391,20 @@ export default function RoasCalculatorPage() {
                 className="h-9 text-sm"
               />
             </div>
-            <p className="text-[11px] text-muted-foreground">Flat biaya proses per order. Default: Rp 1.250</p>
+            <p className="text-[11px] text-muted-foreground">
+              Default: Rp {formatRp(platformCfg.defaults.biayaPerPesanan)}
+            </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Main table */}
+      {/* Main budgeting table */}
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-base">Budgeting Produk & Target ROAS</CardTitle>
+            <CardTitle className="text-base">3. Budgeting Produk & Target ROAS</CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Isi HPP & Harga Jual tiap varian. Target ROAS & estimasi profit otomatis terisi.
+              Isi HPP & Harga Jual tiap varian. Target ROAS & Estimasi Biaya Iklan otomatis terisi.
             </p>
           </div>
           <Button size="sm" onClick={addVariant} className="gap-1 bg-orange-500 hover:bg-orange-600 text-white">
@@ -319,11 +415,11 @@ export default function RoasCalculatorPage() {
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b">
-                <th className="text-left text-xs font-medium text-muted-foreground py-2 pr-3 w-[240px] sticky left-0 bg-background">
+                <th className="text-left text-xs font-medium text-muted-foreground py-2 pr-3 w-[220px] sticky left-0 bg-background">
                   Produk
                 </th>
                 {variants.map((v) => (
-                  <th key={v.id} className="py-2 px-2 min-w-[140px]">
+                  <th key={v.id} className="py-2 px-2 min-w-[130px]">
                     <div className="flex items-center gap-1">
                       <TextCell
                         value={v.name}
@@ -346,7 +442,6 @@ export default function RoasCalculatorPage() {
               </tr>
             </thead>
             <tbody>
-              {/* HPP (input) */}
               <RowInput
                 label="HPP"
                 variants={variants}
@@ -355,7 +450,6 @@ export default function RoasCalculatorPage() {
                 hint="Harga pokok per unit"
                 accent="input"
               />
-              {/* Harga Jual (input) */}
               <RowInput
                 label="Harga Jual"
                 variants={variants}
@@ -364,7 +458,6 @@ export default function RoasCalculatorPage() {
                 hint="Pastikan sudah riset market"
                 accent="input-blue"
               />
-              {/* Biaya Per Pesanan (readonly uniform) */}
               <RowReadonly
                 label="Biaya Per Pesanan"
                 variants={variants}
@@ -372,31 +465,27 @@ export default function RoasCalculatorPage() {
                 hint={`Flat Rp ${formatRp(biayaPerPesanan)} per order`}
                 accent="muted"
               />
-              {/* Admin Fee */}
               <RowReadonly
-                label="Admin Fee"
+                label={platformCfg.labels.adminFee}
                 variants={variants}
                 cell={() => formatPct(adminFeeRate)}
                 hint="Dari tipe toko × kategori"
                 accent="muted"
               />
-              {/* Ongkir Extra */}
               <RowReadonly
-                label="Ongkir Extra"
+                label={platformCfg.labels.ongkirExtra}
                 variants={variants}
                 cell={() => formatPct(ongkirExtraRate)}
-                hint="Program Gratis Ongkir XTRA"
+                hint="Program gratis ongkir"
                 accent="muted"
               />
-              {/* Promo Extra */}
               <RowReadonly
-                label="Promo Extra"
+                label={platformCfg.labels.promoExtra}
                 variants={variants}
                 cell={() => formatPct(promoExtraRate)}
-                hint="Program Cashback Extra"
+                hint="Program cashback / affiliate"
                 accent="muted"
               />
-              {/* Total Pajak */}
               <RowReadonly
                 label="Total Biaya"
                 variants={variants}
@@ -405,33 +494,37 @@ export default function RoasCalculatorPage() {
                 accent="muted"
                 bold
               />
-              {/* Gross Profit */}
               <RowReadonly
                 label="Gross Profit"
                 variants={variants}
                 cell={(_, i) => formatRp(results[i].grossProfit)}
                 hint="Harga Jual − HPP − Total Biaya"
-                accent={(i) => (results[i].grossProfit >= 0 ? 'green' : 'red')}
+                accent={(i) =>
+                  variants[i].hargaJual === 0 ? 'muted' : results[i].grossProfit >= 0 ? 'green' : 'red'
+                }
                 bold
               />
-              {/* % Gross Profit */}
               <RowReadonly
                 label="% Gross Profit"
                 variants={variants}
-                cell={(_, i) => formatPct(results[i].grossProfitPct)}
+                cell={(_, i) =>
+                  variants[i].hargaJual === 0 ? '—' : formatPct(results[i].grossProfitPct)
+                }
                 hint="Minimal 40% kalau bisa"
-                accent={(i) => (results[i].grossProfitPct >= 0.4 ? 'green' : results[i].grossProfitPct >= 0.2 ? 'amber' : 'red')}
+                accent={(i) => {
+                  if (variants[i].hargaJual === 0) return 'muted'
+                  const p = results[i].grossProfitPct
+                  return p >= 0.4 ? 'green' : p >= 0.2 ? 'amber' : 'red'
+                }}
                 bold
               />
 
-              {/* Separator */}
               <tr>
                 <td colSpan={variants.length + 2} className="py-2">
                   <div className="border-t border-dashed" />
                 </td>
               </tr>
 
-              {/* Rugi ROAS (BEP) */}
               <RowReadonly
                 label="Rugi ROAS (BEP)"
                 variants={variants}
@@ -440,16 +533,14 @@ export default function RoasCalculatorPage() {
                 accent="red-bg"
                 bold
               />
-              {/* Target ROAS Kompetitif */}
               <RowReadonly
                 label="Target ROAS Kompetitif"
                 variants={variants}
                 cell={(_, i) => formatRoas(results[i].targetKompetitif)}
-                hint="1.7× BEP — cari traffic (produk baru / pindahan GMV Max Auto)"
+                hint="1.7× BEP — cari traffic"
                 accent="orange-bg"
                 bold
               />
-              {/* Target ROAS Konservatif */}
               <RowReadonly
                 label="Target ROAS Konservatif"
                 variants={variants}
@@ -458,23 +549,20 @@ export default function RoasCalculatorPage() {
                 accent="green-bg"
                 bold
               />
-              {/* Target ROAS Prospektif */}
               <RowReadonly
                 label="Target ROAS Prospektif"
                 variants={variants}
                 cell={(_, i) => formatRoas(results[i].targetProspektif)}
-                hint="4.0× BEP — have fun aja (bukan untuk produk winning)"
+                hint="4.0× BEP — have fun aja"
                 accent="muted"
               />
 
-              {/* Separator */}
               <tr>
                 <td colSpan={variants.length + 2} className="py-2">
                   <div className="border-t border-dashed" />
                 </td>
               </tr>
 
-              {/* Estimasi Hasil ROAS (input) */}
               <RowInput
                 label="Estimasi Hasil ROAS"
                 variants={variants}
@@ -486,9 +574,8 @@ export default function RoasCalculatorPage() {
                 placeholder="0.0"
                 suffix="x"
               />
-              {/* Estimasi Biaya Iklan */}
               <RowReadonly
-                label="Estimasi Biaya Iklan"
+                label="Estimasi Biaya Iklan / Unit"
                 variants={variants}
                 cell={(_, i) =>
                   results[i].estBiayaIklan !== null ? formatRp(results[i].estBiayaIklan!) : '—'
@@ -496,9 +583,8 @@ export default function RoasCalculatorPage() {
                 hint="Harga Jual ÷ Estimasi ROAS"
                 accent="muted"
               />
-              {/* Estimasi Profit */}
               <RowReadonly
-                label="Estimasi Profit"
+                label="Estimasi Profit / Unit"
                 variants={variants}
                 cell={(_, i) =>
                   results[i].estProfit !== null ? formatRp(results[i].estProfit!) : '—'
@@ -516,6 +602,142 @@ export default function RoasCalculatorPage() {
         </CardContent>
       </Card>
 
+      {/* ================================================================= */}
+      {/* SIMULASI PROFIT TOKO                                                */}
+      {/* ================================================================= */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-md bg-green-100 text-green-600 flex items-center justify-center shrink-0">
+              <TrendingUp className="h-4 w-4" />
+            </div>
+            <div>
+              <CardTitle className="text-base">4. Simulasi Profit Toko</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Isi estimasi jumlah terjual per produk. Semua total otomatis terhitung berdasarkan Estimasi ROAS.
+              </p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b text-xs">
+                <th className="text-left font-medium text-muted-foreground py-2 pr-3 min-w-[160px]">Produk</th>
+                <th className="text-right font-medium text-muted-foreground py-2 px-2 bg-orange-50/60 min-w-[120px]">
+                  Unit Terjual
+                </th>
+                <th className="text-right font-medium text-muted-foreground py-2 px-2 min-w-[110px]">Total Omzet</th>
+                <th className="text-right font-medium text-muted-foreground py-2 px-2 min-w-[130px]">Biaya Marketplace</th>
+                <th className="text-right font-medium text-muted-foreground py-2 px-2 min-w-[110px]">Total HPP</th>
+                <th className="text-right font-medium text-muted-foreground py-2 px-2 min-w-[110px]">Biaya Iklan</th>
+                <th className="text-right font-medium text-muted-foreground py-2 px-2 min-w-[120px]">Profit Bersih</th>
+              </tr>
+            </thead>
+            <tbody>
+              {variants.map((v, i) => {
+                const s = simulations[i]
+                return (
+                  <tr key={v.id} className="border-b last:border-b-0">
+                    <td className="py-2 pr-3 text-xs font-medium truncate">
+                      {v.name || <span className="text-muted-foreground italic">(belum diisi)</span>}
+                    </td>
+                    <td className="py-1 px-1 bg-orange-50/60">
+                      <NumCell
+                        value={v.estimasiUnits}
+                        onChange={(n) => updateVariant(v.id, { estimasiUnits: n })}
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="py-2 px-2 text-right text-xs tabular-nums">
+                      {s.units > 0 ? formatRp(s.omzet) : '—'}
+                    </td>
+                    <td className="py-2 px-2 text-right text-xs tabular-nums text-red-600">
+                      {s.units > 0 ? formatRp(s.biayaMarketplace) : '—'}
+                    </td>
+                    <td className="py-2 px-2 text-right text-xs tabular-nums text-red-600">
+                      {s.units > 0 ? formatRp(s.totalHpp) : '—'}
+                    </td>
+                    <td className="py-2 px-2 text-right text-xs tabular-nums text-red-600">
+                      {s.units > 0 && s.hasIklan
+                        ? formatRp(s.biayaIklan)
+                        : s.units > 0
+                          ? <span className="text-muted-foreground italic text-[10px]">isi ROAS dulu</span>
+                          : '—'}
+                    </td>
+                    <td
+                      className={`py-2 px-2 text-right text-xs tabular-nums font-semibold ${
+                        s.units === 0
+                          ? 'text-muted-foreground'
+                          : s.profitBersih >= 0
+                            ? 'text-green-600'
+                            : 'text-red-600'
+                      }`}
+                    >
+                      {s.units > 0 ? formatRp(s.profitBersih) : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+              {/* Total row */}
+              <tr className="bg-muted/40 border-t-2 font-semibold">
+                <td className="py-2.5 pr-3 text-xs">TOTAL TOKO</td>
+                <td className="py-2.5 px-2 text-right text-xs tabular-nums">
+                  {simTotal.units.toLocaleString('id-ID')} unit
+                </td>
+                <td className="py-2.5 px-2 text-right text-xs tabular-nums">
+                  {simTotal.units > 0 ? formatRp(simTotal.omzet) : '—'}
+                </td>
+                <td className="py-2.5 px-2 text-right text-xs tabular-nums text-red-700">
+                  {simTotal.units > 0 ? formatRp(simTotal.biayaMarketplace) : '—'}
+                </td>
+                <td className="py-2.5 px-2 text-right text-xs tabular-nums text-red-700">
+                  {simTotal.units > 0 ? formatRp(simTotal.totalHpp) : '—'}
+                </td>
+                <td className="py-2.5 px-2 text-right text-xs tabular-nums text-red-700">
+                  {simTotal.units > 0 ? formatRp(simTotal.biayaIklan) : '—'}
+                </td>
+                <td
+                  className={`py-2.5 px-2 text-right text-xs tabular-nums font-bold ${
+                    simTotal.units === 0
+                      ? 'text-muted-foreground'
+                      : simTotal.profitBersih >= 0
+                        ? 'text-green-700'
+                        : 'text-red-700'
+                  }`}
+                >
+                  {simTotal.units > 0 ? formatRp(simTotal.profitBersih) : '—'}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* KPI ringkas simulasi */}
+          {simTotal.units > 0 && (
+            <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <SimKpi label="Total Omzet" value={formatRp(simTotal.omzet)} accent="blue" />
+              <SimKpi
+                label="Total Biaya"
+                value={formatRp(simTotal.biayaMarketplace + simTotal.totalHpp + simTotal.biayaIklan)}
+                accent="red"
+                sub={`MP + HPP + Iklan`}
+              />
+              <SimKpi
+                label="Profit Bersih"
+                value={formatRp(simTotal.profitBersih)}
+                accent={simTotal.profitBersih >= 0 ? 'green' : 'red'}
+              />
+              <SimKpi
+                label="Margin Bersih"
+                value={simTotal.omzet > 0 ? `${((simTotal.profitBersih / simTotal.omzet) * 100).toFixed(1)}%` : '—'}
+                accent={simTotal.profitBersih >= 0 ? 'green' : 'red'}
+                sub="Profit / Omzet"
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Info footer */}
       <Card className="bg-muted/30 border-dashed">
         <CardContent className="py-4 flex items-start gap-3">
@@ -526,8 +748,8 @@ export default function RoasCalculatorPage() {
             <p>• Gross Profit = Harga Jual − HPP − Total Biaya</p>
             <p>• BEP ROAS = Harga Jual ÷ Gross Profit</p>
             <p>• Target ROAS: Kompetitif = 1.7× BEP · Konservatif = 2.0× BEP · Prospektif = 4.0× BEP</p>
-            <p>• Estimasi Biaya Iklan = Harga Jual ÷ Estimasi Hasil ROAS</p>
-            <p>• Estimasi Profit = Gross Profit − Estimasi Biaya Iklan</p>
+            <p>• Biaya Iklan/Unit = Harga Jual ÷ Estimasi Hasil ROAS</p>
+            <p>• Profit Bersih (simulasi) = Omzet − Biaya Marketplace − HPP − Biaya Iklan</p>
           </div>
         </CardContent>
       </Card>
@@ -536,8 +758,33 @@ export default function RoasCalculatorPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Reusable table rows
+// Reusable components
 // ---------------------------------------------------------------------------
+
+function SimKpi({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string
+  value: string
+  sub?: string
+  accent: 'blue' | 'red' | 'green'
+}) {
+  const colors = {
+    blue: 'text-blue-600',
+    red: 'text-red-600',
+    green: 'text-green-600',
+  }
+  return (
+    <div className="border rounded-md p-3">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className={`text-lg font-bold ${colors[accent]} tabular-nums`}>{value}</p>
+      {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+    </div>
+  )
+}
 
 type RowAccent =
   | 'input'
