@@ -301,9 +301,12 @@ export interface TrafficLightRow {
   cpa: number
   ctr: number
   conversionRate: number
-  signal: TrafficLight
-  trueRoas: number | null   // ROAS adjusted for HPP
+  signal: TrafficLight | 'neutral'  // 'neutral' = can't classify (no HPP / no BEP)
+  trueRoas: number | null   // ROAS adjusted for HPP (deprecated in UI, kept for back-compat)
   profitPerUnit: number | null
+  /** BEP ROAS — titik impas berdasarkan HPP + fee preset marketplace.
+   *  Formula: harga jual / (harga jual − HPP − total fee). null kalau HPP/units nggak cukup. */
+  bepRoas: number | null
 }
 
 export interface FunnelRow {

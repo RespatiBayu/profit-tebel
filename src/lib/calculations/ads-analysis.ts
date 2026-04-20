@@ -1,4 +1,5 @@
 import { ROAS_THRESHOLDS } from '@/lib/constants/marketplace-fees'
+import { PLATFORMS, ROAS_TARGET_MULTIPLIERS } from '@/lib/constants/shopee-fees-2026'
 import type {
   DbAdsRow,
   MasterProduct,
@@ -9,6 +10,47 @@ import type {
   FunnelRow,
   QuadrantPoint,
 } from '@/types'
+
+// ---------------------------------------------------------------------------
+// BEP ROAS — mengacu ke Kalkulator ROAS (formula sama)
+// ---------------------------------------------------------------------------
+
+/** PPN 11% di atas BEP sebagai batas bawah sebelum KILL. */
+export const BEP_PPN_MULTIPLIER = 1.11
+
+/** Default fee preset buat estimasi BEP ROAS di Detail Iklan — pakai Shopee
+ *  Star × 'other' (paling umum). User tetap bisa override di Kalkulator ROAS. */
+const DEFAULT_ADMIN_RATE = PLATFORMS.shopee.adminFeeMatrix.star.other
+const DEFAULT_ONGKIR_RATE = PLATFORMS.shopee.defaults.ongkirExtraRate
+const DEFAULT_PROMO_RATE = PLATFORMS.shopee.defaults.promoExtraRate
+const DEFAULT_BIAYA_PER_PESANAN = PLATFORMS.shopee.defaults.biayaPerPesanan
+
+/** Hitung BEP ROAS per-unit dari avg harga jual + HPP + fee preset. */
+export function calculateBepRoas(
+  avgSellingPrice: number,
+  hppPerUnit: number,
+): number | null {
+  if (avgSellingPrice <= 0 || hppPerUnit <= 0) return null
+  const totalFeePct = DEFAULT_ADMIN_RATE + DEFAULT_ONGKIR_RATE + DEFAULT_PROMO_RATE
+  const totalPajak = avgSellingPrice * totalFeePct + DEFAULT_BIAYA_PER_PESANAN
+  const grossProfit = avgSellingPrice - hppPerUnit - totalPajak
+  if (grossProfit <= 0) return null
+  return avgSellingPrice / grossProfit
+}
+
+/** Signal berdasarkan BEP ROAS:
+ *   hijau (SCALE):    ROAS ≥ konservatif (2.0× BEP)
+ *   kuning (OPTIMIZE): ROAS ≥ BEP × 1.11 (BEP + PPN)
+ *   merah (KILL):     ROAS < BEP × 1.11
+ *  Kalau BEP null (HPP belum diisi / grossProfit ≤ 0), fallback 'neutral'. */
+export function classifyByBepRoas(roas: number, bepRoas: number | null): TrafficLight | 'neutral' {
+  if (bepRoas === null || !isFinite(bepRoas)) return 'neutral'
+  const scaleThreshold = bepRoas * ROAS_TARGET_MULTIPLIERS.konservatif  // 2.0×
+  const killThreshold = bepRoas * BEP_PPN_MULTIPLIER                     // 1.11×
+  if (roas >= scaleThreshold) return 'scale'
+  if (roas >= killThreshold) return 'optimize'
+  return 'kill'
+}
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -39,7 +81,10 @@ export function classifyProduct(roas: number, conversions: number): TrafficLight
 // 1. Aggregate KPIs
 // ---------------------------------------------------------------------------
 
-export function calculateAdsOverview(rows: DbAdsRow[]): AdsKpis {
+export function calculateAdsOverview(
+  rows: DbAdsRow[],
+  masterProducts: MasterProduct[] = [],
+): AdsKpis {
   // Only count products that have actual individual ad spend for KPIs/signals
   const productRows = rows.filter((r) => !isAggregate(r) && r.ad_spend > 0)
 
@@ -68,7 +113,15 @@ export function calculateAdsOverview(rows: DbAdsRow[]): AdsKpis {
   // Deduplicate by product_code: take the row with highest ad_spend per product
   // (handles multiple periods showing same product)
   const dedupedSignalRows = dedupeByProductCode(productRows)
-  const signals = dedupedSignalRows.map((r) => classifyProduct(r.roas, r.conversions))
+  const hppMap = new Map(masterProducts.map((p) => [p.marketplace_product_id, p]))
+  const signals = dedupedSignalRows.map((r) => {
+    const mp = hppMap.get(r.product_code)
+    const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
+    const units = r.units_sold || 0
+    const avgPrice = units > 0 ? r.gmv / units : 0
+    const bep = calculateBepRoas(avgPrice, hppTotal)
+    return classifyByBepRoas(r.roas, bep)
+  })
   const scaleCount = signals.filter((s) => s === 'scale').length
   const optimizeCount = signals.filter((s) => s === 'optimize').length
   const killCount = signals.filter((s) => s === 'kill').length
@@ -143,10 +196,11 @@ export function buildTrafficLightRows(
 
   return campaignRows
     .map((r) => {
-      const signal = classifyProduct(r.roas, r.conversions)
-
       let trueRoas: number | null = null
       let profitPerUnit: number | null = null
+      let bepRoas: number | null = null
+      let avgSellingPriceOut = 0
+      let hppPerUnitOut = 0
 
       // ---- Strategy 1: Direct product_code lookup ----
       // Works kalau Format 1 campaign row's product_code = specific product ID
@@ -160,6 +214,8 @@ export function buildTrafficLightRows(
         trueRoas = r.ad_spend > 0 ? netGmv / r.ad_spend : 0
         const avgSellingPrice = unitsSold > 0 ? r.gmv / unitsSold : 0
         profitPerUnit = avgSellingPrice - hppTotal
+        avgSellingPriceOut = avgSellingPrice
+        hppPerUnitOut = hppTotal
       } else if (r.ad_name && childPool.length > 0) {
         // ---- Strategy 2: Fallback via parent_iklan → Format 2 children ----
         // Untuk campaign parent (GMV Max Auto/ROAS) yang cover banyak produk,
@@ -192,8 +248,14 @@ export function buildTrafficLightRows(
           const avgPrice = totalUnits > 0 ? r.gmv / totalUnits : 0
           const avgHpp = totalUnits > 0 ? totalHppCost / totalUnits : 0
           profitPerUnit = avgPrice - avgHpp
+          avgSellingPriceOut = avgPrice
+          hppPerUnitOut = avgHpp
         }
       }
+
+      // BEP ROAS (mengacu ke Kalkulator ROAS) + signal baru
+      bepRoas = calculateBepRoas(avgSellingPriceOut, hppPerUnitOut)
+      const signal = classifyByBepRoas(r.roas, bepRoas)
 
       return {
         adName: r.ad_name,
@@ -214,11 +276,12 @@ export function buildTrafficLightRows(
         signal,
         trueRoas,
         profitPerUnit,
+        bepRoas,
       }
     })
     .sort((a, b) => {
-      // Sort: SCALE first, then OPTIMIZE, then KILL; within each group by ROAS desc
-      const order = { scale: 0, optimize: 1, kill: 2 }
+      // Sort: SCALE first, then OPTIMIZE, then NEUTRAL, then KILL; within each group by ROAS desc
+      const order: Record<string, number> = { scale: 0, optimize: 1, neutral: 2, kill: 3 }
       if (order[a.signal] !== order[b.signal]) return order[a.signal] - order[b.signal]
       return b.roas - a.roas
     })
@@ -249,9 +312,11 @@ export function buildFunnelData(rows: DbAdsRow[]): FunnelRow[] {
 
 export function buildQuadrantData(
   rows: DbAdsRow[],
-  profitRows: ProductProfitRow[]
+  profitRows: ProductProfitRow[],
+  masterProducts: MasterProduct[] = [],
 ): QuadrantPoint[] {
   const profitMap = new Map(profitRows.map((p) => [p.productId, p]))
+  const hppMap = new Map(masterProducts.map((p) => [p.marketplace_product_id, p]))
 
   return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .map((r) => {
@@ -263,13 +328,21 @@ export function buildQuadrantData(
 
       if (profitPerUnit === null) return null
 
+      const mp = hppMap.get(r.product_code)
+      const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
+      const units = r.units_sold || 0
+      const avgPrice = units > 0 ? r.gmv / units : 0
+      const bep = calculateBepRoas(avgPrice, hppTotal)
+      const s = classifyByBepRoas(r.roas, bep)
+      const signal: TrafficLight = s === 'neutral' ? 'optimize' : s
+
       return {
         productCode: r.product_code,
         productName: r.product_name ?? r.product_code,
         roas: r.roas,
         profitPerUnit,
         adSpend: r.ad_spend,
-        signal: classifyProduct(r.roas, r.conversions),
+        signal,
       }
     })
     .filter((p): p is QuadrantPoint => p !== null)
@@ -279,14 +352,25 @@ export function buildQuadrantData(
 // 5. ROAS bar chart data (sorted descending)
 // ---------------------------------------------------------------------------
 
-export function buildRoasChartData(rows: DbAdsRow[]) {
+export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProduct[] = []) {
+  const hppMap = new Map(masterProducts.map((p) => [p.marketplace_product_id, p]))
   return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .sort((a, b) => b.roas - a.roas)
     .slice(0, 20) // top 20 for readability
-    .map((r) => ({
-      name: (r.product_name ?? r.product_code).slice(0, 30),
-      roas: r.roas,
-      directRoas: r.direct_roas,
-      signal: classifyProduct(r.roas, r.conversions),
-    }))
+    .map((r) => {
+      const mp = hppMap.get(r.product_code)
+      const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
+      const units = r.units_sold || 0
+      const avgPrice = units > 0 ? r.gmv / units : 0
+      const bep = calculateBepRoas(avgPrice, hppTotal)
+      const s = classifyByBepRoas(r.roas, bep)
+      const signal: TrafficLight = s === 'neutral' ? 'optimize' : s
+      return {
+        name: (r.product_name ?? r.product_code).slice(0, 30),
+        roas: r.roas,
+        directRoas: r.direct_roas,
+        bepRoas: bep,
+        signal,
+      }
+    })
 }

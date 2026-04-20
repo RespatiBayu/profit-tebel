@@ -242,20 +242,36 @@ export default function RoasCalculatorPage() {
         </CardHeader>
         <CardContent>
           <div className="flex gap-2 flex-wrap">
-            {(Object.keys(PLATFORMS) as Platform[]).map((p) => (
-              <button
-                key={p}
-                onClick={() => handlePlatformChange(p)}
-                className={`py-2 px-5 rounded-md border text-sm font-medium transition-colors ${
-                  platform === p
-                    ? 'bg-orange-500 text-white border-orange-500'
-                    : 'bg-background hover:bg-muted border-border'
-                }`}
-              >
-                {PLATFORMS[p].label}
-              </button>
-            ))}
+            {(Object.keys(PLATFORMS) as Platform[]).map((p) => {
+              const disabled = p === 'tiktok'
+              const active = platform === p
+              return (
+                <button
+                  key={p}
+                  onClick={() => !disabled && handlePlatformChange(p)}
+                  disabled={disabled}
+                  title={disabled ? 'Segera hadir' : undefined}
+                  className={`relative py-2 px-5 rounded-md border text-sm font-medium transition-colors ${
+                    disabled
+                      ? 'bg-muted/50 text-muted-foreground border-dashed cursor-not-allowed opacity-70'
+                      : active
+                        ? 'bg-orange-500 text-white border-orange-500'
+                        : 'bg-background hover:bg-muted border-border'
+                  }`}
+                >
+                  {PLATFORMS[p].label}
+                  {disabled && (
+                    <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 align-middle">
+                      Segera hadir
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            * Kalkulator TikTok Shop masih dalam pengembangan dan akan segera tersedia.
+          </p>
         </CardContent>
       </Card>
 

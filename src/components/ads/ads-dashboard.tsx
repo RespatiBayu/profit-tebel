@@ -32,7 +32,11 @@ import {
   buildFunnelData,
   buildQuadrantData,
   buildRoasChartData,
+  calculateBepRoas,
+  classifyByBepRoas,
+  BEP_PPN_MULTIPLIER,
 } from '@/lib/calculations/ads-analysis'
+import { ROAS_TARGET_MULTIPLIERS } from '@/lib/constants/shopee-fees-2026'
 import {
   buildHppMap,
   calculateProductProfit,
@@ -79,6 +83,7 @@ const SIGNAL_CONFIG = {
   scale: { label: '🟢 SCALE', color: 'bg-green-100 text-green-800 border-green-300' },
   optimize: { label: '🟡 OPTIMIZE', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
   kill: { label: '🔴 KILL', color: 'bg-red-100 text-red-800 border-red-300' },
+  neutral: { label: '⚪ —', color: 'bg-muted text-muted-foreground border-border' },
 } as const
 
 function SignalBadge({ signal }: { signal: keyof typeof SIGNAL_CONFIG }) {
@@ -123,7 +128,7 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
 // Traffic Light Table (campaign-level, with inline per-product drill-down)
 // ---------------------------------------------------------------------------
 
-type SortCol = 'name' | 'roas' | 'trueRoas' | 'conversions' | 'adSpend' | 'gmv' | 'cpa'
+type SortCol = 'name' | 'roas' | 'bepRoas' | 'conversions' | 'adSpend' | 'gmv' | 'cpa'
 
 /** Normalize ad_name for matching against parent_iklan.
  *  Strips trailing ★ / * / whitespace so "Shop GMV Max ★" matches "Shop GMV Max". */
@@ -196,7 +201,7 @@ function TrafficLightTable({
       let cmp = 0
       if (sortCol === 'name') cmp = a.productName.localeCompare(b.productName)
       else if (sortCol === 'roas') cmp = a.roas - b.roas
-      else if (sortCol === 'trueRoas') cmp = (a.trueRoas ?? -999) - (b.trueRoas ?? -999)
+      else if (sortCol === 'bepRoas') cmp = (a.bepRoas ?? 999) - (b.bepRoas ?? 999)
       else if (sortCol === 'conversions') cmp = a.conversions - b.conversions
       else if (sortCol === 'adSpend') cmp = a.adSpend - b.adSpend
       else if (sortCol === 'gmv') cmp = a.gmv - b.gmv
@@ -236,17 +241,19 @@ function TrafficLightTable({
               </TableHead>
               <TableHead>Sinyal</TableHead>
               <TableHead>
+                <button
+                  className="flex items-center gap-1"
+                  onClick={() => toggleSort('bepRoas')}
+                  title="Titik impas ROAS berdasarkan HPP + preset fee marketplace (lihat Kalkulator ROAS)"
+                >
+                  BEP ROAS <SortIcon col="bepRoas" />
+                </button>
+              </TableHead>
+              <TableHead>
                 <button className="flex items-center gap-1" onClick={() => toggleSort('roas')}>
                   ROAS <SortIcon col="roas" />
                 </button>
               </TableHead>
-              {hasHppData && (
-                <TableHead>
-                  <button className="flex items-center gap-1" onClick={() => toggleSort('trueRoas')}>
-                    True ROAS <SortIcon col="trueRoas" />
-                  </button>
-                </TableHead>
-              )}
               <TableHead>
                 <button className="flex items-center gap-1" onClick={() => toggleSort('conversions')}>
                   Konversi <SortIcon col="conversions" />
@@ -318,21 +325,24 @@ function TrafficLightTable({
                   </TableCell>
                   <TableCell><SignalBadge signal={row.signal} /></TableCell>
                   <TableCell>
-                    <span className={`text-sm font-semibold ${row.roas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : row.roas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                    {row.bepRoas !== null ? (
+                      <span className="text-sm font-semibold text-muted-foreground tabular-nums">
+                        {row.bepRoas.toFixed(2)}x
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground" title="Isi HPP produk di Master Produk">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className={`text-sm font-semibold ${
+                      row.signal === 'scale' ? 'text-green-700' :
+                      row.signal === 'kill' ? 'text-red-600' :
+                      row.signal === 'optimize' ? 'text-yellow-700' :
+                      'text-foreground'
+                    }`}>
                       {row.roas.toFixed(2)}x
                     </span>
                   </TableCell>
-                  {hasHppData && (
-                    <TableCell>
-                      {row.trueRoas !== null ? (
-                        <span className={`text-sm font-semibold ${row.trueRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : row.trueRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
-                          {row.trueRoas.toFixed(2)}x
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                  )}
                   <TableCell className="text-sm">{row.conversions.toLocaleString('id-ID')}</TableCell>
                   <TableCell className="text-sm">{formatRp(row.adSpend)}</TableCell>
                   <TableCell className="text-sm">{formatRp(row.gmv)}</TableCell>
@@ -348,19 +358,13 @@ function TrafficLightTable({
                 .sort((a, b) => b.ad_spend - a.ad_spend)
                 .map((p) => {
                   const pRoas = p.roas
-                  const pSignal: keyof typeof SIGNAL_CONFIG =
-                    pRoas >= ROAS_THRESHOLDS.scale ? 'scale' :
-                    pRoas < ROAS_THRESHOLDS.kill ? 'kill' : 'optimize'
-                  // Per-child True ROAS: lookup HPP via master_products (relasi by kode produk).
-                  // Master produk berlaku general untuk semua periode, jadi selama HPP diisi
-                  // kita bisa hitung walaupun data anak datang dari satu periode aja.
+                  // BEP ROAS per-child: avg harga jual (gmv / units) × HPP per unit dari master.
                   const mp = hppMap.get(p.product_code)
                   const pHppTotal = mp ? mp.hpp + mp.packaging_cost : 0
                   const pUnits = p.units_sold || 0
-                  const pTrueRoas =
-                    mp && pHppTotal > 0 && p.ad_spend > 0 && pUnits > 0
-                      ? (p.gmv - pHppTotal * pUnits) / p.ad_spend
-                      : null
+                  const pAvgPrice = pUnits > 0 ? p.gmv / pUnits : 0
+                  const pBepRoas = calculateBepRoas(pAvgPrice, pHppTotal)
+                  const pSignal = classifyByBepRoas(pRoas, pBepRoas)
                   return (
                     <TableRow key={p.id} className="bg-purple-50/50">
                       <TableCell />
@@ -372,21 +376,24 @@ function TrafficLightTable({
                       </TableCell>
                       <TableCell><SignalBadge signal={pSignal} /></TableCell>
                       <TableCell>
-                        <span className={`text-xs font-semibold ${pRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : pRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
+                        {pBepRoas !== null ? (
+                          <span className="text-xs font-semibold text-muted-foreground tabular-nums">
+                            {pBepRoas.toFixed(2)}x
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`text-xs font-semibold ${
+                          pSignal === 'scale' ? 'text-green-700' :
+                          pSignal === 'kill' ? 'text-red-600' :
+                          pSignal === 'optimize' ? 'text-yellow-700' :
+                          'text-foreground'
+                        }`}>
                           {pRoas.toFixed(2)}x
                         </span>
                       </TableCell>
-                      {hasHppData && (
-                        <TableCell>
-                          {pTrueRoas !== null ? (
-                            <span className={`text-xs font-semibold ${pTrueRoas >= ROAS_THRESHOLDS.scale ? 'text-green-700' : pTrueRoas < ROAS_THRESHOLDS.kill ? 'text-red-600' : 'text-yellow-700'}`}>
-                              {pTrueRoas.toFixed(2)}x
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                      )}
                       <TableCell className="text-xs">{p.conversions.toLocaleString('id-ID')}</TableCell>
                       <TableCell className="text-xs">{formatRp(p.ad_spend)}</TableCell>
                       <TableCell className="text-xs">{formatRp(p.gmv)}</TableCell>
@@ -677,7 +684,7 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
     [filteredAds, adsProductData, selectedYears, effectiveMonths]
   )
 
-  const kpis = useMemo(() => calculateAdsOverview(filteredAds), [filteredAds])
+  const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts), [filteredAds, masterProducts])
 
   // Filter Format 2 (per-produk detail) sesuai slicer — sumber HPP fallback
   // saat Format 1 campaign product_code nggak match master langsung.
@@ -704,7 +711,7 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
 
   const funnelData = useMemo(() => buildFunnelData(perProductAdRows), [perProductAdRows])
 
-  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows), [perProductAdRows])
+  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows, masterProducts), [perProductAdRows, masterProducts])
 
   // For quadrant + True ROAS, we need profit data from income
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
@@ -714,8 +721,8 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
   )
 
   const quadrantData = useMemo(
-    () => buildQuadrantData(perProductAdRows, profitRows),
-    [perProductAdRows, profitRows]
+    () => buildQuadrantData(perProductAdRows, profitRows, masterProducts),
+    [perProductAdRows, profitRows, masterProducts]
   )
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
@@ -840,9 +847,10 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-base">Rekomendasi per Iklan</CardTitle>
-            <div className="text-xs text-muted-foreground space-y-0.5">
-              <p>🟢 SCALE: ROAS ≥ {ROAS_THRESHOLDS.scale}x AND konversi ≥ {ROAS_THRESHOLDS.minConversions}</p>
-              <p>🔴 KILL: ROAS &lt; {ROAS_THRESHOLDS.kill}x</p>
+            <div className="text-xs text-muted-foreground space-y-0.5 text-right">
+              <p>🟢 SCALE: ROAS ≥ {ROAS_TARGET_MULTIPLIERS.konservatif.toFixed(1)}× BEP (konservatif)</p>
+              <p>🟡 OPTIMIZE: ROAS ≥ BEP × {BEP_PPN_MULTIPLIER.toFixed(2)} (BEP + PPN 11%)</p>
+              <p>🔴 KILL: ROAS &lt; BEP × {BEP_PPN_MULTIPLIER.toFixed(2)}</p>
             </div>
           </div>
         </CardHeader>

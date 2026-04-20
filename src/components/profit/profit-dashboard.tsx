@@ -186,8 +186,8 @@ function KpiCard({
   cta?: { label: string; href: string }
   /** Persentase nilai terhadap Omzet. Kalau null, nggak ditampilkan. */
   pctOmzet?: number | null
-  /** Data untuk panah MoM. */
-  delta?: { current: number; prev: number; context: 'income' | 'cost' }
+  /** Data untuk panah MoM. `perUnit` = bandingkan rata-rata per order, bukan total. */
+  delta?: { current: number; prev: number; context: 'income' | 'cost'; perUnit?: boolean }
 }) {
   const colors = {
     green: 'text-green-600',
@@ -237,7 +237,12 @@ function KpiCard({
             )}
             {delta && (
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] text-muted-foreground">vs Bulan Lalu</span>
+                <span
+                  className="text-[11px] text-muted-foreground"
+                  title={delta.perUnit ? 'Dibandingkan rata-rata per order bulan lalu (bukan total)' : undefined}
+                >
+                  {delta.perUnit ? 'vs Bulan Lalu (avg/order)' : 'vs Bulan Lalu'}
+                </span>
                 <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} />
               </div>
             )}
@@ -666,6 +671,11 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
           .filter((d) => d.group === 'discount')
           .reduce((a, b) => a + b.value, 0)
         const pct = (v: number) => (kpis.totalOmzet > 0 ? (v / kpis.totalOmzet) * 100 : 0)
+        // Rata-rata per order (buat MoM delta yang ngebandingin "per-produk" bukan total).
+        // Total naik sering cuma karena omzet naik; avg/order lebih informatif.
+        const avg = (total: number, count: number) => (count > 0 ? total / count : 0)
+        const curCount = kpis.orderCount
+        const prevCount = prevKpis.orderCount
         return (
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <KpiCard
@@ -686,7 +696,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               icon={Tag}
               tooltip="Total pengurang yang kamu tanggung sendiri: diskon produk, voucher seller, cashback koin, promo gratis ongkir penjual, dan pengembalian dana."
               pctOmzet={pct(totalDiskonPromo)}
-              delta={{ current: totalDiskonPromo, prev: prevDiskonPromo, context: 'cost' }}
+              delta={{
+                current: avg(totalDiskonPromo, curCount),
+                prev: avg(prevDiskonPromo, prevCount),
+                context: 'cost',
+                perUnit: true,
+              }}
             />
             <KpiCard
               label="Total Biaya"
@@ -696,7 +711,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               icon={Receipt}
               tooltip="Biaya marketplace murni: komisi AMS, biaya admin, layanan, proses pesanan, transaksi, kampanye, premi, dan program hemat ongkir."
               pctOmzet={pct(kpis.totalFees)}
-              delta={{ current: kpis.totalFees, prev: prevKpis.totalFees, context: 'cost' }}
+              delta={{
+                current: avg(kpis.totalFees, curCount),
+                prev: avg(prevKpis.totalFees, prevCount),
+                context: 'cost',
+                perUnit: true,
+              }}
             />
             <KpiCard
               label="HPP + Packaging"
@@ -714,7 +734,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               pctOmzet={kpis.hasHppData ? pct(kpis.totalHppCost) : null}
               delta={
                 kpis.hasHppData
-                  ? { current: kpis.totalHppCost, prev: prevKpis.totalHppCost, context: 'cost' }
+                  ? {
+                      current: avg(kpis.totalHppCost, curCount),
+                      prev: avg(prevKpis.totalHppCost, prevCount),
+                      context: 'cost',
+                      perUnit: true,
+                    }
                   : undefined
               }
               cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
