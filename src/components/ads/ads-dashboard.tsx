@@ -139,12 +139,10 @@ function normalizeAdName(name: string | null): string {
 
 function TrafficLightTable({
   rows,
-  hasHppData,
   adsProductData,
   masterProducts,
 }: {
   rows: TrafficLightRow[]
-  hasHppData: boolean
   adsProductData: DbAdsRow[]
   masterProducts: MasterProduct[]
 }) {
@@ -857,7 +855,6 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
         <CardContent>
           <TrafficLightTable
             rows={trafficLightRows}
-            hasHppData={hasHppData}
             adsProductData={adsProductData}
             masterProducts={masterProducts}
           />

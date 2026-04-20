@@ -19,7 +19,9 @@
       "Bash(echo \"BUILD_EXIT:$?\")",
       "Bash(curl -s -X DELETE \"https://fwdtlaqwpaktdhpyfztr.supabase.co/rest/v1/upload_batches?file_type=in.\\(ads,ads_product\\)\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3ZHRsYXF3cGFrdGRocHlmenRyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjEzNjYwMiwiZXhwIjoyMDkxNzEyNjAyfQ.eZtllJcxYiRgfnfuVVsRCOaiOHv7H-QZPiIpwdOMbhM\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3ZHRsYXF3cGFrdGRocHlmenRyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjEzNjYwMiwiZXhwIjoyMDkxNzEyNjAyfQ.eZtllJcxYiRgfnfuVVsRCOaiOHv7H-QZPiIpwdOMbhM\" -H \"Prefer: return=minimal\")",
       "Bash(vercel --prod)",
-      "Bash(npx vercel *)"
+      "Bash(npx vercel *)",
+      "Bash(npm run *)",
+      "Bash(rm build.log)"
     ]
   }
 }
