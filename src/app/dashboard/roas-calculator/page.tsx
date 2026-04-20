@@ -1,153 +1,115 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { MARKETPLACE_FEES, MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
-import type { MarketplaceKey } from '@/lib/constants/marketplace-fees'
-import { calculateRoas } from '@/lib/calculations/roas'
-import type { RoasInputs } from '@/lib/calculations/roas'
+import { useState, useMemo, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
-import { CheckCircle2, XCircle, Save, Trash2, ChevronDown, ChevronUp, Calculator } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Calculator, Plus, Trash2, Info } from 'lucide-react'
+import {
+  SHOP_TYPES,
+  CATEGORIES,
+  SHOPEE_DEFAULTS_2026,
+  getAdminFeeRate,
+  type ShopType,
+} from '@/lib/constants/shopee-fees-2026'
+import { calculateRoasBudget } from '@/lib/calculations/roas-budget'
 
 // ---------------------------------------------------------------------------
-// Types
+// Types & helpers
 // ---------------------------------------------------------------------------
 
-interface SavedScenario {
+interface Variant {
   id: string
-  scenario_name: string
-  marketplace: string
-  selling_price: number
+  name: string
   hpp: number
-  packaging_cost: number
-  commission_rate: number
-  admin_fee_rate: number
-  service_fee_rate: number
-  processing_fee: number
-  estimated_shipping: number
-  seller_voucher: number
-  target_roas: number
-  estimated_cr: number
-  estimated_cpc: number
-  created_at: string
+  hargaJual: number
+  estimasiRoas: number
+}
+
+function uid() {
+  return Math.random().toString(36).slice(2, 9)
+}
+
+function makeDefaultVariants(): Variant[] {
+  return [
+    { id: uid(), name: 'Regular 30ml', hpp: 22064, hargaJual: 59000, estimasiRoas: 3 },
+    { id: uid(), name: 'Regular 2ml', hpp: 3966, hargaJual: 10000, estimasiRoas: 4 },
+    { id: uid(), name: 'Hampers', hpp: 28530, hargaJual: 89000, estimasiRoas: 4 },
+  ]
+}
+
+function formatRp(n: number) {
+  if (!isFinite(n)) return '—'
+  return new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(Math.round(n))
+}
+
+function formatPct(v: number) {
+  return `${(v * 100).toFixed(1)}%`
+}
+
+function formatRoas(v: number | null) {
+  if (v === null || !isFinite(v)) return '—'
+  return `${v.toFixed(2)}x`
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Inline editable cells
 // ---------------------------------------------------------------------------
 
-function formatRp(value: number): string {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value)
-}
-
-function numInput(val: number) {
-  return val === 0 ? '' : String(val)
-}
-
-function parseNum(s: string): number {
-  const n = parseFloat(s.replace(/[^0-9.-]/g, ''))
-  return isNaN(n) ? 0 : n
-}
-
-// ---------------------------------------------------------------------------
-// Default inputs by marketplace
-// ---------------------------------------------------------------------------
-
-function defaultInputs(marketplace: MarketplaceKey): RoasInputs {
-  const fees = MARKETPLACE_FEES[marketplace]
-  return {
-    marketplace,
-    sellingPrice: 0,
-    hpp: 0,
-    packagingCost: 0,
-    commissionRate: fees.adminFeeRate,
-    adminFeeRate: fees.serviceFeeRate,
-    serviceFeeRate: 0,
-    processingFee: fees.processingFee,
-    estimatedShipping: fees.estimatedShippingRange.average,
-    sellerVoucher: 0,
-    targetRoas: 3.0,
-    estimatedCr: 0.02,
-    estimatedCpc: 500,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Sub-component: ResultCard
-// ---------------------------------------------------------------------------
-
-function ResultCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function TextCell({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-lg font-semibold">{value}</p>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-    </div>
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full text-center text-xs font-semibold bg-transparent border-0 outline-none focus:ring-1 focus:ring-orange-400 rounded px-1 py-1"
+    />
   )
 }
 
-// ---------------------------------------------------------------------------
-// Sub-component: NumberField
-// ---------------------------------------------------------------------------
-
-function NumberField({
-  label,
+function NumCell({
   value,
   onChange,
-  suffix,
-  prefix,
-  hint,
   step,
+  placeholder,
 }: {
-  label: string
   value: number
   onChange: (v: number) => void
-  suffix?: string
-  prefix?: string
-  hint?: string
   step?: number
+  placeholder?: string
 }) {
-  const [raw, setRaw] = useState(numInput(value))
-
-  // Sync when value changes externally (e.g. marketplace preset)
-  useEffect(() => {
-    setRaw(numInput(value))
-  }, [value])
+  const [raw, setRaw] = useState(value === 0 ? '' : String(value))
 
   return (
-    <div className="flex flex-col gap-1">
-      <Label className="text-xs font-medium">{label}</Label>
-      <div className="relative flex items-center">
-        {prefix && (
-          <span className="absolute left-2 text-xs text-muted-foreground pointer-events-none">{prefix}</span>
-        )}
-        <Input
-          type="number"
-          step={step ?? 1}
-          value={raw}
-          onChange={(e) => {
-            setRaw(e.target.value)
-            onChange(parseNum(e.target.value))
-          }}
-          className={prefix ? 'pl-7 text-sm h-8' : 'text-sm h-8'}
-          placeholder="0"
-        />
-        {suffix && (
-          <span className="absolute right-2 text-xs text-muted-foreground pointer-events-none">{suffix}</span>
-        )}
-      </div>
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
+    <input
+      type="number"
+      inputMode="decimal"
+      step={step ?? 1}
+      value={raw}
+      placeholder={placeholder ?? '0'}
+      onChange={(e) => {
+        setRaw(e.target.value)
+        const n = parseFloat(e.target.value)
+        onChange(isNaN(n) ? 0 : n)
+      }}
+      className="w-full text-right text-xs bg-transparent border-0 outline-none focus:ring-1 focus:ring-orange-400 rounded px-1 py-1 tabular-nums"
+    />
   )
 }
 
@@ -156,567 +118,538 @@ function NumberField({
 // ---------------------------------------------------------------------------
 
 export default function RoasCalculatorPage() {
-  const supabase = createClient()
+  // Shop & category → auto-fill admin fee
+  const [shopType, setShopType] = useState<ShopType>('star')
+  const [category, setCategory] = useState<string>('beauty')
 
-  const [marketplace, setMarketplace] = useState<MarketplaceKey>('shopee')
-  const [inputs, setInputs] = useState<RoasInputs>(defaultInputs('shopee'))
-  const [scenarioName, setScenarioName] = useState('')
-  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([])
-  const [saving, setSaving] = useState(false)
-  const [showFees, setShowFees] = useState(false)
-  const [showBudget, setShowBudget] = useState(false)
+  // Fee overrides (user bisa edit kalau ga match preset)
+  const presetAdminFee = useMemo(() => getAdminFeeRate(shopType, category), [shopType, category])
+  const [adminFeeRate, setAdminFeeRate] = useState<number>(presetAdminFee)
+  const [ongkirExtraRate, setOngkirExtraRate] = useState<number>(SHOPEE_DEFAULTS_2026.ongkirExtraRate)
+  const [promoExtraRate, setPromoExtraRate] = useState<number>(SHOPEE_DEFAULTS_2026.promoExtraRate)
+  const [biayaPerPesanan, setBiayaPerPesanan] = useState<number>(SHOPEE_DEFAULTS_2026.biayaPerPesanan)
 
-  // Load scenarios on mount
-  const loadScenarios = useCallback(async () => {
-    const { data } = await supabase
-      .from('roas_scenarios')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (data) setSavedScenarios(data as SavedScenario[])
-  }, [supabase])
-
+  // Sync admin fee setiap kali shop/category berubah (replace manual override)
+  const [feeLock, setFeeLock] = useState(false) // kalau user ngedit manual, stop auto-sync
   useEffect(() => {
-    loadScenarios()
-  }, [loadScenarios])
+    if (!feeLock) setAdminFeeRate(presetAdminFee)
+  }, [presetAdminFee, feeLock])
 
-  // When marketplace changes, update fee presets but keep prices
-  function handleMarketplaceChange(mp: MarketplaceKey) {
-    setMarketplace(mp)
-    const fees = MARKETPLACE_FEES[mp]
-    setInputs((prev) => ({
-      ...prev,
-      marketplace: mp,
-      commissionRate: fees.adminFeeRate,
-      adminFeeRate: fees.serviceFeeRate,
-      serviceFeeRate: 0,
-      processingFee: fees.processingFee,
-      estimatedShipping: fees.estimatedShippingRange.average,
-    }))
+  // Variants (kolom di tabel)
+  const [variants, setVariants] = useState<Variant[]>(makeDefaultVariants())
+
+  function updateVariant(id: string, patch: Partial<Variant>) {
+    setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)))
   }
 
-  function setField<K extends keyof RoasInputs>(key: K, value: RoasInputs[K]) {
-    setInputs((prev) => ({ ...prev, [key]: value }))
+  function addVariant() {
+    setVariants((vs) => [...vs, { id: uid(), name: `Produk ${vs.length + 1}`, hpp: 0, hargaJual: 0, estimasiRoas: 0 }])
   }
 
-  // Real-time calculation
+  function removeVariant(id: string) {
+    setVariants((vs) => (vs.length > 1 ? vs.filter((v) => v.id !== id) : vs))
+  }
+
+  // Per-variant calculation
   const results = useMemo(() => {
-    if (inputs.sellingPrice <= 0) return null
-    return calculateRoas(inputs)
-  }, [inputs])
-
-  // Save scenario
-  async function handleSave() {
-    if (!scenarioName.trim()) return
-    setSaving(true)
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      await supabase.from('roas_scenarios').insert({
-        user_id: user.id,
-        scenario_name: scenarioName.trim(),
-        marketplace: inputs.marketplace,
-        selling_price: inputs.sellingPrice,
-        hpp: inputs.hpp,
-        packaging_cost: inputs.packagingCost,
-        commission_rate: inputs.commissionRate,
-        admin_fee_rate: inputs.adminFeeRate,
-        service_fee_rate: inputs.serviceFeeRate,
-        processing_fee: inputs.processingFee,
-        estimated_shipping: inputs.estimatedShipping,
-        seller_voucher: inputs.sellerVoucher,
-        target_roas: inputs.targetRoas,
-        estimated_cr: inputs.estimatedCr,
-        estimated_cpc: inputs.estimatedCpc,
+    return variants.map((v) =>
+      calculateRoasBudget({
+        hpp: v.hpp,
+        hargaJual: v.hargaJual,
+        adminFeeRate,
+        ongkirExtraRate,
+        promoExtraRate,
+        biayaPerPesanan,
+        estimasiRoas: v.estimasiRoas,
       })
-
-      setScenarioName('')
-      await loadScenarios()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // Load scenario into form
-  function handleLoadScenario(s: SavedScenario) {
-    setMarketplace(s.marketplace as MarketplaceKey)
-    setInputs({
-      marketplace: s.marketplace as MarketplaceKey,
-      sellingPrice: s.selling_price,
-      hpp: s.hpp,
-      packagingCost: s.packaging_cost,
-      commissionRate: s.commission_rate,
-      adminFeeRate: s.admin_fee_rate,
-      serviceFeeRate: s.service_fee_rate,
-      processingFee: s.processing_fee,
-      estimatedShipping: s.estimated_shipping,
-      sellerVoucher: s.seller_voucher,
-      targetRoas: s.target_roas,
-      estimatedCr: s.estimated_cr,
-      estimatedCpc: s.estimated_cpc,
-    })
-  }
-
-  // Delete scenario
-  async function handleDeleteScenario(id: string) {
-    await supabase.from('roas_scenarios').delete().eq('id', id)
-    await loadScenarios()
-  }
+    )
+  }, [variants, adminFeeRate, ongkirExtraRate, promoExtraRate, biayaPerPesanan])
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-      <div className="mb-6">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
+      {/* Header */}
+      <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Calculator className="h-6 w-6 text-orange-500" />
-          ROAS Calculator
+          Kalkulator ROAS
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Hitung break-even ROAS, maksimum budget iklan, dan simulasi profit sebelum beriklan.
+          Budgeting produk & target ROAS — biaya admin otomatis sesuai tipe toko & kategori (preset Shopee 2026).
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ---------------------------------------------------------------- */}
-        {/* LEFT PANEL — Inputs                                               */}
-        {/* ---------------------------------------------------------------- */}
-        <div className="flex flex-col gap-4">
-          {/* Marketplace selector */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Marketplace</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-2">
-                {MARKETPLACE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => handleMarketplaceChange(opt.value as MarketplaceKey)}
-                    className={`flex-1 py-2 px-3 rounded-md border text-sm font-medium transition-colors ${
-                      marketplace === opt.value
-                        ? 'bg-orange-500 text-white border-orange-500'
-                        : 'bg-background hover:bg-muted border-border'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
+      {/* Shop / Category / Fee config */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Konfigurasi Toko & Biaya</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Tipe Toko</Label>
+            <Select value={shopType} onValueChange={(v) => { if (v) { setShopType(v as ShopType); setFeeLock(false) } }}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SHOP_TYPES.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
                 ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Product pricing */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Harga &amp; Biaya Produk</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <NumberField
-                  label="Harga Jual (Rp)"
-                  value={inputs.sellingPrice}
-                  onChange={(v) => setField('sellingPrice', v)}
-                  prefix="Rp"
-                  hint="Harga yang tampil di marketplace"
-                />
-              </div>
-              <NumberField
-                label="HPP / Unit (Rp)"
-                value={inputs.hpp}
-                onChange={(v) => setField('hpp', v)}
-                prefix="Rp"
-              />
-              <NumberField
-                label="Biaya Packaging (Rp)"
-                value={inputs.packagingCost}
-                onChange={(v) => setField('packagingCost', v)}
-                prefix="Rp"
-              />
-              <div className="col-span-2">
-                <NumberField
-                  label="Voucher Seller (Rp)"
-                  value={inputs.sellerVoucher}
-                  onChange={(v) => setField('sellerVoucher', v)}
-                  prefix="Rp"
-                  hint="Per unit yang kamu tanggung"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Marketplace fees — collapsible */}
-          <Card>
-            <button
-              className="w-full flex items-center justify-between p-4 text-left"
-              onClick={() => setShowFees((v) => !v)}
-            >
-              <span className="font-semibold text-base">Biaya Marketplace</span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  Preset: {MARKETPLACE_FEES[marketplace].name}
-                </span>
-                {showFees ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </div>
-            </button>
-            {showFees && (
-              <CardContent className="grid grid-cols-2 gap-3 pt-0">
-                <NumberField
-                  label="Komisi / Admin Fee (%)"
-                  value={inputs.commissionRate * 100}
-                  onChange={(v) => setField('commissionRate', v / 100)}
-                  suffix="%"
-                  step={0.01}
-                />
-                <NumberField
-                  label="Service Fee (%)"
-                  value={inputs.adminFeeRate * 100}
-                  onChange={(v) => setField('adminFeeRate', v / 100)}
-                  suffix="%"
-                  step={0.01}
-                />
-                <NumberField
-                  label="Transaction Fee (%)"
-                  value={inputs.serviceFeeRate * 100}
-                  onChange={(v) => setField('serviceFeeRate', v / 100)}
-                  suffix="%"
-                  step={0.01}
-                />
-                <NumberField
-                  label="Processing Fee (Rp)"
-                  value={inputs.processingFee}
-                  onChange={(v) => setField('processingFee', v)}
-                  prefix="Rp"
-                />
-                <div className="col-span-2">
-                  <NumberField
-                    label="Estimasi Ongkir (Rp)"
-                    value={inputs.estimatedShipping}
-                    onChange={(v) => setField('estimatedShipping', v)}
-                    prefix="Rp"
-                    hint="Ongkir yang kamu tanggung per pesanan"
-                  />
-                </div>
-              </CardContent>
-            )}
-          </Card>
-
-          {/* Ad simulation inputs */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Target &amp; Estimasi Iklan</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <NumberField
-                  label="Target ROAS"
-                  value={inputs.targetRoas}
-                  onChange={(v) => setField('targetRoas', v)}
-                  suffix="x"
-                  step={0.1}
-                  hint="ROAS yang ingin kamu capai"
-                />
-              </div>
-              <NumberField
-                label="Est. Conversion Rate (%)"
-                value={inputs.estimatedCr * 100}
-                onChange={(v) => setField('estimatedCr', v / 100)}
-                suffix="%"
-                step={0.1}
-                hint="% pengunjung yang beli"
-              />
-              <NumberField
-                label="Est. CPC (Rp)"
-                value={inputs.estimatedCpc}
-                onChange={(v) => setField('estimatedCpc', v)}
-                prefix="Rp"
-                hint="Biaya per klik iklan"
-              />
-            </CardContent>
-          </Card>
-
-          {/* Save scenario */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Simpan Skenario</CardTitle>
-            </CardHeader>
-            <CardContent className="flex gap-2">
-              <Input
-                placeholder="Nama skenario..."
-                value={scenarioName}
-                onChange={(e) => setScenarioName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-                className="text-sm h-8"
-              />
-              <Button
-                size="sm"
-                onClick={handleSave}
-                disabled={!scenarioName.trim() || saving}
-                className="gap-1 bg-orange-500 hover:bg-orange-600 text-white shrink-0"
-              >
-                <Save className="h-3 w-3" />
-                Simpan
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* RIGHT PANEL — Results                                             */}
-        {/* ---------------------------------------------------------------- */}
-        <div className="flex flex-col gap-4">
-          {!results ? (
-            <Card className="flex items-center justify-center min-h-[300px]">
-              <div className="text-center text-muted-foreground">
-                <Calculator className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p>Masukkan harga jual untuk melihat hasil kalkulasi.</p>
-              </div>
-            </Card>
-          ) : (
-            <>
-              {/* Feasibility banner */}
-              <Card className={results.isFeasible ? 'border-green-500' : 'border-red-400'}>
-                <CardContent className="py-4 flex items-start gap-3">
-                  {results.isFeasible ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
-                  ) : (
-                    <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
-                  )}
-                  <p className="text-sm">{results.feasibilityNote}</p>
-                </CardContent>
-              </Card>
-
-              {/* Break-even summary */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Break-Even Analysis</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-4">
-                  <ResultCard
-                    label="Total COGS"
-                    value={formatRp(results.totalCogs)}
-                    sub="HPP + Packaging"
-                  />
-                  <ResultCard
-                    label="Total Biaya Marketplace"
-                    value={formatRp(results.totalFees)}
-                    sub="Komisi + fee + ongkir + voucher"
-                  />
-                  <ResultCard
-                    label="Net Revenue / Unit"
-                    value={formatRp(results.netRevenuePerUnit)}
-                    sub="Setelah biaya marketplace"
-                  />
-                  <ResultCard
-                    label="Profit Sebelum Iklan"
-                    value={formatRp(results.profitBeforeAds)}
-                    sub="Margin jika ROAS = infinite"
-                  />
-                  <Separator className="col-span-2" />
-                  <ResultCard
-                    label="Break-Even ROAS"
-                    value={
-                      results.breakEvenRoas > 0
-                        ? `${results.breakEvenRoas.toFixed(2)}x`
-                        : 'N/A'
-                    }
-                    sub="Min ROAS agar tidak rugi"
-                  />
-                  <ResultCard
-                    label="Maks. Ad Spend / Unit"
-                    value={formatRp(results.breakEvenAdSpend)}
-                    sub="Di atas ini = rugi"
-                  />
-                </CardContent>
-              </Card>
-
-              {/* At target ROAS */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">Pada Target ROAS</CardTitle>
-                    <Badge variant="outline">{inputs.targetRoas.toFixed(1)}x</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-4">
-                  <ResultCard
-                    label="Maks. Ad Spend / Unit"
-                    value={formatRp(results.maxAdSpendAtTarget)}
-                    sub={`Harga jual / ROAS target`}
-                  />
-                  <ResultCard
-                    label="Acceptable CPA"
-                    value={formatRp(results.acceptableCpa)}
-                    sub="Maks. biaya per konversi"
-                  />
-                  <div className="col-span-2">
-                    <ResultCard
-                      label="Est. Profit / Unit"
-                      value={formatRp(results.profitAtTargetRoas)}
-                      sub={
-                        results.profitAtTargetRoas >= 0
-                          ? 'Untung per unit terjual'
-                          : 'Rugi per unit — kurangi biaya atau naikkan harga'
-                      }
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Budget simulation — collapsible */}
-              <Card>
-                <button
-                  className="w-full flex items-center justify-between p-4 text-left"
-                  onClick={() => setShowBudget((v) => !v)}
-                >
-                  <span className="font-semibold text-base">Simulasi Budget Rp 1 Juta</span>
-                  {showBudget ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </button>
-                {showBudget && (
-                  <CardContent className="grid grid-cols-2 gap-4 pt-0">
-                    <ResultCard
-                      label="Est. Klik"
-                      value={Math.round(results.estimatedClicks).toLocaleString('id-ID')}
-                      sub={`Rp 1jt / CPC ${formatRp(inputs.estimatedCpc)}`}
-                    />
-                    <ResultCard
-                      label="Est. Konversi"
-                      value={results.estimatedConversions.toFixed(1)}
-                      sub={`Klik x CR ${(inputs.estimatedCr * 100).toFixed(1)}%`}
-                    />
-                    <ResultCard
-                      label="Est. Revenue"
-                      value={formatRp(results.estimatedRevenue)}
-                      sub="Konversi x harga jual"
-                    />
-                    <ResultCard
-                      label="Simulasi ROAS"
-                      value={`${results.simulatedRoas.toFixed(2)}x`}
-                      sub="Revenue / Rp 1jt"
-                    />
-                    <div className="col-span-2">
-                      <ResultCard
-                        label="Est. Profit Bersih"
-                        value={formatRp(results.estimatedProfit)}
-                        sub="Setelah semua biaya + iklan Rp 1jt"
-                      />
-                    </div>
-                  </CardContent>
-                )}
-              </Card>
-
-              {/* Cost breakdown */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Rincian Biaya / Unit</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2 text-sm">
-                    {(
-                      [
-                        ['Harga Jual', inputs.sellingPrice],
-                        ['HPP', -inputs.hpp],
-                        ['Packaging', -inputs.packagingCost],
-                        ['Komisi/Admin', -(inputs.sellingPrice * inputs.commissionRate)],
-                        ['Service Fee', -(inputs.sellingPrice * inputs.adminFeeRate)],
-                        ['Transaction Fee', -(inputs.sellingPrice * inputs.serviceFeeRate)],
-                        ['Processing Fee', -inputs.processingFee],
-                        ['Ongkir', -inputs.estimatedShipping],
-                        ['Voucher Seller', -inputs.sellerVoucher],
-                      ] as [string, number][]
-                    )
-                      .filter(([, v]) => v !== 0)
-                      .map(([label, value]) => (
-                        <div key={label} className="flex justify-between">
-                          <span className="text-muted-foreground">
-                            {value < 0 ? `− ${label}` : label}
-                          </span>
-                          <span className={value < 0 ? 'text-red-600' : 'font-medium'}>
-                            {value < 0 ? formatRp(-value) : formatRp(value)}
-                          </span>
-                        </div>
-                      ))}
-                    <Separator />
-                    <div className="flex justify-between font-semibold">
-                      <span>Profit Sebelum Iklan</span>
-                      <span className={results.profitBeforeAds >= 0 ? 'text-green-600' : 'text-red-600'}>
-                        {formatRp(results.profitBeforeAds)}
-                      </span>
-                    </div>
-                    {results.maxAdSpendAtTarget > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          {`− Maks. Ad Spend (ROAS ${inputs.targetRoas.toFixed(1)}x)`}
-                        </span>
-                        <span className="text-red-600">
-                          {formatRp(results.maxAdSpendAtTarget)}
-                        </span>
-                      </div>
-                    )}
-                    <Separator />
-                    <div className="flex justify-between font-bold">
-                      <span>Est. Profit Bersih / Unit</span>
-                      <span className={results.profitAtTargetRoas >= 0 ? 'text-green-600' : 'text-red-600'}>
-                        {formatRp(results.profitAtTargetRoas)}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground text-right">
-                      {`Margin: ${
-                        inputs.sellingPrice > 0
-                          ? `${((results.profitAtTargetRoas / inputs.sellingPrice) * 100).toFixed(1)}%`
-                          : 'N/A'
-                      }`}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Saved scenarios                                                      */}
-      {/* ------------------------------------------------------------------ */}
-      {savedScenarios.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-lg font-semibold mb-3">Skenario Tersimpan</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {savedScenarios.map((s) => (
-              <Card key={s.id} className="hover:border-orange-300 transition-colors">
-                <CardContent className="py-3 px-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{s.scenario_name}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{s.marketplace}</p>
-                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                        <span className="text-muted-foreground">Harga Jual</span>
-                        <span className="font-medium">{formatRp(s.selling_price)}</span>
-                        <span className="text-muted-foreground">HPP</span>
-                        <span>{formatRp(s.hpp)}</span>
-                        <span className="text-muted-foreground">Target ROAS</span>
-                        <span>{s.target_roas.toFixed(1)}x</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1 shrink-0">
-                      <button
-                        onClick={() => handleLoadScenario(s)}
-                        className="text-xs text-orange-600 hover:text-orange-700 font-medium"
-                      >
-                        Load
-                      </button>
-                      <button
-                        onClick={() => handleDeleteScenario(s.id)}
-                        className="text-xs text-red-500 hover:text-red-600"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {SHOP_TYPES.find((s) => s.value === shopType)?.description}
+            </p>
           </div>
-        </div>
-      )}
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Kategori Produk</Label>
+            <Select value={category} onValueChange={(v) => { if (v) { setCategory(v); setFeeLock(false) } }}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORIES.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Menentukan preset Biaya Admin di Shopee 2026.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs flex items-center gap-1">
+              Biaya Admin
+              <span className="text-[10px] text-orange-600 font-normal">(auto dari toko × kategori)</span>
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                step={0.01}
+                value={(adminFeeRate * 100).toFixed(2)}
+                onChange={(e) => {
+                  setFeeLock(true)
+                  const n = parseFloat(e.target.value)
+                  setAdminFeeRate(isNaN(n) ? 0 : n / 100)
+                }}
+                className="h-9 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">%</span>
+              {feeLock && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px]"
+                  onClick={() => { setFeeLock(false); setAdminFeeRate(presetAdminFee) }}
+                >
+                  Reset preset
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Preset: {(presetAdminFee * 100).toFixed(2)}% — bisa di-override manual.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Ongkir Extra (Gratis Ongkir XTRA)</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                step={0.01}
+                value={(ongkirExtraRate * 100).toFixed(2)}
+                onChange={(e) => setOngkirExtraRate((parseFloat(e.target.value) || 0) / 100)}
+                className="h-9 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">%</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Default Shopee: 4%</p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Promo Extra (Cashback Extra)</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                step={0.01}
+                value={(promoExtraRate * 100).toFixed(2)}
+                onChange={(e) => setPromoExtraRate((parseFloat(e.target.value) || 0) / 100)}
+                className="h-9 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">%</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Default Shopee: 4.5%</p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Biaya Per Pesanan</Label>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Rp</span>
+              <Input
+                type="number"
+                value={biayaPerPesanan}
+                onChange={(e) => setBiayaPerPesanan(parseFloat(e.target.value) || 0)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">Flat biaya proses per order. Default: Rp 1.250</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Main table */}
+      <Card>
+        <CardHeader className="pb-3 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Budgeting Produk & Target ROAS</CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Isi HPP & Harga Jual tiap varian. Target ROAS & estimasi profit otomatis terisi.
+            </p>
+          </div>
+          <Button size="sm" onClick={addVariant} className="gap-1 bg-orange-500 hover:bg-orange-600 text-white">
+            <Plus className="h-3 w-3" /> Tambah Produk
+          </Button>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left text-xs font-medium text-muted-foreground py-2 pr-3 w-[240px] sticky left-0 bg-background">
+                  Produk
+                </th>
+                {variants.map((v) => (
+                  <th key={v.id} className="py-2 px-2 min-w-[140px]">
+                    <div className="flex items-center gap-1">
+                      <TextCell
+                        value={v.name}
+                        onChange={(name) => updateVariant(v.id, { name })}
+                        placeholder="Nama produk"
+                      />
+                      {variants.length > 1 && (
+                        <button
+                          onClick={() => removeVariant(v.id)}
+                          className="text-muted-foreground hover:text-red-500 shrink-0"
+                          title="Hapus produk"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+                ))}
+                <th className="text-left text-[11px] text-muted-foreground py-2 pl-3 w-[200px]">Keterangan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* HPP (input) */}
+              <RowInput
+                label="HPP"
+                variants={variants}
+                value={(v) => v.hpp}
+                onChange={(v, n) => updateVariant(v.id, { hpp: n })}
+                hint="Harga pokok per unit"
+                accent="input"
+              />
+              {/* Harga Jual (input) */}
+              <RowInput
+                label="Harga Jual"
+                variants={variants}
+                value={(v) => v.hargaJual}
+                onChange={(v, n) => updateVariant(v.id, { hargaJual: n })}
+                hint="Pastikan sudah riset market"
+                accent="input-blue"
+              />
+              {/* Biaya Per Pesanan (readonly uniform) */}
+              <RowReadonly
+                label="Biaya Per Pesanan"
+                variants={variants}
+                cell={() => formatRp(biayaPerPesanan)}
+                hint={`Flat Rp ${formatRp(biayaPerPesanan)} per order`}
+                accent="muted"
+              />
+              {/* Admin Fee */}
+              <RowReadonly
+                label="Admin Fee"
+                variants={variants}
+                cell={() => formatPct(adminFeeRate)}
+                hint="Dari tipe toko × kategori"
+                accent="muted"
+              />
+              {/* Ongkir Extra */}
+              <RowReadonly
+                label="Ongkir Extra"
+                variants={variants}
+                cell={() => formatPct(ongkirExtraRate)}
+                hint="Program Gratis Ongkir XTRA"
+                accent="muted"
+              />
+              {/* Promo Extra */}
+              <RowReadonly
+                label="Promo Extra"
+                variants={variants}
+                cell={() => formatPct(promoExtraRate)}
+                hint="Program Cashback Extra"
+                accent="muted"
+              />
+              {/* Total Pajak */}
+              <RowReadonly
+                label="Total Biaya"
+                variants={variants}
+                cell={(_, i) => formatRp(results[i].totalPajak)}
+                hint={`Total ${formatPct(adminFeeRate + ongkirExtraRate + promoExtraRate)} × Harga + Biaya per pesanan`}
+                accent="muted"
+                bold
+              />
+              {/* Gross Profit */}
+              <RowReadonly
+                label="Gross Profit"
+                variants={variants}
+                cell={(_, i) => formatRp(results[i].grossProfit)}
+                hint="Harga Jual − HPP − Total Biaya"
+                accent={(i) => (results[i].grossProfit >= 0 ? 'green' : 'red')}
+                bold
+              />
+              {/* % Gross Profit */}
+              <RowReadonly
+                label="% Gross Profit"
+                variants={variants}
+                cell={(_, i) => formatPct(results[i].grossProfitPct)}
+                hint="Minimal 40% kalau bisa"
+                accent={(i) => (results[i].grossProfitPct >= 0.4 ? 'green' : results[i].grossProfitPct >= 0.2 ? 'amber' : 'red')}
+                bold
+              />
+
+              {/* Separator */}
+              <tr>
+                <td colSpan={variants.length + 2} className="py-2">
+                  <div className="border-t border-dashed" />
+                </td>
+              </tr>
+
+              {/* Rugi ROAS (BEP) */}
+              <RowReadonly
+                label="Rugi ROAS (BEP)"
+                variants={variants}
+                cell={(_, i) => formatRoas(results[i].bepRoas)}
+                hint="Di bawah ini = rugi"
+                accent="red-bg"
+                bold
+              />
+              {/* Target ROAS Kompetitif */}
+              <RowReadonly
+                label="Target ROAS Kompetitif"
+                variants={variants}
+                cell={(_, i) => formatRoas(results[i].targetKompetitif)}
+                hint="1.7× BEP — cari traffic (produk baru / pindahan GMV Max Auto)"
+                accent="orange-bg"
+                bold
+              />
+              {/* Target ROAS Konservatif */}
+              <RowReadonly
+                label="Target ROAS Konservatif"
+                variants={variants}
+                cell={(_, i) => formatRoas(results[i].targetKonservatif)}
+                hint="2.0× BEP — mulai cari profit"
+                accent="green-bg"
+                bold
+              />
+              {/* Target ROAS Prospektif */}
+              <RowReadonly
+                label="Target ROAS Prospektif"
+                variants={variants}
+                cell={(_, i) => formatRoas(results[i].targetProspektif)}
+                hint="4.0× BEP — have fun aja (bukan untuk produk winning)"
+                accent="muted"
+              />
+
+              {/* Separator */}
+              <tr>
+                <td colSpan={variants.length + 2} className="py-2">
+                  <div className="border-t border-dashed" />
+                </td>
+              </tr>
+
+              {/* Estimasi Hasil ROAS (input) */}
+              <RowInput
+                label="Estimasi Hasil ROAS"
+                variants={variants}
+                value={(v) => v.estimasiRoas}
+                onChange={(v, n) => updateVariant(v.id, { estimasiRoas: n })}
+                hint="ROAS realistis yang kamu targetkan"
+                accent="input"
+                step={0.1}
+                placeholder="0.0"
+                suffix="x"
+              />
+              {/* Estimasi Biaya Iklan */}
+              <RowReadonly
+                label="Estimasi Biaya Iklan"
+                variants={variants}
+                cell={(_, i) =>
+                  results[i].estBiayaIklan !== null ? formatRp(results[i].estBiayaIklan!) : '—'
+                }
+                hint="Harga Jual ÷ Estimasi ROAS"
+                accent="muted"
+              />
+              {/* Estimasi Profit */}
+              <RowReadonly
+                label="Estimasi Profit"
+                variants={variants}
+                cell={(_, i) =>
+                  results[i].estProfit !== null ? formatRp(results[i].estProfit!) : '—'
+                }
+                hint="Gross Profit − Estimasi Biaya Iklan"
+                accent={(i) => {
+                  const p = results[i].estProfit
+                  if (p === null) return 'muted'
+                  return p >= 0 ? 'green' : 'red'
+                }}
+                bold
+              />
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {/* Info footer */}
+      <Card className="bg-muted/30 border-dashed">
+        <CardContent className="py-4 flex items-start gap-3">
+          <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p><strong>Rumus:</strong></p>
+            <p>• Total Biaya = (Admin% + Ongkir% + Promo%) × Harga Jual + Biaya Per Pesanan</p>
+            <p>• Gross Profit = Harga Jual − HPP − Total Biaya</p>
+            <p>• BEP ROAS = Harga Jual ÷ Gross Profit</p>
+            <p>• Target ROAS: Kompetitif = 1.7× BEP · Konservatif = 2.0× BEP · Prospektif = 4.0× BEP</p>
+            <p>• Estimasi Biaya Iklan = Harga Jual ÷ Estimasi Hasil ROAS</p>
+            <p>• Estimasi Profit = Gross Profit − Estimasi Biaya Iklan</p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Reusable table rows
+// ---------------------------------------------------------------------------
+
+type RowAccent =
+  | 'input'
+  | 'input-blue'
+  | 'muted'
+  | 'green'
+  | 'red'
+  | 'amber'
+  | 'red-bg'
+  | 'orange-bg'
+  | 'green-bg'
+
+function accentCellClass(a: RowAccent): string {
+  switch (a) {
+    case 'input':
+      return 'bg-orange-50/60'
+    case 'input-blue':
+      return 'bg-blue-50/60'
+    case 'green':
+      return 'text-green-700 font-medium'
+    case 'red':
+      return 'text-red-600 font-medium'
+    case 'amber':
+      return 'text-amber-600 font-medium'
+    case 'red-bg':
+      return 'bg-red-500 text-white font-semibold'
+    case 'orange-bg':
+      return 'bg-orange-500 text-white font-semibold'
+    case 'green-bg':
+      return 'bg-green-500 text-white font-semibold'
+    case 'muted':
+    default:
+      return ''
+  }
+}
+
+function RowInput({
+  label,
+  variants,
+  value,
+  onChange,
+  hint,
+  accent = 'input',
+  step,
+  placeholder,
+  suffix,
+}: {
+  label: string
+  variants: Variant[]
+  value: (v: Variant) => number
+  onChange: (v: Variant, n: number) => void
+  hint?: string
+  accent?: RowAccent
+  step?: number
+  placeholder?: string
+  suffix?: string
+}) {
+  return (
+    <tr className="border-b last:border-b-0">
+      <td className="text-left text-xs font-medium py-1.5 pr-3 sticky left-0 bg-background">
+        {label}
+      </td>
+      {variants.map((v) => (
+        <td key={v.id} className={`py-1.5 px-1 ${accentCellClass(accent)}`}>
+          <div className="flex items-center">
+            <NumCell
+              value={value(v)}
+              onChange={(n) => onChange(v, n)}
+              step={step}
+              placeholder={placeholder}
+            />
+            {suffix && <span className="text-[10px] text-muted-foreground pr-1">{suffix}</span>}
+          </div>
+        </td>
+      ))}
+      <td className="text-[11px] text-muted-foreground pl-3">{hint}</td>
+    </tr>
+  )
+}
+
+function RowReadonly({
+  label,
+  variants,
+  cell,
+  hint,
+  accent = 'muted',
+  bold = false,
+}: {
+  label: string
+  variants: Variant[]
+  cell: (v: Variant, i: number) => string
+  hint?: string
+  accent?: RowAccent | ((i: number) => RowAccent)
+  bold?: boolean
+}) {
+  return (
+    <tr className="border-b last:border-b-0">
+      <td className={`text-left text-xs py-1.5 pr-3 sticky left-0 bg-background ${bold ? 'font-semibold' : 'font-medium'}`}>
+        {label}
+      </td>
+      {variants.map((v, i) => {
+        const a = typeof accent === 'function' ? accent(i) : accent
+        return (
+          <td
+            key={v.id}
+            className={`py-1.5 px-2 text-right text-xs tabular-nums ${bold ? 'font-semibold' : ''} ${accentCellClass(a)}`}
+          >
+            {cell(v, i)}
+          </td>
+        )
+      })}
+      <td className="text-[11px] text-muted-foreground pl-3">{hint}</td>
+    </tr>
   )
 }
