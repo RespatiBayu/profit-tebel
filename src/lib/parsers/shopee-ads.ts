@@ -1,43 +1,72 @@
 import Papa from 'papaparse'
 import type { AdsParseResult, ParsedAdsRow } from '@/types'
 
-// Column indices in NEW format data rows (0-based)
-// Format: Urutan | Nama Iklan | Status | Kode Produk | Mode Bidding | Penempatan Iklan |
-//         Tanggal Mulai | Tanggal Selesai | Dilihat | Jumlah Klik | Persentase Klik |
-//         Konversi | Konversi Langsung | Tingkat konversi | Tingkat Konversi Langsung |
-//         Biaya per Konversi | Biaya per Konversi Langsung | Produk Terjual | Terjual Langsung |
-//         Omzet Penjualan | Penjualan Langsung | Biaya | Efektifitas Iklan | Efektivitas Langsung |
-//         ACOS | ACOS Langsung | Voucher Amount | Vouchered Sales
-const COL = {
-  RANK: 0,
-  AD_NAME: 1,
-  STATUS: 2,
-  PRODUCT_CODE: 3,
-  BIDDING_MODE: 4,
-  PLACEMENT: 5,
-  START_DATE: 6,
-  END_DATE: 7,
-  IMPRESSIONS: 8,
-  CLICKS: 9,
-  CTR: 10,
-  CONVERSIONS: 11,
-  DIRECT_CONVERSIONS: 12,
-  CONVERSION_RATE: 13,
-  DIRECT_CONVERSION_RATE: 14,
-  COST_PER_CONVERSION: 15,
-  COST_PER_DIRECT_CONVERSION: 16,
-  UNITS_SOLD: 17,
-  DIRECT_UNITS_SOLD: 18,
-  GMV: 19,
-  DIRECT_GMV: 20,
-  AD_SPEND: 21,
-  ROAS: 22,
-  DIRECT_ROAS: 23,
-  ACOS: 24,
-  DIRECT_ACOS: 25,
-  VOUCHER_AMOUNT: 26,
-  VOUCHERED_SALES: 27,
-} as const
+/**
+ * Parser "Semua Laporan Iklan CPC" dari Shopee Seller Centre.
+ *
+ * Shopee suka nambah/ngurangin kolom antar versi export (misal tambah
+ * "Jenis Iklan", "Tampilan Iklan", "Jumlah Produk Dilihat"). Biar ga brittle,
+ * parser ini cari header row secara dinamis (row yang dimulai "Urutan") lalu
+ * map tiap kolom by nama-nya, bukan by posisi hardcoded.
+ */
+
+// Mapping nama kolom header → key internal. Pakai lowercase + trim buat match.
+// Kalau Shopee rename kolom, tambahin alias di array-nya.
+const HEADER_ALIASES: Record<string, string[]> = {
+  ad_name: ['nama iklan'],
+  product_code: ['kode produk'],
+  impressions: ['dilihat', 'iklan dilihat'],
+  clicks: ['jumlah klik'],
+  ctr: ['persentase klik'],
+  conversions: ['konversi'],
+  direct_conversions: ['konversi langsung'],
+  conversion_rate: ['tingkat konversi'],
+  direct_conversion_rate: ['tingkat konversi langsung'],
+  cost_per_conversion: ['biaya per konversi'],
+  cost_per_direct_conversion: ['biaya per konversi langsung'],
+  units_sold: ['produk terjual'],
+  direct_units_sold: ['terjual langsung'],
+  gmv: ['omzet penjualan', 'penjualan dari iklan'],
+  direct_gmv: [
+    'penjualan langsung (gmv langsung)',
+    'penjualan langsung',
+    'gmv langsung',
+  ],
+  ad_spend: ['biaya'],
+  roas: ['efektifitas iklan', 'efektivitas iklan', 'roas'],
+  direct_roas: ['efektivitas langsung', 'efektifitas langsung', 'roas langsung'],
+  acos: [
+    'persentase biaya iklan terhadap penjualan dari iklan (acos)',
+    'acos',
+  ],
+  direct_acos: [
+    'persentase biaya iklan terhadap penjualan dari iklan langsung (acos langsung)',
+    'acos langsung',
+  ],
+  voucher_amount: ['voucher amount', 'jumlah voucher'],
+  vouchered_sales: ['vouchered sales', 'penjualan voucher'],
+}
+
+type ColMap = Record<string, number>
+
+function normalizeHeader(s: string): string {
+  return String(s ?? '').trim().toLowerCase()
+}
+
+function buildColMap(headerRow: string[]): ColMap {
+  const map: ColMap = {}
+  const normalized = headerRow.map(normalizeHeader)
+  for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
+    for (const alias of aliases) {
+      const idx = normalized.indexOf(alias)
+      if (idx !== -1) {
+        map[key] = idx
+        break
+      }
+    }
+  }
+  return map
+}
 
 function parseNum(value: unknown): number {
   if (value === null || value === undefined || value === '' || value === '-') return 0
@@ -76,21 +105,27 @@ function parseStr(value: unknown): string | null {
   return s || null
 }
 
-// Extract period from row index 5 ("Periode,01/03/2026 - 31/03/2026")
-// Falls back to scanning all metadata rows if not found
+/** Helper: ambil nilai kolom by key dari col map. Return '' kalau header missing. */
+function cell(row: string[], cols: ColMap, key: string): string {
+  const idx = cols[key]
+  if (idx === undefined) return ''
+  return row[idx] ?? ''
+}
+
+// Extract period from metadata rows (search for "Periode" key or DD/MM/YYYY range)
 function extractPeriod(allRows: string[][]): { start: string | null; end: string | null } {
-  // Try dedicated row first (row 5 key = "Periode")
-  const periodRow = allRows[5]
-  if (periodRow) {
-    const key = String(periodRow[0] ?? '').trim()
-    const val = String(periodRow[1] ?? '').trim()
-    if (key === 'Periode' && val) {
+  // Scan first 10 rows
+  for (let i = 0; i < Math.min(10, allRows.length); i++) {
+    const row = allRows[i]
+    if (!row) continue
+    const key = String(row[0] ?? '').trim().toLowerCase()
+    if (key === 'periode') {
+      const val = String(row[1] ?? '').trim()
       const parsed = parsePeriodString(val)
       if (parsed.start) return parsed
     }
   }
-
-  // Fallback: scan metadata rows 0-9 for any date range pattern
+  // Fallback: scan full metadata text for date range
   const metaText = (allRows.slice(0, 10) ?? []).flat().join(' ')
   return parsePeriodString(metaText)
 }
@@ -115,34 +150,49 @@ function dmyToIso(dmy: string): string {
   return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
 }
 
-function rowToAdsRow(row: string[]): ParsedAdsRow {
-  const adName = parseStr(row[COL.AD_NAME])   // "Nama Iklan" — campaign identifier
+function rowToAdsRow(row: string[], cols: ColMap): ParsedAdsRow {
+  const adName = parseStr(cell(row, cols, 'ad_name'))
   return {
     ad_name: adName,
-    parent_iklan: null,                        // Format 1 has no parent_iklan
-    product_name: adName,                      // keep product_name = ad_name for backward compat
-    product_code: String(row[COL.PRODUCT_CODE] ?? '').trim(),
-    impressions: Math.round(parseNum(row[COL.IMPRESSIONS])),
-    clicks: Math.round(parseNum(row[COL.CLICKS])),
-    ctr: parsePercent(row[COL.CTR]),
-    conversions: Math.round(parseNum(row[COL.CONVERSIONS])),
-    direct_conversions: Math.round(parseNum(row[COL.DIRECT_CONVERSIONS])),
-    conversion_rate: parsePercent(row[COL.CONVERSION_RATE]),
-    direct_conversion_rate: parsePercent(row[COL.DIRECT_CONVERSION_RATE]),
-    cost_per_conversion: parseNum(row[COL.COST_PER_CONVERSION]),
-    cost_per_direct_conversion: parseNum(row[COL.COST_PER_DIRECT_CONVERSION]),
-    units_sold: Math.round(parseNum(row[COL.UNITS_SOLD])),
-    direct_units_sold: Math.round(parseNum(row[COL.DIRECT_UNITS_SOLD])),
-    gmv: parseNum(row[COL.GMV]),
-    direct_gmv: parseNum(row[COL.DIRECT_GMV]),
-    ad_spend: parseNum(row[COL.AD_SPEND]),
-    roas: parseNum(row[COL.ROAS]),
-    direct_roas: parseNum(row[COL.DIRECT_ROAS]),
-    acos: parsePercent(row[COL.ACOS]),
-    direct_acos: parsePercent(row[COL.DIRECT_ACOS]),
-    voucher_amount: parseNum(row[COL.VOUCHER_AMOUNT]),
-    vouchered_sales: parseNum(row[COL.VOUCHERED_SALES]),
+    parent_iklan: null,
+    product_name: adName,
+    product_code: String(cell(row, cols, 'product_code')).trim(),
+    impressions: Math.round(parseNum(cell(row, cols, 'impressions'))),
+    clicks: Math.round(parseNum(cell(row, cols, 'clicks'))),
+    ctr: parsePercent(cell(row, cols, 'ctr')),
+    conversions: Math.round(parseNum(cell(row, cols, 'conversions'))),
+    direct_conversions: Math.round(parseNum(cell(row, cols, 'direct_conversions'))),
+    conversion_rate: parsePercent(cell(row, cols, 'conversion_rate')),
+    direct_conversion_rate: parsePercent(cell(row, cols, 'direct_conversion_rate')),
+    cost_per_conversion: parseNum(cell(row, cols, 'cost_per_conversion')),
+    cost_per_direct_conversion: parseNum(cell(row, cols, 'cost_per_direct_conversion')),
+    units_sold: Math.round(parseNum(cell(row, cols, 'units_sold'))),
+    direct_units_sold: Math.round(parseNum(cell(row, cols, 'direct_units_sold'))),
+    gmv: parseNum(cell(row, cols, 'gmv')),
+    direct_gmv: parseNum(cell(row, cols, 'direct_gmv')),
+    ad_spend: parseNum(cell(row, cols, 'ad_spend')),
+    roas: parseNum(cell(row, cols, 'roas')),
+    direct_roas: parseNum(cell(row, cols, 'direct_roas')),
+    acos: parsePercent(cell(row, cols, 'acos')),
+    direct_acos: parsePercent(cell(row, cols, 'direct_acos')),
+    voucher_amount: parseNum(cell(row, cols, 'voucher_amount')),
+    vouchered_sales: parseNum(cell(row, cols, 'vouchered_sales')),
   }
+}
+
+/** Cari row yang kemungkinan besar adalah header (dimulai "Urutan" / "No."). */
+function findHeaderRowIdx(allRows: string[][]): number {
+  for (let i = 0; i < Math.min(20, allRows.length); i++) {
+    const first = normalizeHeader(allRows[i]?.[0] ?? '')
+    if (first === 'urutan' || first === 'no.' || first === 'no') {
+      // Pastikan ada kolom "Nama Iklan" di row yg sama biar ga false positive
+      const hasAdName = (allRows[i] ?? []).some(
+        (c) => normalizeHeader(c) === 'nama iklan'
+      )
+      if (hasAdName) return i
+    }
+  }
+  return -1
 }
 
 export function parseShopeeAds(csvText: string): AdsParseResult {
@@ -153,12 +203,25 @@ export function parseShopeeAds(csvText: string): AdsParseResult {
   })
 
   const allRows = parseResult.data as string[][]
-
-  // Metadata rows 0-7, row 8 = empty, row 9 = headers, row 10+ = data
   const { start: periodStart, end: periodEnd } = extractPeriod(allRows)
 
-  // Data starts at row 10 (index 10)
-  const dataRows = allRows.slice(10).filter((row) =>
+  // Auto-detect header row (robust ke perubahan jumlah metadata row antar versi).
+  const headerIdx = findHeaderRowIdx(allRows)
+  if (headerIdx === -1) {
+    throw new Error(
+      'Header "Urutan, Nama Iklan, …" tidak ditemukan. Pastikan file CSV adalah "Semua Laporan Iklan CPC" dari Shopee Seller Centre.'
+    )
+  }
+
+  const cols = buildColMap(allRows[headerIdx])
+  if (cols.ad_name === undefined || cols.product_code === undefined || cols.ad_spend === undefined) {
+    throw new Error(
+      'Kolom wajib (Nama Iklan / Kode Produk / Biaya) tidak ditemukan di header. Kemungkinan format file berubah.'
+    )
+  }
+
+  // Data rows = setelah header
+  const dataRows = allRows.slice(headerIdx + 1).filter((row) =>
     row.some((cell) => String(cell ?? '').trim() !== '')
   )
 
@@ -166,19 +229,17 @@ export function parseShopeeAds(csvText: string): AdsParseResult {
   const rows: ParsedAdsRow[] = []
 
   for (const row of dataRows) {
-    if (!row[COL.PRODUCT_CODE]) continue
-
-    const code = String(row[COL.PRODUCT_CODE]).trim()
+    const rawCode = cell(row, cols, 'product_code')
+    if (!rawCode) continue
+    const code = String(rawCode).trim()
 
     // Aggregate row (code = "-") — capture separately, skip from per-product
     if (code === '-') {
-      shopAggregate = rowToAdsRow(row)
+      shopAggregate = rowToAdsRow(row, cols)
       continue
     }
-
-    // Only keep rows that have a real product code
     if (!code) continue
-    rows.push(rowToAdsRow(row))
+    rows.push(rowToAdsRow(row, cols))
   }
 
   return { rows, shopAggregate, periodStart, periodEnd, parentIklan: null }

@@ -313,28 +313,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Overwrite rows yang berubah: delete by id lalu insert ulang.
-    if (toUpdate.length > 0) {
-      const updateIds = toUpdate
-        .map((r) => existingMap.get(identityKey(r as unknown as { product_code: string; report_period_start: string | null; report_period_end: string | null }))?.id)
-        .filter((id): id is string => Boolean(id))
-      for (let i = 0; i < updateIds.length; i += CHUNK) {
-        const chunk = updateIds.slice(i, i + CHUNK)
-        const { error } = await supabase.from('ads_data').delete().in('id', chunk)
-        if (error) {
-          console.error('Ads product delete-for-update error:', error.message)
-          warnings.push(`Sebagian data produk lama gagal di-refresh: ${error.message}`)
-        }
-      }
-      for (let i = 0; i < toUpdate.length; i += CHUNK) {
-        const chunk = toUpdate.slice(i, i + CHUNK)
-        const { error } = await supabase.from('ads_data').insert(chunk as unknown[])
-        if (error) {
-          console.error('Ads product update (re-insert) error:', error.message)
-          warnings.push(`Sebagian data produk gagal di-update: ${error.message}`)
-        } else {
-          updatedCount += chunk.length
-        }
+    // Overwrite rows yang berubah: UPDATE by id per-row (aman, no data-loss window).
+    for (const row of toUpdate) {
+      const key = identityKey(row as unknown as { product_code: string; report_period_start: string | null; report_period_end: string | null })
+      const existingId = existingMap.get(key)?.id
+      if (!existingId) continue
+      const updateData = { ...(row as Record<string, unknown>) }
+      delete updateData.id
+      const { error } = await supabase.from('ads_data').update(updateData).eq('id', existingId)
+      if (error) {
+        console.error('Ads product update error:', error.message)
+        warnings.push(`Row produk gagal di-update: ${error.message}`)
+      } else {
+        updatedCount += 1
       }
     }
 
