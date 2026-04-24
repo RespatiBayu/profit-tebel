@@ -267,13 +267,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (periodStart && periodEnd) {
+      // Wipe by period OVERLAP (bukan exact match) — lihat komentar di ads/route.ts
       const { count: existingCount } = await supabase
         .from('ads_data')
         .select('id', { count: 'exact', head: true })
         .eq('store_id', storeId)
         .is('ad_name', null)
-        .eq('report_period_start', periodStart)
-        .eq('report_period_end', periodEnd)
+        .lte('report_period_start', periodEnd)
+        .gte('report_period_end', periodStart)
 
       if ((existingCount ?? 0) > 0) {
         const { error: deleteErr } = await supabase
@@ -281,8 +282,8 @@ export async function POST(request: NextRequest) {
           .delete()
           .eq('store_id', storeId)
           .is('ad_name', null)
-          .eq('report_period_start', periodStart)
-          .eq('report_period_end', periodEnd)
+          .lte('report_period_start', periodEnd)
+          .gte('report_period_end', periodStart)
         if (deleteErr) {
           console.error('Ads product wipe-period error:', deleteErr.message)
           warnings.push(`Gagal wipe data periode lama: ${deleteErr.message}`)

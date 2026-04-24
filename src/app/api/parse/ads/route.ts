@@ -264,20 +264,25 @@ export async function POST(request: NextRequest) {
     // Hanya wipe kalau period valid. Kalau null, skip — biar data lama ga
     // ke-wipe sembarangan.
     if (periodStart && periodEnd) {
+      // Wipe existing rows yang periodenya OVERLAP sama periode baru
+      // (existing.start <= new.end AND existing.end >= new.start). Ini nge-catch
+      // case di mana user upload periode lebih lebar yang mencakup upload lama
+      // (misal upload 1-17 Apr dulu, sekarang upload 1-24 Apr — yang 1-17 ikut
+      // ke-wipe biar ga double-count di filter bulanan).
       const { count: existingCount } = await supabase
         .from('ads_data')
         .select('id', { count: 'exact', head: true })
         .eq('store_id', storeId)
-        .eq('report_period_start', periodStart)
-        .eq('report_period_end', periodEnd)
+        .lte('report_period_start', periodEnd)
+        .gte('report_period_end', periodStart)
 
       if ((existingCount ?? 0) > 0) {
         const { error: deleteErr } = await supabase
           .from('ads_data')
           .delete()
           .eq('store_id', storeId)
-          .eq('report_period_start', periodStart)
-          .eq('report_period_end', periodEnd)
+          .lte('report_period_start', periodEnd)
+          .gte('report_period_end', periodStart)
         if (deleteErr) {
           console.error('Ads wipe-period error:', deleteErr.message)
           warnings.push(`Gagal wipe data periode lama: ${deleteErr.message}`)
