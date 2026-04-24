@@ -2,7 +2,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
+import { classifyIncomingRows } from '@/lib/upload/dedupe'
 import type { UploadSummary } from '@/types'
+
+// Metric fields yang dibandingkan untuk detect perubahan antar re-upload.
+// Derived ratios (roas/ctr/cpc) otomatis ikut berubah kalau angka basis ini berubah,
+// jadi gak perlu masuk compare list.
+const ADS_COMPARE_FIELDS = [
+  'impressions',
+  'clicks',
+  'conversions',
+  'direct_conversions',
+  'units_sold',
+  'direct_units_sold',
+  'gmv',
+  'direct_gmv',
+  'ad_spend',
+  'voucher_amount',
+  'vouchered_sales',
+] as const
 
 export async function POST(request: NextRequest) {
   try {
@@ -250,44 +268,74 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Dedup: check which (ad_name, period) already exist for this store
+    // Dedup: fetch existing (ad_name, period) rows with their metric values,
+    // lalu compare sama incoming. Kalau identik → skip, kalau beda → overwrite ke versi baru.
     // Format 1 rows are identified by ad_name (Nama Iklan), not product_code,
     // because two campaigns can target the same product with different ad_names.
-    const existingSet = new Set<string>()
+    const existingMap = new Map<string, { id: string } & Record<string, unknown>>()
     const QUERY_CHUNK = 500
     const uniqueAdNames = Array.from(new Set(adsRows.map((r) => r.ad_name).filter(Boolean))) as string[]
     for (let i = 0; i < uniqueAdNames.length; i += QUERY_CHUNK) {
       const slice = uniqueAdNames.slice(i, i + QUERY_CHUNK)
       const { data: existingAds } = await supabase
         .from('ads_data')
-        .select('ad_name, report_period_start, report_period_end')
+        .select(
+          'id, ad_name, report_period_start, report_period_end, impressions, clicks, conversions, direct_conversions, units_sold, direct_units_sold, gmv, direct_gmv, ad_spend, voucher_amount, vouchered_sales'
+        )
         .eq('store_id', storeId)
         .in('ad_name', slice)
       if (existingAds) {
         for (const row of existingAds) {
-          existingSet.add(
-            `${row.ad_name}|${row.report_period_start}|${row.report_period_end}`
-          )
+          const key = `${row.ad_name}|${row.report_period_start}|${row.report_period_end}`
+          existingMap.set(key, row as { id: string } & Record<string, unknown>)
         }
       }
     }
 
-    const newAdsRows = adsRows.filter(
-      (r) =>
-        !existingSet.has(
-          `${r.ad_name}|${r.report_period_start}|${r.report_period_end}`
-        )
+    const identityKey = (r: { ad_name: string | null; report_period_start: string | null; report_period_end: string | null }) =>
+      `${r.ad_name}|${r.report_period_start}|${r.report_period_end}`
+
+    const { toInsert, toUpdate, unchangedCount } = classifyIncomingRows(
+      adsRows as unknown as Record<string, unknown>[],
+      existingMap as unknown as Map<string, Record<string, unknown>>,
+      (r) => identityKey(r as unknown as { ad_name: string | null; report_period_start: string | null; report_period_end: string | null }),
+      ADS_COMPARE_FIELDS as unknown as readonly string[],
     )
-    const duplicateCount = adsRows.length - newAdsRows.length
 
     const CHUNK = 500
     let insertedCount = 0
+    let updatedCount = 0
     const warnings: string[] = []
-    for (let i = 0; i < newAdsRows.length; i += CHUNK) {
-      const chunk = newAdsRows.slice(i, i + CHUNK)
-      // Use insert (not upsert) — client-side dedup already filtered duplicates.
-      // The partial unique index (ads_data_format1_unique) acts as DB-level safety net.
-      const { error } = await supabase.from('ads_data').insert(chunk)
+
+    // Overwrite rows yang berubah: delete dulu baru insert ulang (lebih simple
+    // daripada upsert terhadap partial unique index).
+    if (toUpdate.length > 0) {
+      const updateIds = toUpdate
+        .map((r) => existingMap.get(identityKey(r as unknown as { ad_name: string | null; report_period_start: string | null; report_period_end: string | null }))?.id)
+        .filter((id): id is string => Boolean(id))
+      for (let i = 0; i < updateIds.length; i += CHUNK) {
+        const chunk = updateIds.slice(i, i + CHUNK)
+        const { error } = await supabase.from('ads_data').delete().in('id', chunk)
+        if (error) {
+          console.error('Ads delete-for-update error:', error.message)
+          warnings.push(`Sebagian data iklan lama gagal di-refresh: ${error.message}`)
+        }
+      }
+      for (let i = 0; i < toUpdate.length; i += CHUNK) {
+        const chunk = toUpdate.slice(i, i + CHUNK)
+        const { error } = await supabase.from('ads_data').insert(chunk as unknown[])
+        if (error) {
+          console.error('Ads update (re-insert) error:', error.message)
+          warnings.push(`Sebagian data iklan gagal di-update: ${error.message}`)
+        } else {
+          updatedCount += chunk.length
+        }
+      }
+    }
+
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      const chunk = toInsert.slice(i, i + CHUNK)
+      const { error } = await supabase.from('ads_data').insert(chunk as unknown[])
       if (error) {
         console.error('Ads insert error:', error.message)
         warnings.push(`Sebagian data iklan gagal disimpan: ${error.message}`)
@@ -296,10 +344,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const duplicateCount = unchangedCount
+
     // Update batch with actual inserted count
     await supabase
       .from('upload_batches')
-      .update({ record_count: insertedCount })
+      .update({ record_count: insertedCount + updatedCount })
       .eq('id', batch.id)
 
     // Auto-create master_products for new products found in ads
@@ -341,6 +391,8 @@ export async function POST(request: NextRequest) {
       batchId: batch.id,
       recordCount: rows.length,
       insertedCount,
+      updatedCount,
+      unchangedCount,
       duplicateCount,
       newProducts,
       periodStart,

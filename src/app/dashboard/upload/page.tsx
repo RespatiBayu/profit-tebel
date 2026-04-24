@@ -40,6 +40,8 @@ interface UploadState {
   result: {
     recordCount?: number
     insertedCount?: number
+    updatedCount?: number
+    unchangedCount?: number
     duplicateCount?: number
     newProducts?: number
     periodStart?: string | null
@@ -145,9 +147,14 @@ function DropZone({
                   +{(state.result.insertedCount ?? 0).toLocaleString('id-ID')} data baru
                 </span>
               </span>
-              {(state.result.duplicateCount ?? 0) > 0 && (
+              {(state.result.updatedCount ?? 0) > 0 && (
+                <span className="text-blue-700 font-medium">
+                  ↻ {state.result.updatedCount?.toLocaleString('id-ID')} di-update ke versi terbaru
+                </span>
+              )}
+              {(state.result.unchangedCount ?? state.result.duplicateCount ?? 0) > 0 && (
                 <span className="text-amber-700">
-                  {state.result.duplicateCount?.toLocaleString('id-ID')} duplikat dilewati
+                  {(state.result.unchangedCount ?? state.result.duplicateCount)?.toLocaleString('id-ID')} tidak berubah (skip)
                 </span>
               )}
               <span className="col-span-2">
@@ -324,6 +331,8 @@ export default function UploadPage() {
         result: {
           recordCount: data.recordCount,
           insertedCount: data.insertedCount,
+          updatedCount: data.updatedCount,
+          unchangedCount: data.unchangedCount,
           duplicateCount: data.duplicateCount,
           newProducts: data.newProducts,
           periodStart: data.periodStart,

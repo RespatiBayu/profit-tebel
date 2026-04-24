@@ -88,8 +88,10 @@ export interface AdsParseResult {
 export interface UploadSummary {
   batchId: string
   recordCount: number         // total rows parsed from file
-  insertedCount: number       // actually saved as new (after dedup)
-  duplicateCount: number      // skipped because already existed
+  insertedCount: number       // saved as new rows
+  updatedCount?: number       // rows yang sudah ada tapi values-nya berubah → di-overwrite ke versi terbaru
+  unchangedCount?: number     // rows yang sudah ada & values identik → skip (no-op)
+  duplicateCount: number      // legacy alias: kompatibel sama UI lama (= unchangedCount)
   newProducts: number
   periodStart: string | null
   periodEnd: string | null

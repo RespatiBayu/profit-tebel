@@ -2,7 +2,35 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { parseShopeeIncome } from '@/lib/parsers/shopee-income'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
+import { classifyIncomingRows } from '@/lib/upload/dedupe'
 import type { UploadSummary } from '@/types'
+
+// Financial fields yang mungkin direvisi Shopee antar export (settlement update,
+// koreksi admin fee, dll) — dibandingkan untuk detect perubahan.
+const ORDER_COMPARE_FIELDS = [
+  'release_date',
+  'payment_method',
+  'original_price',
+  'product_discount',
+  'refund_amount',
+  'seller_voucher',
+  'seller_voucher_cofund',
+  'seller_cashback',
+  'buyer_shipping_fee',
+  'shopee_shipping_subsidy',
+  'actual_shipping_cost',
+  'return_shipping_cost',
+  'ams_commission',
+  'admin_fee',
+  'service_fee',
+  'processing_fee',
+  'premium_fee',
+  'shipping_program_fee',
+  'transaction_fee',
+  'campaign_fee',
+  'total_income',
+  'seller_free_shipping_promo',
+] as const
 
 export async function POST(request: NextRequest) {
   try {
@@ -135,31 +163,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Dedup: check which order_numbers already exist for THIS store
+    // Dedup: fetch existing orders with their financial fields, classify incoming
+    // → insert (baru), update (values berubah = Shopee revisi settlement), skip (identik).
     const incomingOrderNumbers = orders.map((o) => o.order_number)
-    const existingSet = new Set<string>()
+    const existingMap = new Map<string, Record<string, unknown>>()
 
     // Query in chunks (Supabase .in() has a limit around 1000)
     const QUERY_CHUNK = 500
+    const selectCols = ['order_number', ...ORDER_COMPARE_FIELDS].join(', ')
     for (let i = 0; i < incomingOrderNumbers.length; i += QUERY_CHUNK) {
       const slice = incomingOrderNumbers.slice(i, i + QUERY_CHUNK)
       const { data: existingOrders } = await supabase
         .from('orders')
-        .select('order_number')
+        .select(selectCols)
         .eq('store_id', storeId)
         .in('order_number', slice)
       if (existingOrders) {
-        for (const row of existingOrders) existingSet.add(row.order_number)
+        for (const row of existingOrders as unknown as Array<Record<string, unknown>>) {
+          existingMap.set(row.order_number as string, row)
+        }
       }
     }
 
-    // Filter: only keep NEW orders
-    const newOrders = orders.filter((o) => !existingSet.has(o.order_number))
-    const duplicateCount = orders.length - newOrders.length
+    const { toInsert, toUpdate, unchangedCount } = classifyIncomingRows(
+      orders as unknown as Record<string, unknown>[],
+      existingMap,
+      (o) => (o as unknown as { order_number: string }).order_number,
+      ORDER_COMPARE_FIELDS as unknown as readonly string[],
+    )
 
-    // Insert new orders in chunks of 500
     const CHUNK = 500
-    const orderRows = newOrders.map((o) => ({
+    const toInsertRows = (toInsert as unknown as typeof orders).map((o) => ({
+      ...o,
+      user_id: user.id,
+      store_id: storeId,
+      upload_batch_id: batch.id,
+      marketplace,
+    }))
+    const toUpdateRows = (toUpdate as unknown as typeof orders).map((o) => ({
       ...o,
       user_id: user.id,
       store_id: storeId,
@@ -168,9 +209,13 @@ export async function POST(request: NextRequest) {
     }))
 
     let insertedCount = 0
+    let updatedCount = 0
     const warnings: string[] = []
-    for (let i = 0; i < orderRows.length; i += CHUNK) {
-      const chunk = orderRows.slice(i, i + CHUNK)
+
+    // Insert rows baru — pakai upsert + ignoreDuplicates sebagai safety net
+    // jikalau row muncul di race condition.
+    for (let i = 0; i < toInsertRows.length; i += CHUNK) {
+      const chunk = toInsertRows.slice(i, i + CHUNK)
       const { error } = await supabase
         .from('orders')
         .upsert(chunk, {
@@ -184,6 +229,26 @@ export async function POST(request: NextRequest) {
         insertedCount += chunk.length
       }
     }
+
+    // Overwrite rows yang berubah — upsert dengan ignoreDuplicates: false akan
+    // meng-update kolom-kolom baru kalau key (store_id, order_number) sudah ada.
+    for (let i = 0; i < toUpdateRows.length; i += CHUNK) {
+      const chunk = toUpdateRows.slice(i, i + CHUNK)
+      const { error } = await supabase
+        .from('orders')
+        .upsert(chunk, {
+          onConflict: 'store_id,order_number',
+          ignoreDuplicates: false,
+        })
+      if (error) {
+        console.error('Order update error:', error.message)
+        warnings.push(`Sebagian order gagal di-update: ${error.message}`)
+      } else {
+        updatedCount += chunk.length
+      }
+    }
+
+    const duplicateCount = unchangedCount
 
     // Insert order_products — always upsert ALL parsed product rows (not just for new orders).
     // This allows re-upload to backfill missing mappings for already-existing orders.
@@ -226,7 +291,7 @@ export async function POST(request: NextRequest) {
     // Update batch with actual inserted count
     await supabase
       .from('upload_batches')
-      .update({ record_count: insertedCount })
+      .update({ record_count: insertedCount + updatedCount })
       .eq('id', batch.id)
 
     let newProducts = 0
@@ -266,6 +331,8 @@ export async function POST(request: NextRequest) {
       batchId: batch.id,
       recordCount: orders.length,
       insertedCount,
+      updatedCount,
+      unchangedCount,
       duplicateCount,
       newProducts,
       periodStart,
