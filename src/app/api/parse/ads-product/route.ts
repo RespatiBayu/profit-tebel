@@ -2,23 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { parseShopeeAdsProduct } from '@/lib/parsers/shopee-ads-product'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
-import { classifyIncomingRows } from '@/lib/upload/dedupe'
 import type { UploadSummary } from '@/types'
-
-// Metric fields yang dibandingkan untuk detect perubahan antar re-upload.
-const ADS_COMPARE_FIELDS = [
-  'impressions',
-  'clicks',
-  'conversions',
-  'direct_conversions',
-  'units_sold',
-  'direct_units_sold',
-  'gmv',
-  'direct_gmv',
-  'ad_spend',
-  'voucher_amount',
-  'vouchered_sales',
-] as const
 
 export async function POST(request: NextRequest) {
   try {
@@ -269,43 +253,12 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Dedup: fetch existing (product_code, period) rows with metric values,
-    // classify incoming → insert (baru), update (berubah), atau skip (identik).
-    // (ad_name IS NULL distinguishes Format 2 from Format 1 in the partial unique index)
-    const existingMap = new Map<string, { id: string } & Record<string, unknown>>()
-    const QUERY_CHUNK = 500
-    const uniqueCodes = Array.from(new Set(adsRows.map((r) => r.product_code)))
-    for (let i = 0; i < uniqueCodes.length; i += QUERY_CHUNK) {
-      const slice = uniqueCodes.slice(i, i + QUERY_CHUNK)
-      const { data: existingAds } = await supabase
-        .from('ads_data')
-        .select(
-          'id, product_code, report_period_start, report_period_end, impressions, clicks, conversions, direct_conversions, units_sold, direct_units_sold, gmv, direct_gmv, ad_spend, voucher_amount, vouchered_sales'
-        )
-        .eq('store_id', storeId)
-        .is('ad_name', null)           // only check Format 2 rows
-        .in('product_code', slice)
-      if (existingAds) {
-        for (const row of existingAds) {
-          const key = `${row.product_code}|${row.report_period_start}|${row.report_period_end}`
-          existingMap.set(key, row as { id: string } & Record<string, unknown>)
-        }
-      }
-    }
-
-    const identityKey = (r: { product_code: string; report_period_start: string | null; report_period_end: string | null }) =>
-      `${r.product_code}|${r.report_period_start}|${r.report_period_end}`
-
-    const { toInsert, toUpdate, unchangedCount } = classifyIncomingRows(
-      adsRows as unknown as Record<string, unknown>[],
-      existingMap as unknown as Map<string, Record<string, unknown>>,
-      (r) => identityKey(r as unknown as { product_code: string; report_period_start: string | null; report_period_end: string | null }),
-      ADS_COMPARE_FIELDS as unknown as readonly string[],
-    )
-
+    // "Always take the latest version" strategy — Format 2 (ad_name IS NULL).
+    // Wipe semua Format 2 rows di store+periode yang sama, lalu insert fresh.
     const CHUNK = 500
     let insertedCount = 0
     let updatedCount = 0
+    const unchangedCount = 0
     const warnings: string[] = []
     if (!parentIklan) {
       warnings.push(
@@ -313,31 +266,52 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Overwrite rows yang berubah: UPDATE by id per-row (aman, no data-loss window).
-    for (const row of toUpdate) {
-      const key = identityKey(row as unknown as { product_code: string; report_period_start: string | null; report_period_end: string | null })
-      const existingId = existingMap.get(key)?.id
-      if (!existingId) continue
-      const updateData = { ...(row as Record<string, unknown>) }
-      delete updateData.id
-      const { error } = await supabase.from('ads_data').update(updateData).eq('id', existingId)
-      if (error) {
-        console.error('Ads product update error:', error.message)
-        warnings.push(`Row produk gagal di-update: ${error.message}`)
-      } else {
-        updatedCount += 1
+    if (periodStart && periodEnd) {
+      const { count: existingCount } = await supabase
+        .from('ads_data')
+        .select('id', { count: 'exact', head: true })
+        .eq('store_id', storeId)
+        .is('ad_name', null)
+        .eq('report_period_start', periodStart)
+        .eq('report_period_end', periodEnd)
+
+      if ((existingCount ?? 0) > 0) {
+        const { error: deleteErr } = await supabase
+          .from('ads_data')
+          .delete()
+          .eq('store_id', storeId)
+          .is('ad_name', null)
+          .eq('report_period_start', periodStart)
+          .eq('report_period_end', periodEnd)
+        if (deleteErr) {
+          console.error('Ads product wipe-period error:', deleteErr.message)
+          warnings.push(`Gagal wipe data periode lama: ${deleteErr.message}`)
+        } else {
+          updatedCount = existingCount ?? 0
+        }
       }
+    } else {
+      warnings.push(
+        'Periode tidak terdeteksi dari metadata file. Data baru di-insert tanpa menghapus data periode lama — kemungkinan muncul duplikat.'
+      )
     }
 
-    for (let i = 0; i < toInsert.length; i += CHUNK) {
-      const chunk = toInsert.slice(i, i + CHUNK)
-      const { error } = await supabase.from('ads_data').insert(chunk as unknown[])
+    for (let i = 0; i < adsRows.length; i += CHUNK) {
+      const chunk = adsRows.slice(i, i + CHUNK)
+      const { error } = await supabase.from('ads_data').insert(chunk)
       if (error) {
         console.error('Ads product insert error:', error.message)
         warnings.push(`Sebagian data produk gagal disimpan: ${error.message}`)
       } else {
         insertedCount += chunk.length
       }
+    }
+
+    if (updatedCount > 0) {
+      const actualUpdated = Math.min(updatedCount, insertedCount)
+      const actualInserted = insertedCount - actualUpdated
+      updatedCount = actualUpdated
+      insertedCount = actualInserted
     }
 
     const duplicateCount = unchangedCount

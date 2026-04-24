@@ -2,25 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
-import { classifyIncomingRows } from '@/lib/upload/dedupe'
 import type { UploadSummary } from '@/types'
-
-// Metric fields yang dibandingkan untuk detect perubahan antar re-upload.
-// Derived ratios (roas/ctr/cpc) otomatis ikut berubah kalau angka basis ini berubah,
-// jadi gak perlu masuk compare list.
-const ADS_COMPARE_FIELDS = [
-  'impressions',
-  'clicks',
-  'conversions',
-  'direct_conversions',
-  'units_sold',
-  'direct_units_sold',
-  'gmv',
-  'direct_gmv',
-  'ad_spend',
-  'voucher_amount',
-  'vouchered_sales',
-] as const
 
 export async function POST(request: NextRequest) {
   try {
@@ -268,73 +250,65 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Dedup: fetch existing (ad_name, period) rows with their metric values,
-    // lalu compare sama incoming. Kalau identik → skip, kalau beda → overwrite ke versi baru.
-    // Format 1 rows are identified by ad_name (Nama Iklan), not product_code,
-    // because two campaigns can target the same product with different ad_names.
-    const existingMap = new Map<string, { id: string } & Record<string, unknown>>()
-    const QUERY_CHUNK = 500
-    const uniqueAdNames = Array.from(new Set(adsRows.map((r) => r.ad_name).filter(Boolean))) as string[]
-    for (let i = 0; i < uniqueAdNames.length; i += QUERY_CHUNK) {
-      const slice = uniqueAdNames.slice(i, i + QUERY_CHUNK)
-      const { data: existingAds } = await supabase
-        .from('ads_data')
-        .select(
-          'id, ad_name, report_period_start, report_period_end, impressions, clicks, conversions, direct_conversions, units_sold, direct_units_sold, gmv, direct_gmv, ad_spend, voucher_amount, vouchered_sales'
-        )
-        .eq('store_id', storeId)
-        .in('ad_name', slice)
-      if (existingAds) {
-        for (const row of existingAds) {
-          const key = `${row.ad_name}|${row.report_period_start}|${row.report_period_end}`
-          existingMap.set(key, row as { id: string } & Record<string, unknown>)
-        }
-      }
-    }
-
-    const identityKey = (r: { ad_name: string | null; report_period_start: string | null; report_period_end: string | null }) =>
-      `${r.ad_name}|${r.report_period_start}|${r.report_period_end}`
-
-    const { toInsert, toUpdate, unchangedCount } = classifyIncomingRows(
-      adsRows as unknown as Record<string, unknown>[],
-      existingMap as unknown as Map<string, Record<string, unknown>>,
-      (r) => identityKey(r as unknown as { ad_name: string | null; report_period_start: string | null; report_period_end: string | null }),
-      ADS_COMPARE_FIELDS as unknown as readonly string[],
-    )
-
+    // "Always take the latest version" strategy:
+    // File upload untuk periode X dianggap source of truth untuk periode itu.
+    // Wipe dulu semua ads_data existing di store+periode yang sama (termasuk
+    // row-row garbage dari upload lama yang mungkin ter-shift kolomnya),
+    // lalu insert semua row fresh dari file ini.
     const CHUNK = 500
     let insertedCount = 0
     let updatedCount = 0
+    const unchangedCount = 0
     const warnings: string[] = []
 
-    // Overwrite rows yang berubah: UPDATE by id per-row. Cara ini aman — kalau
-    // insert gagal, data lama ga hilang (beda dengan pola delete-then-insert
-    // yang risky kalau insert fail di tengah jalan).
-    for (const row of toUpdate) {
-      const key = identityKey(row as unknown as { ad_name: string | null; report_period_start: string | null; report_period_end: string | null })
-      const existingId = existingMap.get(key)?.id
-      if (!existingId) continue
-      // Strip id kalau kebawa (safety), update all columns
-      const updateData = { ...(row as Record<string, unknown>) }
-      delete updateData.id
-      const { error } = await supabase.from('ads_data').update(updateData).eq('id', existingId)
-      if (error) {
-        console.error('Ads update error:', error.message)
-        warnings.push(`Row iklan gagal di-update: ${error.message}`)
-      } else {
-        updatedCount += 1
+    // Hanya wipe kalau period valid. Kalau null, skip — biar data lama ga
+    // ke-wipe sembarangan.
+    if (periodStart && periodEnd) {
+      const { count: existingCount } = await supabase
+        .from('ads_data')
+        .select('id', { count: 'exact', head: true })
+        .eq('store_id', storeId)
+        .eq('report_period_start', periodStart)
+        .eq('report_period_end', periodEnd)
+
+      if ((existingCount ?? 0) > 0) {
+        const { error: deleteErr } = await supabase
+          .from('ads_data')
+          .delete()
+          .eq('store_id', storeId)
+          .eq('report_period_start', periodStart)
+          .eq('report_period_end', periodEnd)
+        if (deleteErr) {
+          console.error('Ads wipe-period error:', deleteErr.message)
+          warnings.push(`Gagal wipe data periode lama: ${deleteErr.message}`)
+        } else {
+          updatedCount = existingCount ?? 0
+        }
       }
+    } else {
+      warnings.push(
+        'Periode tidak terdeteksi dari metadata file. Data baru di-insert tanpa menghapus data periode lama — kemungkinan muncul duplikat.'
+      )
     }
 
-    for (let i = 0; i < toInsert.length; i += CHUNK) {
-      const chunk = toInsert.slice(i, i + CHUNK)
-      const { error } = await supabase.from('ads_data').insert(chunk as unknown[])
+    for (let i = 0; i < adsRows.length; i += CHUNK) {
+      const chunk = adsRows.slice(i, i + CHUNK)
+      const { error } = await supabase.from('ads_data').insert(chunk)
       if (error) {
         console.error('Ads insert error:', error.message)
         warnings.push(`Sebagian data iklan gagal disimpan: ${error.message}`)
       } else {
         insertedCount += chunk.length
       }
+    }
+
+    // Kalau ada row yang di-wipe, insertedCount baru dihitung sebagai "update"
+    // (menggantikan row lama), sisanya adalah "data baru".
+    if (updatedCount > 0) {
+      const actualUpdated = Math.min(updatedCount, insertedCount)
+      const actualInserted = insertedCount - actualUpdated
+      updatedCount = actualUpdated
+      insertedCount = actualInserted
     }
 
     const duplicateCount = unchangedCount
