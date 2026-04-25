@@ -190,6 +190,7 @@ export async function POST(request: NextRequest) {
       upload_batch_id: batch.id,
       marketplace,
       ad_name: null,                    // Format 2 has no individual ad name
+      ad_status: null,
       parent_iklan: parentIklan,        // "Parent Iklan" from file metadata
       product_name: r.product_name,
       product_code: r.product_code,
@@ -225,7 +226,8 @@ export async function POST(request: NextRequest) {
         upload_batch_id: batch.id,
         marketplace,
         ad_name: null,
-        parent_iklan: parentIklan,
+        ad_status: null,
+      parent_iklan: parentIklan,
         product_name: 'Shop GMV Max (Total)',
         product_code: '-',
         impressions: shopAggregate.impressions,

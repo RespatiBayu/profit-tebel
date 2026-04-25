@@ -95,6 +95,20 @@ function SignalBadge({ signal }: { signal: keyof typeof SIGNAL_CONFIG }) {
   )
 }
 
+function AdStatusBadge({ status }: { status: string | null }) {
+  if (!status) return <span className="text-xs text-muted-foreground">—</span>
+  const s = status.trim().toLowerCase()
+  let color = 'bg-muted text-muted-foreground border-border'
+  if (s === 'berjalan') color = 'bg-green-100 text-green-800 border-green-300'
+  else if (s === 'dijeda') color = 'bg-amber-100 text-amber-800 border-amber-300'
+  else if (s === 'berakhir') color = 'bg-gray-100 text-gray-700 border-gray-300'
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${color}`}>
+      {status}
+    </span>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // KPI Card
 // ---------------------------------------------------------------------------
@@ -237,6 +251,7 @@ function TrafficLightTable({
                   Nama Iklan <SortIcon col="name" />
                 </button>
               </TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Sinyal</TableHead>
               <TableHead>
                 <button
@@ -321,6 +336,7 @@ function TrafficLightTable({
                       )}
                     </div>
                   </TableCell>
+                  <TableCell><AdStatusBadge status={row.adStatus} /></TableCell>
                   <TableCell><SignalBadge signal={row.signal} /></TableCell>
                   <TableCell>
                     {row.bepRoas !== null ? (
@@ -372,6 +388,7 @@ function TrafficLightTable({
                           <p className="text-[10px] text-muted-foreground font-mono">{p.product_code}</p>
                         </div>
                       </TableCell>
+                      <TableCell />
                       <TableCell><SignalBadge signal={pSignal} /></TableCell>
                       <TableCell>
                         {pBepRoas !== null ? (

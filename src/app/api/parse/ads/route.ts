@@ -187,6 +187,7 @@ export async function POST(request: NextRequest) {
       upload_batch_id: batch.id,
       marketplace,
       ad_name: r.ad_name,        // "Nama Iklan" — campaign identifier
+      ad_status: r.ad_status,    // Berjalan | Dijeda | Berakhir
       parent_iklan: null,        // Format 1 has no parent_iklan
       product_name: r.product_name,
       product_code: r.product_code,
@@ -222,6 +223,7 @@ export async function POST(request: NextRequest) {
         upload_batch_id: batch.id,
         marketplace,
         ad_name: shopAggregate.ad_name ?? 'Shop GMV Max (Agregat)',
+        ad_status: shopAggregate.ad_status,
         parent_iklan: null,
         product_name: shopAggregate.ad_name ?? 'Shop GMV Max (Agregat)',
         product_code: '-',

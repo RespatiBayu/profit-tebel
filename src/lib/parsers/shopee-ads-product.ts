@@ -174,6 +174,7 @@ function rowToAdsRow(row: string[], parentIklan: string | null): ParsedAdsRow {
   return {
     ad_name: null,                              // Format 2 has no campaign name per row
     parent_iklan: parentIklan,                  // populated from file metadata
+    ad_status: null,                            // Format 2 has no per-row status
     product_name: parseStr(row[COL.PRODUCT_NAME]), // Nama Produk (actual product name)
     product_code: String(row[COL.PRODUCT_CODE] ?? '').trim(),
     impressions: Math.round(parseNum(row[COL.IMPRESSIONS])),

@@ -43,6 +43,7 @@ export interface ParsedOrderProduct {
 export interface ParsedAdsRow {
   ad_name: string | null        // "Nama Iklan" from Format 1 (null for Format 2)
   parent_iklan: string | null   // "Parent Iklan" from Format 2 (null for Format 1)
+  ad_status: string | null      // "Status" from Format 1: Berjalan | Dijeda | Berakhir
   product_name: string | null
   product_code: string
   impressions: number
@@ -246,6 +247,7 @@ export interface DbAdsRow {
   marketplace: string
   ad_name: string | null        // "Nama Iklan" from Format 1 (null for Format 2)
   parent_iklan: string | null   // "Parent Iklan" from Format 2 (null for Format 1)
+  ad_status: string | null      // Format 1: Berjalan | Dijeda | Berakhir
   product_name: string | null
   product_code: string
   impressions: number
@@ -289,6 +291,7 @@ export interface AdsKpis {
 
 export interface TrafficLightRow {
   adName: string | null          // "Nama Iklan" from Format 1 — campaign identifier
+  adStatus: string | null        // Status iklan: Berjalan | Dijeda | Berakhir | null (Format 2)
   productCode: string
   productName: string
   reportPeriodStart: string | null

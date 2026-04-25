@@ -14,6 +14,7 @@ import type { AdsParseResult, ParsedAdsRow } from '@/types'
 // Kalau Shopee rename kolom, tambahin alias di array-nya.
 const HEADER_ALIASES: Record<string, string[]> = {
   ad_name: ['nama iklan'],
+  ad_status: ['status'],
   product_code: ['kode produk'],
   impressions: ['dilihat', 'iklan dilihat'],
   clicks: ['jumlah klik'],
@@ -155,6 +156,7 @@ function rowToAdsRow(row: string[], cols: ColMap): ParsedAdsRow {
   return {
     ad_name: adName,
     parent_iklan: null,
+    ad_status: parseStr(cell(row, cols, 'ad_status')),
     product_name: adName,
     product_code: String(cell(row, cols, 'product_code')).trim(),
     impressions: Math.round(parseNum(cell(row, cols, 'impressions'))),

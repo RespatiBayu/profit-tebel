@@ -259,6 +259,7 @@ export function buildTrafficLightRows(
 
       return {
         adName: r.ad_name,
+        adStatus: r.ad_status,
         productCode: r.product_code,
         productName: r.product_name ?? r.ad_name ?? r.product_code,
         reportPeriodStart: r.report_period_start,
