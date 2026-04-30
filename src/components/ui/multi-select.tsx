@@ -52,7 +52,10 @@ export function MultiSelect({
 
   const label = (() => {
     if (selected.length === 0) return placeholder ?? allLabel
-    if (selected.length === options.length) return allLabel
+    // Note: jangan collapse jadi allLabel ketika selected.length === options.length.
+    // User explicit pick (misal "2026") harus tetap kelihatan walaupun kebetulan
+    // di halaman lain available options-nya cuma 2026 → biar nggak misleading
+    // "filter direset" padahal masih kefilter.
     if (selected.length > collapseAfter) return `${selected.length} dipilih`
     return options
       .filter((o) => selected.includes(o.value))
