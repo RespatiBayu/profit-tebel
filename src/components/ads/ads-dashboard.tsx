@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { usePeriodStore } from '@/lib/stores/period-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
@@ -24,8 +25,7 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts'
-import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Calendar } from 'lucide-react'
-import { MultiSelect } from '@/components/ui/multi-select'
+import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   calculateAdsOverview,
   buildTrafficLightRows,
@@ -625,32 +625,48 @@ interface Props {
 }
 
 export default function AdsDashboard({ adsData, adsProductData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
-  // Slicer multi-select: Tahun + Bulan
-  const [selectedYears, setSelectedYears] = useState<string[]>([])
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
+  // Period filter — sumber dari global Zustand store (shared dgn Dashboard Analisis)
+  const selectedYears = usePeriodStore((s) => s.selectedYears)
+  const selectedMonths = usePeriodStore((s) => s.selectedMonths)
+  const setAvailable = usePeriodStore((s) => s.setAvailable)
 
-  // Derive available years + months from ALL ads data
-  const { availableYears, availableMonthsForYear } = useMemo(() => {
-    const yearMonthMap = new Map<string, Set<string>>()
-    for (const ad of adsData) {
-      const date = ad.report_period_start ?? ad.report_period_end
-      if (!date) continue
+  // Build year→months map dari ads data + adsProductData (Format 1 + Format 2)
+  const yearMonthMap = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    const collect = (date: string | null | undefined) => {
+      if (!date) return
       const y = date.slice(0, 4)
       const m = date.slice(5, 7)
-      const ms = yearMonthMap.get(y) ?? new Set<string>()
+      const ms = map.get(y) ?? new Set<string>()
       ms.add(m)
-      yearMonthMap.set(y, ms)
+      map.set(y, ms)
     }
+    for (const ad of adsData) collect(ad.report_period_start ?? ad.report_period_end)
+    for (const ad of adsProductData) collect(ad.report_period_start ?? ad.report_period_end)
+    return map
+  }, [adsData, adsProductData])
+
+  // Publish available periods ke global store supaya header PeriodSwitcher tau
+  useEffect(() => {
     const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a))
+    const byYear: Record<string, string[]> = {}
+    for (const [y, ms] of Array.from(yearMonthMap.entries())) {
+      byYear[y] = Array.from(ms).sort()
+    }
+    setAvailable(years, byYear)
+  }, [yearMonthMap, setAvailable])
+
+  // Compute effective months (intersect dgn data yg ada di tahun terpilih)
+  const availableMonthsForYear = useMemo(() => {
+    const years = Array.from(yearMonthMap.keys())
     const relevantYears = selectedYears.length > 0 ? selectedYears : years
     const allMonths = new Set<string>()
     for (const y of relevantYears) {
       const ms = yearMonthMap.get(y)
       if (ms) for (const m of Array.from(ms)) allMonths.add(m)
     }
-    const months = Array.from(allMonths).sort()
-    return { availableYears: years, availableMonthsForYear: months }
-  }, [adsData, selectedYears])
+    return Array.from(allMonths).sort()
+  }, [yearMonthMap, selectedYears])
 
   const effectiveMonths = useMemo(
     () => selectedMonths.filter((m) => availableMonthsForYear.includes(m)),
@@ -754,29 +770,6 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
               : 'Hanya kampanye toko (Shop GMV Max)'}
             {periodLabel && <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full">{periodLabel}</span>}
           </p>
-        </div>
-        {/* Period slicer: Tahun + Bulan multi-select */}
-        <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-          <MultiSelect
-            className="w-32"
-            allLabel="Semua Tahun"
-            placeholder="Tahun"
-            options={availableYears.map((y) => ({ value: y, label: y }))}
-            selected={selectedYears}
-            onChange={setSelectedYears}
-          />
-          <MultiSelect
-            className="w-36"
-            allLabel="Semua Bulan"
-            placeholder="Bulan"
-            options={availableMonthsForYear.map((m) => ({
-              value: m,
-              label: new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' }),
-            }))}
-            selected={effectiveMonths}
-            onChange={setSelectedMonths}
-          />
         </div>
       </div>
 

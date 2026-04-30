@@ -21,7 +21,8 @@
       "Bash(vercel --prod)",
       "Bash(npx vercel *)",
       "Bash(npm run *)",
-      "Bash(rm build.log)"
+      "Bash(rm build.log)",
+      "Bash(find \"/d/01.Project/15 Profit Tebel/profit-tebel/src\" -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" \\\\\\) -exec grep -l \"zustand\\\\|createStore\\\\|useStore\" {} \\\\;)"
     ]
   }
 }

@@ -29,6 +29,7 @@ import {
   Store,
 } from 'lucide-react'
 import { StoreSwitcher } from './store-switcher'
+import { PeriodSwitcher } from './period-switcher'
 
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -144,9 +145,10 @@ export default function DashboardShell({
             <Menu className="h-5 w-5" />
           </Button>
 
-          {/* Store switcher */}
-          <div className="flex-1 flex items-center lg:justify-start justify-center">
+          {/* Store switcher + Period filter (global) */}
+          <div className="flex-1 flex items-center gap-3 lg:justify-start justify-center flex-wrap">
             <StoreSwitcher />
+            <PeriodSwitcher />
           </div>
 
           {/* User menu */}

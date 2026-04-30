@@ -1,13 +1,13 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { usePeriodStore } from '@/lib/stores/period-store'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
-import { MultiSelect } from '@/components/ui/multi-select'
 import {
   Table,
   TableBody,
@@ -415,37 +415,51 @@ interface Props {
 
 export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, noHppCount }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
-  // Slicer multi-select: Tahun + Bulan. Array kosong = "semua".
-  const [selectedYears, setSelectedYears] = useState<string[]>([])
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
+  // Period filter — sumber dari global Zustand store (shared dgn Detail Iklan)
+  const selectedYears = usePeriodStore((s) => s.selectedYears)
+  const selectedMonths = usePeriodStore((s) => s.selectedMonths)
+  const setAvailable = usePeriodStore((s) => s.setAvailable)
 
   // Build lookup maps
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
   const orderProductMap = useMemo(() => buildOrderProductMap(orderProducts), [orderProducts])
 
-  // Derive available years + months from orders
-  const { availableYears, availableMonthsForYear } = useMemo(() => {
-    const yearMonthMap = new Map<string, Set<string>>()
-    for (const o of orders) {
-      if (!o.order_date) continue
-      const y = o.order_date.slice(0, 4)
-      const m = o.order_date.slice(5, 7)
-      const ms = yearMonthMap.get(y) ?? new Set<string>()
+  // Build year→months map dari orders + adsData (gabungan source)
+  const yearMonthMap = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    const collect = (date: string | null | undefined) => {
+      if (!date) return
+      const y = date.slice(0, 4)
+      const m = date.slice(5, 7)
+      const ms = map.get(y) ?? new Set<string>()
       ms.add(m)
-      yearMonthMap.set(y, ms)
+      map.set(y, ms)
     }
-    const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a)) // desc
-    // Kalau tahun spesifik terpilih, munculin bulan yang ada di tahun-tahun itu aja;
-    // selain itu gabungkan semua bulan.
+    for (const o of orders) collect(o.order_date)
+    for (const a of adsData) collect(a.report_period_start ?? a.report_period_end)
+    return map
+  }, [orders, adsData])
+
+  // Publish available periods ke global store supaya header PeriodSwitcher tau
+  useEffect(() => {
+    const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a))
+    const byYear: Record<string, string[]> = {}
+    for (const [y, ms] of Array.from(yearMonthMap.entries())) {
+      byYear[y] = Array.from(ms).sort()
+    }
+    setAvailable(years, byYear)
+  }, [yearMonthMap, setAvailable])
+
+  const availableMonthsForYear = useMemo(() => {
+    const years = Array.from(yearMonthMap.keys())
     const relevantYears = selectedYears.length > 0 ? selectedYears : years
     const allMonths = new Set<string>()
     for (const y of relevantYears) {
       const ms = yearMonthMap.get(y)
       if (ms) for (const m of Array.from(ms)) allMonths.add(m)
     }
-    const months = Array.from(allMonths).sort() // asc 01..12
-    return { availableYears: years, availableMonthsForYear: months }
-  }, [orders, selectedYears])
+    return Array.from(allMonths).sort()
+  }, [yearMonthMap, selectedYears])
 
   // Drop selected months that aren't valid anymore setelah tahun berubah
   const effectiveMonths = useMemo(
@@ -595,28 +609,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
           <p className="text-muted-foreground mt-0.5">
             {filteredOrders.length.toLocaleString('id-ID')} order
           </p>
-        </div>
-        {/* Period filter: Tahun + Bulan multi-select */}
-        <div className="flex items-center gap-2">
-          <MultiSelect
-            className="w-32"
-            allLabel="Semua Tahun"
-            placeholder="Tahun"
-            options={availableYears.map((y) => ({ value: y, label: y }))}
-            selected={selectedYears}
-            onChange={setSelectedYears}
-          />
-          <MultiSelect
-            className="w-36"
-            allLabel="Semua Bulan"
-            placeholder="Bulan"
-            options={availableMonthsForYear.map((m) => ({
-              value: m,
-              label: new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', { month: 'long' }),
-            }))}
-            selected={effectiveMonths}
-            onChange={setSelectedMonths}
-          />
         </div>
       </div>
 
