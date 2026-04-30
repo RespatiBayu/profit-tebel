@@ -528,7 +528,86 @@ function FunnelChart({ data }: { data: ReturnType<typeof buildFunnelData> }) {
 // Quadrant Matrix
 // ---------------------------------------------------------------------------
 
+type QuadrantKey = 'stars' | 'check_hpp' | 'optimize' | 'kill'
+
+/** Klasifikasi titik ke salah satu dari 4 kuadran berdasarkan ROAS & profit/unit. */
+function classifyQuadrant(roas: number, profitPerUnit: number): QuadrantKey {
+  const highRoas = roas >= ROAS_THRESHOLDS.scale
+  const highProfit = profitPerUnit > 0
+  if (highRoas && highProfit) return 'stars'
+  if (highRoas && !highProfit) return 'check_hpp'
+  if (!highRoas && highProfit) return 'optimize'
+  return 'kill'
+}
+
+const QUADRANT_CARDS: {
+  key: QuadrantKey
+  label: string
+  hint: string
+  bg: string
+  border: string
+  text: string
+  textSub: string
+  ringActive: string
+}[] = [
+  {
+    key: 'stars',
+    label: '⭐ Stars',
+    hint: 'ROAS tinggi + profit tinggi',
+    bg: 'bg-blue-50',
+    border: 'border-blue-200',
+    text: 'text-blue-800',
+    textSub: 'text-blue-600',
+    ringActive: 'ring-2 ring-blue-500 ring-offset-1',
+  },
+  {
+    key: 'check_hpp',
+    label: '🔍 Check HPP',
+    hint: 'ROAS tinggi + profit rendah',
+    bg: 'bg-yellow-50',
+    border: 'border-yellow-200',
+    text: 'text-yellow-800',
+    textSub: 'text-yellow-600',
+    ringActive: 'ring-2 ring-yellow-500 ring-offset-1',
+  },
+  {
+    key: 'optimize',
+    label: '📈 Optimize Ads',
+    hint: 'ROAS rendah + profit tinggi',
+    bg: 'bg-purple-50',
+    border: 'border-purple-200',
+    text: 'text-purple-800',
+    textSub: 'text-purple-600',
+    ringActive: 'ring-2 ring-purple-500 ring-offset-1',
+  },
+  {
+    key: 'kill',
+    label: '❌ Kill',
+    hint: 'ROAS rendah + profit rendah',
+    bg: 'bg-red-50',
+    border: 'border-red-200',
+    text: 'text-red-800',
+    textSub: 'text-red-600',
+    ringActive: 'ring-2 ring-red-500 ring-offset-1',
+  },
+]
+
 function QuadrantMatrix({ data }: { data: ReturnType<typeof buildQuadrantData> }) {
+  const [activeQuadrant, setActiveQuadrant] = useState<QuadrantKey | null>(null)
+
+  // Hitung jumlah produk per kuadran (buat ditampilkan di card)
+  const counts = useMemo(() => {
+    const c: Record<QuadrantKey, number> = { stars: 0, check_hpp: 0, optimize: 0, kill: 0 }
+    for (const d of data) c[classifyQuadrant(d.roas, d.profitPerUnit)] += 1
+    return c
+  }, [data])
+
+  // Filter data sesuai kuadran aktif (null = tampilkan semua)
+  const filteredData = useMemo(() => {
+    if (!activeQuadrant) return data
+    return data.filter((d) => classifyQuadrant(d.roas, d.profitPerUnit) === activeQuadrant)
+  }, [data, activeQuadrant])
+
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center h-60 text-muted-foreground text-sm">
@@ -543,23 +622,48 @@ function QuadrantMatrix({ data }: { data: ReturnType<typeof buildQuadrantData> }
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2 text-xs text-center">
-        <div className="rounded-lg bg-blue-50 border border-blue-200 p-2">
-          <p className="font-semibold text-blue-800">⭐ Stars</p>
-          <p className="text-blue-600">ROAS tinggi + profit tinggi</p>
-        </div>
-        <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-2">
-          <p className="font-semibold text-yellow-800">🔍 Check HPP</p>
-          <p className="text-yellow-600">ROAS tinggi + profit rendah</p>
-        </div>
-        <div className="rounded-lg bg-purple-50 border border-purple-200 p-2">
-          <p className="font-semibold text-purple-800">📈 Optimize Ads</p>
-          <p className="text-purple-600">ROAS rendah + profit tinggi</p>
-        </div>
-        <div className="rounded-lg bg-red-50 border border-red-200 p-2">
-          <p className="font-semibold text-red-800">❌ Kill</p>
-          <p className="text-red-600">ROAS rendah + profit rendah</p>
-        </div>
+        {QUADRANT_CARDS.map((card) => {
+          const isActive = activeQuadrant === card.key
+          const count = counts[card.key]
+          return (
+            <button
+              key={card.key}
+              type="button"
+              onClick={() => setActiveQuadrant(isActive ? null : card.key)}
+              disabled={count === 0}
+              className={`rounded-lg ${card.bg} border ${card.border} p-2 text-left transition-all hover:shadow-sm focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                isActive ? card.ringActive : 'hover:brightness-95'
+              }`}
+              title={isActive ? 'Klik untuk reset filter' : `Filter: ${card.hint}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className={`font-semibold ${card.text}`}>{card.label}</p>
+                <span className={`text-[10px] font-bold ${card.text} bg-white/60 rounded-full px-1.5 py-0.5 tabular-nums`}>
+                  {count}
+                </span>
+              </div>
+              <p className={`${card.textSub} text-center`}>{card.hint}</p>
+            </button>
+          )
+        })}
       </div>
+      {activeQuadrant && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-1.5">
+          <span>
+            Menampilkan <span className="font-semibold text-foreground">{filteredData.length}</span> produk di kuadran{' '}
+            <span className="font-semibold text-foreground">
+              {QUADRANT_CARDS.find((c) => c.key === activeQuadrant)?.label}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setActiveQuadrant(null)}
+            className="text-primary hover:underline font-medium"
+          >
+            Reset filter
+          </button>
+        </div>
+      )}
       <ResponsiveContainer width="100%" height={380}>
         <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
           <CartesianGrid strokeDasharray="3 3" />
@@ -598,10 +702,10 @@ function QuadrantMatrix({ data }: { data: ReturnType<typeof buildQuadrantData> }
           <ReferenceLine x={ROAS_THRESHOLDS.scale} stroke="#16a34a" strokeDasharray="5 3" />
           <ReferenceLine y={0} stroke="#dc2626" strokeDasharray="5 3" />
           <Scatter
-            data={data}
+            data={filteredData}
             fill="#3b82f6"
           >
-            {data.map((entry, index) => (
+            {filteredData.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={ROAS_COLORS[entry.signal]} />
             ))}
           </Scatter>
