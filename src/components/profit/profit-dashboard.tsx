@@ -677,12 +677,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               icon={ShoppingBag}
               tooltip="Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee)."
               pctOmzet={kpis.totalOmzet > 0 ? 100 : null}
-              delta={{
-                current: avg(kpis.totalOmzet, curCount),
-                prev: avg(prevKpis.totalOmzet, prevCount),
-                context: 'income',
-                perUnit: true,
-              }}
+              delta={{ current: kpis.totalOmzet, prev: prevKpis.totalOmzet, context: 'income' }}
             />
             <KpiCard
               label="Total Diskon & Promo"
@@ -707,12 +702,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               icon={Banknote}
               tooltip="Pendapatan setelah dikurangi diskon dan promo yang kamu tanggung, sebelum biaya marketplace dan iklan."
               pctOmzet={pct(kpis.grossIncome)}
-              delta={{
-                current: avg(kpis.grossIncome, curCount),
-                prev: avg(prevKpis.grossIncome, prevCount),
-                context: 'income',
-                perUnit: true,
-              }}
+              delta={{ current: kpis.grossIncome, prev: prevKpis.grossIncome, context: 'income' }}
             />
             <KpiCard
               label="Total Biaya"
@@ -763,12 +753,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               icon={Zap}
               tooltip="Total biaya iklan yang dikeluarkan untuk mempromosikan produk di platform."
               pctOmzet={pct(kpis.totalAdSpend)}
-              delta={{
-                current: avg(kpis.totalAdSpend, curCount),
-                prev: avg(prevKpis.totalAdSpend, prevCount),
-                context: 'cost',
-                perUnit: true,
-              }}
+              delta={{ current: kpis.totalAdSpend, prev: prevKpis.totalAdSpend, context: 'cost' }}
             />
             <KpiCard
               label="Real Profit"
@@ -786,12 +771,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               pctOmzet={kpis.hasHppData ? pct(kpis.realProfit) : null}
               delta={
                 kpis.hasHppData
-                  ? {
-                      current: avg(kpis.realProfit, curCount),
-                      prev: avg(prevKpis.realProfit, prevCount),
-                      context: 'income',
-                      perUnit: true,
-                    }
+                  ? { current: kpis.realProfit, prev: prevKpis.realProfit, context: 'income' }
                   : undefined
               }
               cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
@@ -853,7 +833,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 prev: prevKpis.totalOmzet,
                 context: 'income',
                 tone: 'neutral',
-                showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
               })
 
               let totalDeducted = 0
@@ -889,7 +868,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                     context: 'income',
                     tone: 'neutral',
                     sub: 'Setelah diskon & promo yang kamu tanggung',
-                    showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
                   })
                 }
               }
@@ -919,7 +897,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 context: 'income',
                 tone: 'neutral',
                 sub: 'Total Penghasilan dari Shopee',
-                showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
               })
 
               if (kpis.hasHppData) {
@@ -958,7 +935,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                   prev: prevKpis.realProfit,
                   context: 'income',
                   tone: kpis.realProfit >= 0 ? 'profit' : 'loss',
-                  showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
                 })
               }
 
