@@ -812,7 +812,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
             {/* Column header */}
             <div className="flex items-center justify-end gap-3 pb-1 border-b mb-1">
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-[72px] text-right">Nilai</span>
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-14 text-right">% Omzet</span>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-14 text-right">%</span>
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-20 text-right">vs Bln Lalu</span>
             </div>
             {(() => {
@@ -947,6 +947,19 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               }
 
               return rows.map((r, i) => {
+                // Track if we've passed the Gross Income row to show % Gross Income for subsequent rows
+                let hasPassedGrossIncome = false
+                for (let j = 0; j < i; j++) {
+                  const prevRow = rows[j]
+                  if (prevRow.kind === 'total' && prevRow.label === 'Pendapatan Kotor (Gross Income)') {
+                    hasPassedGrossIncome = true
+                    break
+                  }
+                }
+
+                const pctGrossIncome = (v: number) =>
+                  kpis.grossIncome > 0 ? (v / kpis.grossIncome) * 100 : 0
+
                 if (r.kind === 'divider') {
                   return <div key={`div-${i}`} className="border-t border-dashed my-1" />
                 }
@@ -964,7 +977,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                           {formatRp(r.subtotal)}
                         </span>
                         <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
-                          {pct(r.subtotal).toFixed(1)}%
+                          {hasPassedGrossIncome ? pctGrossIncome(r.subtotal).toFixed(1) : pct(r.subtotal).toFixed(1)}%
                         </span>
                         <DeltaBadge current={r.subtotal} prev={r.prevSubtotal} context="cost" />
                       </div>
@@ -992,7 +1005,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                           {formatRp(r.value)}
                         </span>
                         <span className="text-xs font-medium text-muted-foreground w-14 text-right tabular-nums">
-                          {pct(r.value).toFixed(1)}%
+                          {hasPassedGrossIncome ? pctGrossIncome(r.value).toFixed(1) : pct(r.value).toFixed(1)}%
                         </span>
                         <DeltaBadge current={r.value} prev={r.prev} context={r.context} />
                       </div>
@@ -1021,7 +1034,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                         {formatRp(r.value)}
                       </span>
                       <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
-                        {pct(r.value).toFixed(1)}%
+                        {hasPassedGrossIncome ? pctGrossIncome(r.value).toFixed(1) : pct(r.value).toFixed(1)}%
                       </span>
                       <DeltaBadge current={r.value} prev={r.prev} context="cost" />
                     </div>
