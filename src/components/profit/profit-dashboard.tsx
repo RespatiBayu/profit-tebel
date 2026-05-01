@@ -951,6 +951,16 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 const pctGrossIncome = (v: number) =>
                   kpis.grossIncome > 0 ? (v / kpis.grossIncome) * 100 : 0
 
+                // Check if we've passed the Gross Income row to determine if we should show % GI
+                let hasPassedGrossIncome = false
+                for (let j = 0; j < i; j++) {
+                  const prevRow = rows[j]
+                  if (prevRow.kind === 'total' && prevRow.label === 'Pendapatan Kotor (Gross Income)') {
+                    hasPassedGrossIncome = true
+                    break
+                  }
+                }
+
                 if (r.kind === 'divider') {
                   return <div key={`div-${i}`} className="border-t border-dashed my-1" />
                 }
@@ -971,7 +981,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                           {pct(r.subtotal).toFixed(1)}%
                         </span>
                         <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
-                          {pctGrossIncome(r.subtotal).toFixed(1)}%
+                          {hasPassedGrossIncome ? pctGrossIncome(r.subtotal).toFixed(1) + '%' : '—'}
                         </span>
                         <DeltaBadge current={r.subtotal} prev={r.prevSubtotal} context="cost" />
                       </div>
@@ -1002,7 +1012,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                           {pct(r.value).toFixed(1)}%
                         </span>
                         <span className="text-xs font-medium text-muted-foreground w-14 text-right tabular-nums">
-                          {pctGrossIncome(r.value).toFixed(1)}%
+                          {hasPassedGrossIncome ? pctGrossIncome(r.value).toFixed(1) + '%' : '—'}
                         </span>
                         <DeltaBadge current={r.value} prev={r.prev} context={r.context} />
                       </div>
@@ -1034,7 +1044,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                         {pct(r.value).toFixed(1)}%
                       </span>
                       <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
-                        {pctGrossIncome(r.value).toFixed(1)}%
+                        {hasPassedGrossIncome ? pctGrossIncome(r.value).toFixed(1) + '%' : '—'}
                       </span>
                       <DeltaBadge current={r.value} prev={r.prev} context="cost" />
                     </div>
