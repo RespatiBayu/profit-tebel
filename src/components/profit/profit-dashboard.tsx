@@ -120,15 +120,18 @@ function shiftMonth(ym: string, delta: number): string {
 }
 
 /** Panah naik/turun + persentase delta current vs prev, berwarna sesuai konteks.
- *  context 'income' → naik = hijau. context 'cost' → naik = merah. */
+ *  context 'income' → naik = hijau. context 'cost' → naik = merah.
+ *  perUnit: ketika true, berarti current/prev sudah dihitung sebagai rata-rata per order. */
 function DeltaBadge({
   current,
   prev,
   context,
+  perUnit,
 }: {
   current: number
   prev: number
   context: 'income' | 'cost'
+  perUnit?: boolean
 }) {
   if (prev === 0 && current === 0) {
     return <span className="text-[11px] text-muted-foreground/60 w-20 text-right tabular-nums">—</span>
@@ -244,7 +247,7 @@ function KpiCard({
                 >
                   {delta.perUnit ? 'vs Bulan Lalu (avg/order)' : 'vs Bulan Lalu'}
                 </span>
-                <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} />
+                <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} perUnit={delta.perUnit} />
               </div>
             )}
           </div>
@@ -677,7 +680,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               icon={ShoppingBag}
               tooltip="Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee)."
               pctOmzet={kpis.totalOmzet > 0 ? 100 : null}
-              delta={{ current: kpis.totalOmzet, prev: prevKpis.totalOmzet, context: 'income' }}
+              delta={{
+                current: avg(kpis.totalOmzet, curCount),
+                prev: avg(prevKpis.totalOmzet, prevCount),
+                context: 'income',
+                perUnit: true,
+              }}
             />
             <KpiCard
               label="Total Diskon & Promo"
@@ -758,7 +766,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               icon={Zap}
               tooltip="Total biaya iklan yang dikeluarkan untuk mempromosikan produk di platform."
               pctOmzet={pct(kpis.totalAdSpend)}
-              delta={{ current: kpis.totalAdSpend, prev: prevKpis.totalAdSpend, context: 'cost' }}
+              delta={{
+                current: avg(kpis.totalAdSpend, curCount),
+                prev: avg(prevKpis.totalAdSpend, prevCount),
+                context: 'cost',
+                perUnit: true,
+              }}
             />
             <KpiCard
               label="Real Profit"
@@ -776,7 +789,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               pctOmzet={kpis.hasHppData ? pct(kpis.realProfit) : null}
               delta={
                 kpis.hasHppData
-                  ? { current: kpis.realProfit, prev: prevKpis.realProfit, context: 'income' }
+                  ? {
+                      current: avg(kpis.realProfit, curCount),
+                      prev: avg(prevKpis.realProfit, prevCount),
+                      context: 'income',
+                      perUnit: true,
+                    }
                   : undefined
               }
               cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
@@ -817,8 +835,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               const pct = (v: number) => (omzet > 0 ? (v / omzet) * 100 : 0)
 
               type Row =
-                | { kind: 'total'; label: string; value: number; prev: number; context: 'income' | 'cost'; tone: 'neutral' | 'profit' | 'loss'; sub?: string }
-                | { kind: 'cost'; label: string; value: number; prev: number; color?: string; hint?: string }
+                | { kind: 'total'; label: string; value: number; prev: number; context: 'income' | 'cost'; tone: 'neutral' | 'profit' | 'loss'; sub?: string; perUnit?: boolean }
+                | { kind: 'cost'; label: string; value: number; prev: number; color?: string; hint?: string; perUnit?: boolean }
                 | { kind: 'group'; label: string; subtotal: number; prevSubtotal: number }
                 | { kind: 'divider' }
 
@@ -831,13 +849,18 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               ]
 
               const rows: Row[] = []
+              const avgOrVal = (total: number, count: number, perUnit?: boolean) =>
+                perUnit && count > 0 ? total / count : total
+              const curCount = kpis.orderCount
+              const prevCount = prevKpis.orderCount
               rows.push({
                 kind: 'total',
                 label: 'Total Omzet (Harga Asli Produk)',
-                value: omzet,
-                prev: prevKpis.totalOmzet,
+                value: avgOrVal(omzet, curCount, true),
+                prev: avgOrVal(prevKpis.totalOmzet, prevCount, true),
                 context: 'income',
                 tone: 'neutral',
+                perUnit: true,
               })
 
               let totalDeducted = 0
@@ -868,11 +891,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                   rows.push({
                     kind: 'total',
                     label: 'Pendapatan Kotor (Gross Income)',
-                    value: kpis.grossIncome,
-                    prev: prevKpis.grossIncome,
+                    value: avgOrVal(kpis.grossIncome, curCount, true),
+                    prev: avgOrVal(prevKpis.grossIncome, prevCount, true),
                     context: 'income',
                     tone: 'neutral',
                     sub: 'Setelah diskon & promo yang kamu tanggung',
+                    perUnit: true,
                   })
                 }
               }
@@ -897,11 +921,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               rows.push({
                 kind: 'total',
                 label: 'Net Income',
-                value: kpis.totalNetIncome,
-                prev: prevKpis.totalNetIncome,
+                value: avgOrVal(kpis.totalNetIncome, curCount, true),
+                prev: avgOrVal(prevKpis.totalNetIncome, prevCount, true),
                 context: 'income',
                 tone: 'neutral',
                 sub: 'Total Penghasilan dari Shopee',
+                perUnit: true,
               })
 
               if (kpis.hasHppData) {
@@ -926,9 +951,10 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                     rows.push({
                       kind: 'cost',
                       label: 'Biaya Iklan',
-                      value: kpis.totalAdSpend,
-                      prev: prevKpis.totalAdSpend,
+                      value: avgOrVal(kpis.totalAdSpend, curCount, true),
+                      prev: avgOrVal(prevKpis.totalAdSpend, prevCount, true),
                       color: '#ef4444',
+                      perUnit: true,
                     })
                   }
                 }
@@ -936,10 +962,11 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 rows.push({
                   kind: 'total',
                   label: 'Real Profit',
-                  value: kpis.realProfit,
-                  prev: prevKpis.realProfit,
+                  value: avgOrVal(kpis.realProfit, curCount, true),
+                  prev: avgOrVal(prevKpis.realProfit, prevCount, true),
                   context: 'income',
                   tone: kpis.realProfit >= 0 ? 'profit' : 'loss',
+                  perUnit: true,
                 })
               }
 
@@ -1014,7 +1041,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                         <span className="text-xs font-medium text-muted-foreground w-14 text-right tabular-nums">
                           {isGrossIncomeRow ? '100.0%' : hasPassedGrossIncome ? pctGrossIncome(r.value).toFixed(1) + '%' : '—'}
                         </span>
-                        <DeltaBadge current={r.value} prev={r.prev} context={r.context} />
+                        <DeltaBadge current={r.value} prev={r.prev} context={r.context} perUnit={r.perUnit} />
                       </div>
                     </div>
                   )
@@ -1046,7 +1073,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                       <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
                         {hasPassedGrossIncome && !isGrossIncomeRow ? pctGrossIncome(r.value).toFixed(1) + '%' : '—'}
                       </span>
-                      <DeltaBadge current={r.value} prev={r.prev} context="cost" />
+                      <DeltaBadge current={r.value} prev={r.prev} context="cost" perUnit={r.perUnit} />
                     </div>
                   </div>
                 )
