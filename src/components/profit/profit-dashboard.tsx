@@ -436,10 +436,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       ms.add(m)
       map.set(y, ms)
     }
-    // Pakai release_date (Tanggal Dana Dilepas) sebagai sumber utama supaya
-    // angka match dgn Shopee dashboard "Sudah Dilepas Bulan Ini" (semantic
-    // cash-flow). Fallback ke order_date untuk order pending yg belum dilepas.
-    for (const o of orders) collect(o.release_date ?? o.order_date)
+    // Pakai order_date (Tanggal Pesanan Dibuat) sebagai sumber utama untuk konsistensi
+    for (const o of orders) collect(o.order_date)
     for (const a of adsData) collect(a.report_period_start ?? a.report_period_end)
     return map
   }, [orders, adsData])
@@ -482,12 +480,10 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   }
 
   // Filter orders sesuai slicer.
-  // Pakai release_date (Tanggal Dana Dilepas) sebagai sumber periode utama
-  // — match dgn Shopee dashboard "Sudah Dilepas Bulan Ini". Order pending
-  // (release_date null) jatuh ke order_date sebagai fallback.
+  // Pakai order_date (Tanggal Pesanan Dibuat) sebagai sumber periode utama
   const filteredOrders = useMemo(() => {
     if (selectedYears.length === 0 && effectiveMonths.length === 0) return orders
-    return orders.filter((o) => matchesPeriod(o.release_date ?? o.order_date))
+    return orders.filter((o) => matchesPeriod(o.order_date))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders, selectedYears, effectiveMonths])
 
@@ -513,11 +509,11 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   )
 
   // --- Previous period: geser semua bulan yang aktif mundur 1 bulan ---
-  // Pakai release_date sebagai bucket biar konsisten dgn filter utama.
+  // Pakai order_date sebagai bucket biar konsisten dgn filter utama.
   const prevWindow = useMemo(() => {
     const currentMonths = new Set<string>()
     for (const o of filteredOrders) {
-      const ref = o.release_date ?? o.order_date
+      const ref = o.order_date
       if (ref) currentMonths.add(ref.slice(0, 7))
     }
     const prevMonths = new Set<string>()
@@ -525,7 +521,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     const inPrev = (iso: string | null | undefined) =>
       !!iso && prevMonths.has(iso.slice(0, 7))
     return {
-      orders: orders.filter((o) => inPrev(o.release_date ?? o.order_date)),
+      orders: orders.filter((o) => inPrev(o.order_date)),
       ads: adsData.filter((a) => inPrev(a.report_period_start ?? a.report_period_end)),
       months: Array.from(prevMonths).sort(),
     }
