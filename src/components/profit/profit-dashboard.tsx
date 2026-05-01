@@ -120,18 +120,15 @@ function shiftMonth(ym: string, delta: number): string {
 }
 
 /** Panah naik/turun + persentase delta current vs prev, berwarna sesuai konteks.
- *  context 'income' → naik = hijau. context 'cost' → naik = merah.
- *  perUnit: ketika true, berarti current/prev sudah dihitung sebagai rata-rata per order. */
+ *  context 'income' → naik = hijau. context 'cost' → naik = merah. */
 function DeltaBadge({
   current,
   prev,
   context,
-  perUnit,
 }: {
   current: number
   prev: number
   context: 'income' | 'cost'
-  perUnit?: boolean
 }) {
   if (prev === 0 && current === 0) {
     return <span className="text-[11px] text-muted-foreground/60 w-20 text-right tabular-nums">—</span>
@@ -247,7 +244,7 @@ function KpiCard({
                 >
                   {delta.perUnit ? 'vs Bulan Lalu (avg/order)' : 'vs Bulan Lalu'}
                 </span>
-                <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} perUnit={delta.perUnit} />
+                <DeltaBadge current={delta.current} prev={delta.prev} context={delta.context} />
               </div>
             )}
           </div>
@@ -835,8 +832,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               const pct = (v: number) => (omzet > 0 ? (v / omzet) * 100 : 0)
 
               type Row =
-                | { kind: 'total'; label: string; value: number; prev: number; context: 'income' | 'cost'; tone: 'neutral' | 'profit' | 'loss'; sub?: string; perUnit?: boolean }
-                | { kind: 'cost'; label: string; value: number; prev: number; color?: string; hint?: string; perUnit?: boolean }
+                | { kind: 'total'; label: string; value: number; prev: number; context: 'income' | 'cost'; tone: 'neutral' | 'profit' | 'loss'; sub?: string; showAvgCompare?: { orderCount: number; prevOrderCount: number } }
+                | { kind: 'cost'; label: string; value: number; prev: number; color?: string; hint?: string }
                 | { kind: 'group'; label: string; subtotal: number; prevSubtotal: number }
                 | { kind: 'divider' }
 
@@ -849,18 +846,14 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               ]
 
               const rows: Row[] = []
-              const avgOrVal = (total: number, count: number, perUnit?: boolean) =>
-                perUnit && count > 0 ? total / count : total
-              const curCount = kpis.orderCount
-              const prevCount = prevKpis.orderCount
               rows.push({
                 kind: 'total',
                 label: 'Total Omzet (Harga Asli Produk)',
-                value: avgOrVal(omzet, curCount, true),
-                prev: avgOrVal(prevKpis.totalOmzet, prevCount, true),
+                value: omzet,
+                prev: prevKpis.totalOmzet,
                 context: 'income',
                 tone: 'neutral',
-                perUnit: true,
+                showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
               })
 
               let totalDeducted = 0
@@ -891,12 +884,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                   rows.push({
                     kind: 'total',
                     label: 'Pendapatan Kotor (Gross Income)',
-                    value: avgOrVal(kpis.grossIncome, curCount, true),
-                    prev: avgOrVal(prevKpis.grossIncome, prevCount, true),
+                    value: kpis.grossIncome,
+                    prev: prevKpis.grossIncome,
                     context: 'income',
                     tone: 'neutral',
                     sub: 'Setelah diskon & promo yang kamu tanggung',
-                    perUnit: true,
+                    showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
                   })
                 }
               }
@@ -921,12 +914,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               rows.push({
                 kind: 'total',
                 label: 'Net Income',
-                value: avgOrVal(kpis.totalNetIncome, curCount, true),
-                prev: avgOrVal(prevKpis.totalNetIncome, prevCount, true),
+                value: kpis.totalNetIncome,
+                prev: prevKpis.totalNetIncome,
                 context: 'income',
                 tone: 'neutral',
                 sub: 'Total Penghasilan dari Shopee',
-                perUnit: true,
+                showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
               })
 
               if (kpis.hasHppData) {
@@ -951,10 +944,9 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                     rows.push({
                       kind: 'cost',
                       label: 'Biaya Iklan',
-                      value: avgOrVal(kpis.totalAdSpend, curCount, true),
-                      prev: avgOrVal(prevKpis.totalAdSpend, prevCount, true),
+                      value: kpis.totalAdSpend,
+                      prev: prevKpis.totalAdSpend,
                       color: '#ef4444',
-                      perUnit: true,
                     })
                   }
                 }
@@ -962,11 +954,11 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 rows.push({
                   kind: 'total',
                   label: 'Real Profit',
-                  value: avgOrVal(kpis.realProfit, curCount, true),
-                  prev: avgOrVal(prevKpis.realProfit, prevCount, true),
+                  value: kpis.realProfit,
+                  prev: prevKpis.realProfit,
                   context: 'income',
                   tone: kpis.realProfit >= 0 ? 'profit' : 'loss',
-                  perUnit: true,
+                  showAvgCompare: { orderCount: kpis.orderCount, prevOrderCount: prevKpis.orderCount },
                 })
               }
 
@@ -1022,6 +1014,17 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                       : r.tone === 'loss'
                       ? 'text-red-600'
                       : 'text-foreground'
+                  // Calculate average per order if showAvgCompare is set
+                  const currentForCompare = r.showAvgCompare
+                    ? r.showAvgCompare.orderCount > 0
+                      ? r.value / r.showAvgCompare.orderCount
+                      : 0
+                    : r.value
+                  const prevForCompare = r.showAvgCompare
+                    ? r.showAvgCompare.prevOrderCount > 0
+                      ? r.prev / r.showAvgCompare.prevOrderCount
+                      : 0
+                    : r.prev
                   return (
                     <div
                       key={`t-${i}`}
@@ -1041,7 +1044,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                         <span className="text-xs font-medium text-muted-foreground w-14 text-right tabular-nums">
                           {isGrossIncomeRow ? '100.0%' : hasPassedGrossIncome ? pctGrossIncome(r.value).toFixed(1) + '%' : '—'}
                         </span>
-                        <DeltaBadge current={r.value} prev={r.prev} context={r.context} perUnit={r.perUnit} />
+                        <DeltaBadge current={currentForCompare} prev={prevForCompare} context={r.context} />
                       </div>
                     </div>
                   )
@@ -1073,7 +1076,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                       <span className="text-xs text-muted-foreground w-14 text-right tabular-nums">
                         {hasPassedGrossIncome && !isGrossIncomeRow ? pctGrossIncome(r.value).toFixed(1) + '%' : '—'}
                       </span>
-                      <DeltaBadge current={r.value} prev={r.prev} context="cost" perUnit={r.perUnit} />
+                      <DeltaBadge current={r.value} prev={r.prev} context="cost" />
                     </div>
                   </div>
                 )
