@@ -864,19 +864,21 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                     hint: it.hint,
                   })
                 }
-              }
 
-              // Add Gross Income row (after discount deductions)
-              rows.push({ kind: 'divider' })
-              rows.push({
-                kind: 'total',
-                label: 'Pendapatan Kotor (Gross Income)',
-                value: kpis.grossIncome,
-                prev: prevKpis.grossIncome,
-                context: 'income',
-                tone: 'neutral',
-                sub: 'Setelah diskon & promo yang kamu tanggung',
-              })
+                // Add Gross Income row after discount group but before other groups
+                if (g.id === 'discount') {
+                  rows.push({ kind: 'divider' })
+                  rows.push({
+                    kind: 'total',
+                    label: 'Pendapatan Kotor (Gross Income)',
+                    value: kpis.grossIncome,
+                    prev: prevKpis.grossIncome,
+                    context: 'income',
+                    tone: 'neutral',
+                    sub: 'Setelah diskon & promo yang kamu tanggung',
+                  })
+                }
+              }
 
               // Rekonsiliasi: kalau masih ada gap antara (omzet − totalDeducted) dan netIncome,
               // tampilkan sebagai "Penyesuaian Lain" — biar angka selalu balance.
