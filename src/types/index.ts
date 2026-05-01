@@ -173,6 +173,8 @@ export interface DbOrderProduct {
 // Calculated profit results
 export interface ProfitKpis {
   totalOmzet: number
+  totalDiskonPromo: number
+  grossIncome: number
   totalNetIncome: number
   totalFees: number
   totalHppCost: number

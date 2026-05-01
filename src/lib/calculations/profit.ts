@@ -149,6 +149,24 @@ export function calculateKpis(
     totalAdSpend += ad.ad_spend ?? 0
   }
 
+  // Calculate total discount & promo that seller bears
+  // = sum of: product_discount + seller_voucher + seller_voucher_cofund + 
+  //   seller_cashback + seller_free_shipping_promo + refund_amount
+  let totalDiskonPromo = 0
+  for (const o of orders) {
+    totalDiskonPromo +=
+      Math.abs(o.product_discount) +
+      Math.abs(o.seller_voucher) +
+      Math.abs(o.seller_voucher_cofund) +
+      Math.abs(o.seller_cashback) +
+      Math.abs(o.seller_free_shipping_promo) +
+      Math.abs(o.refund_amount)
+  }
+
+  // Gross income = Total Omzet - Total Diskon & Promo
+  // (amount received after seller-borne discounts but before marketplace fees)
+  const grossIncome = totalOmzet - totalDiskonPromo
+
   // If no HPP found in this period but there's global HPP data, still mark as having HPP data
   // This allows Real Profit to be calculated for all periods once HPP is set
   if (!hasHppData && hasAnyGlobalHpp && orders.length > 0) {
@@ -161,6 +179,8 @@ export function calculateKpis(
 
   return {
     totalOmzet,
+    totalDiskonPromo,
+    grossIncome,
     totalNetIncome,
     totalFees,
     totalHppCost,

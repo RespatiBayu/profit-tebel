@@ -45,6 +45,7 @@ import {
   ShoppingBag,
   Zap,
   Tag,
+  Banknote,
 } from 'lucide-react'
 import {
   buildHppMap,
@@ -435,7 +436,10 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       ms.add(m)
       map.set(y, ms)
     }
-    for (const o of orders) collect(o.order_date)
+    // Pakai release_date (Tanggal Dana Dilepas) sebagai sumber utama supaya
+    // angka match dgn Shopee dashboard "Sudah Dilepas Bulan Ini" (semantic
+    // cash-flow). Fallback ke order_date untuk order pending yg belum dilepas.
+    for (const o of orders) collect(o.release_date ?? o.order_date)
     for (const a of adsData) collect(a.report_period_start ?? a.report_period_end)
     return map
   }, [orders, adsData])
@@ -477,10 +481,13 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     return true
   }
 
-  // Filter orders sesuai slicer
+  // Filter orders sesuai slicer.
+  // Pakai release_date (Tanggal Dana Dilepas) sebagai sumber periode utama
+  // — match dgn Shopee dashboard "Sudah Dilepas Bulan Ini". Order pending
+  // (release_date null) jatuh ke order_date sebagai fallback.
   const filteredOrders = useMemo(() => {
     if (selectedYears.length === 0 && effectiveMonths.length === 0) return orders
-    return orders.filter((o) => matchesPeriod(o.order_date))
+    return orders.filter((o) => matchesPeriod(o.release_date ?? o.order_date))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders, selectedYears, effectiveMonths])
 
@@ -506,17 +513,19 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   )
 
   // --- Previous period: geser semua bulan yang aktif mundur 1 bulan ---
+  // Pakai release_date sebagai bucket biar konsisten dgn filter utama.
   const prevWindow = useMemo(() => {
     const currentMonths = new Set<string>()
     for (const o of filteredOrders) {
-      if (o.order_date) currentMonths.add(o.order_date.slice(0, 7))
+      const ref = o.release_date ?? o.order_date
+      if (ref) currentMonths.add(ref.slice(0, 7))
     }
     const prevMonths = new Set<string>()
     for (const m of Array.from(currentMonths)) prevMonths.add(shiftMonth(m, -1))
     const inPrev = (iso: string | null | undefined) =>
       !!iso && prevMonths.has(iso.slice(0, 7))
     return {
-      orders: orders.filter((o) => inPrev(o.order_date)),
+      orders: orders.filter((o) => inPrev(o.release_date ?? o.order_date)),
       ads: adsData.filter((a) => inPrev(a.report_period_start ?? a.report_period_end)),
       months: Array.from(prevMonths).sort(),
     }
@@ -656,12 +665,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
 
       {/* KPI Cards */}
       {(() => {
-        const totalDiskonPromo = omzetDeductions
-          .filter((d) => d.group === 'discount')
-          .reduce((a, b) => a + b.value, 0)
-        const prevDiskonPromo = prevDeductions
-          .filter((d) => d.group === 'discount')
-          .reduce((a, b) => a + b.value, 0)
         const pct = (v: number) => (kpis.totalOmzet > 0 ? (v / kpis.totalOmzet) * 100 : 0)
         // Rata-rata per order (buat MoM delta yang ngebandingin "per-produk" bukan total).
         // Total naik sering cuma karena omzet naik; avg/order lebih informatif.
@@ -669,7 +672,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
         const curCount = kpis.orderCount
         const prevCount = prevKpis.orderCount
         return (
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
             <KpiCard
               label="Total Omzet"
               value={formatRp(kpis.totalOmzet)}
@@ -682,16 +685,31 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
             />
             <KpiCard
               label="Total Diskon & Promo"
-              value={formatRp(totalDiskonPromo)}
+              value={formatRp(kpis.totalDiskonPromo)}
               sub="Diskon produk + voucher + cashback + refund"
               accent="orange"
               icon={Tag}
               tooltip="Total pengurang yang kamu tanggung sendiri: diskon produk, voucher seller, cashback koin, promo gratis ongkir penjual, dan pengembalian dana."
-              pctOmzet={pct(totalDiskonPromo)}
+              pctOmzet={pct(kpis.totalDiskonPromo)}
               delta={{
-                current: avg(totalDiskonPromo, curCount),
-                prev: avg(prevDiskonPromo, prevCount),
+                current: avg(kpis.totalDiskonPromo, curCount),
+                prev: avg(prevKpis.totalDiskonPromo, prevCount),
                 context: 'cost',
+                perUnit: true,
+              }}
+            />
+            <KpiCard
+              label="Pendapatan Kotor (Gross Income)"
+              value={formatRp(kpis.grossIncome)}
+              sub="Setelah diskon & promo"
+              accent="green"
+              icon={Banknote}
+              tooltip="Pendapatan setelah dikurangi diskon dan promo yang kamu tanggung, sebelum biaya marketplace dan iklan."
+              pctOmzet={pct(kpis.grossIncome)}
+              delta={{
+                current: avg(kpis.grossIncome, curCount),
+                prev: avg(prevKpis.grossIncome, prevCount),
+                context: 'income',
                 perUnit: true,
               }}
             />
@@ -847,6 +865,18 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                   })
                 }
               }
+
+              // Add Gross Income row (after discount deductions)
+              rows.push({ kind: 'divider' })
+              rows.push({
+                kind: 'total',
+                label: 'Pendapatan Kotor (Gross Income)',
+                value: kpis.grossIncome,
+                prev: prevKpis.grossIncome,
+                context: 'income',
+                tone: 'neutral',
+                sub: 'Setelah diskon & promo yang kamu tanggung',
+              })
 
               // Rekonsiliasi: kalau masih ada gap antara (omzet − totalDeducted) dan netIncome,
               // tampilkan sebagai "Penyesuaian Lain" — biar angka selalu balance.
