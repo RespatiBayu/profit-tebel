@@ -1,6 +1,19 @@
 -- Demo Account Setup Script for Profit Tebel
--- Run this in Supabase SQL Editor after creating a demo user via auth
--- Replace 'demo@profit-tebel.com' with actual demo email if different
+-- OPTIONAL: This migration is not required for basic demo account setup
+-- 
+-- The simplest way to create a demo account:
+-- 1. Run: npx tsx scripts/create-demo-account.ts
+--    OR manually create via Supabase > Authentication > Users > Invite
+-- 2. Add to .env.local: ADMIN_EMAILS=demo@profit-tebel.com
+-- 3. Restart development server
+-- 4. Login with demo@profit-tebel.com / Demo123456!
+--
+-- This migration is only needed if you want to pre-populate sample data.
+-- Run this in Supabase SQL Editor if you want demo toko + products.
+
+-- ============================================================
+-- OPTIONAL SETUP: Create demo store + sample products
+-- ============================================================
 
 -- ============================================================
 -- PART 1: Get demo user ID
