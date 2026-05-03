@@ -616,13 +616,68 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
 
   const PENDING_STATUSES = ['Telah Dikirim', 'Sedang Dikirim', 'Perlu Dikirim', 'Belum Bayar']
 
+  // Build mapping: seller SKU text code → Shopee numeric product ID
+  // Order.all stores seller-defined SKU codes (e.g. "#BNYWGIEDP-AMERTA30ML")
+  // but master_products is keyed by Shopee numeric IDs (e.g. "24142481111") from the income file.
+  // We infer the mapping by cross-referencing orders that appear in BOTH files (same order_number).
+  const sellerSkuToNumericId = useMemo(() => {
+    const mapping = new Map<string, string>() // seller_sku_code → shopee_numeric_id
+
+    // Build order_number → [numeric_ids] from income orderProducts
+    const opByOrder = new Map<string, string[]>()
+    for (const op of orderProducts) {
+      const arr = opByOrder.get(op.order_number) ?? []
+      arr.push(op.marketplace_product_id)
+      opByOrder.set(op.order_number, arr)
+    }
+
+    // For each order in ordersAll that also exists in income file (matched by order_number)
+    for (const oa of ordersAll) {
+      const numericIds = opByOrder.get(oa.order_number)
+      if (!numericIds || numericIds.length === 0) continue // order not in income (still pending or older period)
+
+      const skuProducts = (oa.products_json ?? []).filter((p) => p.marketplace_product_id)
+      if (skuProducts.length === 0) continue
+
+      // Single-product order: safe 1-to-1 mapping
+      if (skuProducts.length === 1 && numericIds.length === 1) {
+        mapping.set(skuProducts[0].marketplace_product_id!, numericIds[0])
+        continue
+      }
+
+      // Multi-product: map by product name similarity (both files have product_name)
+      // Only map if all seller SKUs in the order can be uniquely identified
+      if (skuProducts.length === numericIds.length) {
+        // Try positional mapping — Shopee usually lists products in the same order in both files
+        // This is a best-effort approach; single-SKU orders above are the reliable path
+        for (let i = 0; i < skuProducts.length; i++) {
+          const sellerSku = skuProducts[i].marketplace_product_id!
+          if (!mapping.has(sellerSku)) {
+            mapping.set(sellerSku, numericIds[i])
+          }
+        }
+      }
+    }
+
+    return mapping
+  }, [ordersAll, orderProducts])
+
   // Pending KPIs: compute all 7 KPI components from Order.all pending orders
   // so they can be merged with confirmed income KPIs in the summary cards
   const pendingKpis = useMemo(() => {
-    const hppMap = new Map(masterProducts.map((p) => [
+    const hppLookup = new Map(masterProducts.map((p) => [
       p.marketplace_product_id,
       { hpp: p.hpp ?? 0, packaging: p.packaging_cost ?? 0 },
     ]))
+    // Resolve HPP by seller SKU using the cross-reference mapping
+    const getHpp = (sellerSku: string | null) => {
+      if (!sellerSku) return undefined
+      // Direct match (unlikely — format mismatch — but handles future-proof cases)
+      if (hppLookup.has(sellerSku)) return hppLookup.get(sellerSku)
+      // Resolved via seller_sku → numeric_id mapping built from matched orders
+      const numericId = sellerSkuToNumericId.get(sellerSku)
+      return numericId ? hppLookup.get(numericId) : undefined
+    }
 
     const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
 
@@ -648,12 +703,12 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       // Net income = total_pembayaran (estimated seller payout, parallel to total_income in income file)
       totalNetIncome += order.total_pembayaran
 
-      // HPP
+      // HPP: resolve via seller_sku → numeric_id mapping, then look up master_products
       let orderHpp = 0; let skuCount = 0; let hppMatched = 0
       for (const prod of products) {
         if (!prod.marketplace_product_id) continue
         skuCount++
-        const master = hppMap.get(prod.marketplace_product_id)
+        const master = getHpp(prod.marketplace_product_id)
         if (master && (master.hpp > 0 || master.packaging > 0)) {
           orderHpp += (master.hpp + master.packaging) * prod.quantity
           hppMatched++
@@ -684,7 +739,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       hasPendingData: pending.length > 0,
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredOrdersAll, masterProducts, kpis.totalFees, kpis.totalOmzet])
+  }, [filteredOrdersAll, masterProducts, sellerSkuToNumericId, kpis.totalFees, kpis.totalOmzet])
 
   const pendingSummary = useMemo(() => {
     const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
