@@ -262,6 +262,8 @@ export interface DbOrderAll {
     harga_awal: number             // original price per unit → for omzet calc
     harga_setelah_diskon: number   // price after product discount → for diskon calc
   }> | null
+  /** Pre-computed HPP estimate (migration 012). 0 if no HPP found at upload time. */
+  estimated_hpp: number | null
 }
 
 // Summary of pending orders from orders_all

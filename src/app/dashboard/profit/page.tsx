@@ -30,7 +30,7 @@ export default async function ProfitPage({
 
   const ordersAllQ = supabase
     .from('orders_all')
-    .select('id,order_number,status_pesanan,total_pembayaran,seller_voucher,order_date,order_complete_date,products_json')
+    .select('id,order_number,status_pesanan,total_pembayaran,seller_voucher,order_date,order_complete_date,products_json,estimated_hpp')
   if (storeId) ordersAllQ.eq('store_id', storeId)
 
   const [
