@@ -62,6 +62,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Fetch existing order_numbers for this store to compute inserted vs updated counts
+    const { data: existing } = await supabase
+      .from('orders_all')
+      .select('order_number')
+      .eq('store_id', storeId!)
+    const existingSet = new Set((existing ?? []).map((r) => r.order_number))
+
     // Upload batch
     const { data: batch, error: batchErr } = await supabase.from('upload_batches').insert({
       user_id: user.id,
@@ -78,19 +85,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Gagal menyimpan batch: ${batchErr?.message}` }, { status: 500 })
     }
 
-    // Wipe-and-replace by period overlap (take latest version as source of truth)
     const warnings: string[] = []
+
+    // Wipe-and-replace: delete all rows in the period's date range so stale data
+    // (including old rows missing products_json / seller_voucher) is fully cleared
+    // before inserting the fresh version.
     if (periodStart && periodEnd) {
-      const { error: delErr } = await supabase.from('orders_all').delete()
-        .eq('store_id', storeId)
+      const { error: delErr } = await supabase
+        .from('orders_all')
+        .delete()
+        .eq('store_id', storeId!)
         .lte('order_date', periodEnd)
         .gte('order_date', periodStart)
       if (delErr) warnings.push(`Gagal menghapus data lama: ${delErr.message}`)
+    } else {
+      // No date range detected — wipe ALL rows for this store to avoid orphaned data
+      const { error: delErr } = await supabase
+        .from('orders_all')
+        .delete()
+        .eq('store_id', storeId!)
+      if (delErr) warnings.push(`Gagal menghapus data lama: ${delErr.message}`)
     }
 
-    // Insert
+    // Insert fresh rows in chunks
     const CHUNK = 500
     let insertedCount = 0
+    let updatedCount = 0
+
     const rows = orders.map((o) => ({
       order_number: o.order_number,
       status_pesanan: o.status_pesanan,
@@ -106,7 +127,8 @@ export async function POST(request: NextRequest) {
     }))
 
     for (let i = 0; i < rows.length; i += CHUNK) {
-      const { error } = await supabase.from('orders_all').upsert(rows.slice(i, i + CHUNK), {
+      const chunk = rows.slice(i, i + CHUNK)
+      const { error } = await supabase.from('orders_all').upsert(chunk, {
         onConflict: 'store_id,order_number',
         ignoreDuplicates: false,
       })
@@ -114,7 +136,10 @@ export async function POST(request: NextRequest) {
         console.error('orders_all insert error:', error.message)
         warnings.push(`Sebagian data gagal disimpan: ${error.message}`)
       } else {
-        insertedCount += Math.min(CHUNK, rows.length - i)
+        for (const row of chunk) {
+          if (existingSet.has(row.order_number)) updatedCount++
+          else insertedCount++
+        }
       }
     }
 
@@ -122,7 +147,7 @@ export async function POST(request: NextRequest) {
       batchId: batch.id,
       recordCount: orders.length,
       insertedCount,
-      updatedCount: 0,
+      updatedCount,
       unchangedCount: 0,
       duplicateCount: 0,
       newProducts: 0,
