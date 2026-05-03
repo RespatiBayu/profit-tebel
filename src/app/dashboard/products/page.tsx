@@ -129,15 +129,19 @@ export default function ProductsPage() {
 
     setSaving((prev) => ({ ...prev, [product.id]: true }))
 
-    const { error } = await supabase
-      .from('master_products')
-      .update({ hpp, packaging_cost })
-      .eq('id', product.id)
+    // Use API route (not direct Supabase) so the server can also backfill
+    // estimated_hpp in orders_all after HPP is saved.
+    const res = await fetch(`/api/master-products/${product.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hpp, packaging_cost }),
+    })
+    const json = await res.json()
 
     setSaving((prev) => ({ ...prev, [product.id]: false }))
 
-    if (error) {
-      setError(`Gagal menyimpan: ${error.message}`)
+    if (!res.ok) {
+      setError(`Gagal menyimpan: ${json?.error ?? res.statusText}`)
     } else {
       setProducts((prev) =>
         prev.map((p) => p.id === product.id ? { ...p, hpp, packaging_cost } : p)
