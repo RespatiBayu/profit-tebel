@@ -614,8 +614,79 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordersAll, selectedYears, effectiveMonths])
 
+  const PENDING_STATUSES = ['Telah Dikirim', 'Sedang Dikirim', 'Perlu Dikirim', 'Belum Bayar']
+
+  // Pending KPIs: compute all 7 KPI components from Order.all pending orders
+  // so they can be merged with confirmed income KPIs in the summary cards
+  const pendingKpis = useMemo(() => {
+    const hppMap = new Map(masterProducts.map((p) => [
+      p.marketplace_product_id,
+      { hpp: p.hpp ?? 0, packaging: p.packaging_cost ?? 0 },
+    ]))
+
+    const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
+
+    let totalOmzet    = 0   // SUM(harga_awal × qty)
+    let totalDiskon   = 0   // product discount + seller voucher
+    let totalHpp      = 0   // HPP + packaging from master_products
+    let totalNetIncome = 0  // total_pembayaran (est. seller payout after Shopee fees)
+    let ordersNoHpp   = 0
+
+    for (const order of pending) {
+      const products = order.products_json ?? []
+
+      // Omzet & diskon from per-SKU price data
+      for (const prod of products) {
+        const ha = prod.harga_awal           ?? 0
+        const hd = prod.harga_setelah_diskon ?? 0
+        totalOmzet  += ha * prod.quantity
+        totalDiskon += (ha - hd) * prod.quantity
+      }
+      // Seller-borne voucher/bundle discount at order level
+      totalDiskon += order.seller_voucher ?? 0
+
+      // Net income = total_pembayaran (estimated seller payout, parallel to total_income in income file)
+      totalNetIncome += order.total_pembayaran
+
+      // HPP
+      let orderHpp = 0; let skuCount = 0; let hppMatched = 0
+      for (const prod of products) {
+        if (!prod.marketplace_product_id) continue
+        skuCount++
+        const master = hppMap.get(prod.marketplace_product_id)
+        if (master && (master.hpp > 0 || master.packaging > 0)) {
+          orderHpp += (master.hpp + master.packaging) * prod.quantity
+          hppMatched++
+        }
+      }
+      totalHpp += orderHpp
+      if (skuCount > 0 && hppMatched === 0) ordersNoHpp++
+    }
+
+    const grossIncome = totalOmzet - totalDiskon
+    // Estimate Shopee fees using the same rate as confirmed orders (fee rate on omzet)
+    const feeRateOnOmzet = kpis.totalOmzet > 0 ? kpis.totalFees / kpis.totalOmzet : 0
+    const totalFees = totalOmzet * feeRateOnOmzet
+    // Real profit = net income (after Shopee fees) - HPP (no ads attribution for pending)
+    const realProfit = totalNetIncome - totalHpp
+
+    return {
+      totalOmzet,
+      totalDiskon,
+      grossIncome,
+      totalFees,
+      totalHpp,
+      totalNetIncome,
+      realProfit,
+      orderCount: pending.length,
+      hasHppData: totalHpp > 0,
+      ordersNoHpp,
+      hasPendingData: pending.length > 0,
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredOrdersAll, masterProducts, kpis.totalFees, kpis.totalOmzet])
+
   const pendingSummary = useMemo(() => {
-    const PENDING_STATUSES = ['Telah Dikirim', 'Sedang Dikirim', 'Perlu Dikirim', 'Belum Bayar']
     const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
     const selesai = filteredOrdersAll.filter((o) => o.status_pesanan === 'Selesai')
 
@@ -636,67 +707,17 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     const byStatus = Array.from(statusMap.entries()).map(([status, v]) => ({ status, ...v }))
       .sort((a, b) => b.total - a.total)
 
-    // --- Estimasi HPP untuk pending orders ---
-    // total_pembayaran di Order.all = estimated seller payout setelah fee Shopee (mirip net income)
-    // Kita kurangi HPP+packaging dari master_products untuk dapat estimasi profit
-    const hppMap = new Map(masterProducts.map((p) => [
-      p.marketplace_product_id,
-      { hpp: p.hpp ?? 0, packaging: p.packaging_cost ?? 0 },
-    ]))
-
-    let totalPendingHpp       = 0
-    let ordersWithHpp         = 0    // order yang semua produknya ada HPP
-    let ordersPartialHpp      = 0    // order yang sebagian produknya ada HPP
-    let ordersNoHpp           = 0    // order yang tidak ada HPP sama sekali / tidak ada produk
-
-    for (const order of pending) {
-      const products = order.products_json ?? []
-      if (products.length === 0) { ordersNoHpp++; continue }
-
-      let orderHpp = 0
-      let matchedCount = 0
-      let skuCount = 0
-
-      for (const prod of products) {
-        if (!prod.marketplace_product_id) continue
-        skuCount++
-        const master = hppMap.get(prod.marketplace_product_id)
-        if (master && (master.hpp > 0 || master.packaging > 0)) {
-          orderHpp += (master.hpp + master.packaging) * prod.quantity
-          matchedCount++
-        }
-      }
-
-      totalPendingHpp += orderHpp
-      if (skuCount === 0)                        ordersNoHpp++
-      else if (matchedCount === skuCount)         ordersWithHpp++
-      else if (matchedCount > 0)                  ordersPartialHpp++
-      else                                        ordersNoHpp++
-    }
-
-    const totalPendingIncome   = pending.reduce((s, o) => s + o.total_pembayaran, 0)
-    const estimatedPendingProfit = totalPendingIncome - totalPendingHpp
-    const hppCoverage          = pending.length > 0
-      ? Math.round(((ordersWithHpp + ordersPartialHpp) / pending.length) * 100)
-      : 0
-
     return {
-      totalPending: totalPendingIncome,
+      totalPending: pending.reduce((s, o) => s + o.total_pembayaran, 0),
       countPending: pending.length,
       byStatus,
       totalSelesai: selesai.reduce((s, o) => s + o.total_pembayaran, 0),
       countSelesai: selesai.length,
       matchedWithIncome: matchedCount,
       hasData: filteredOrdersAll.length > 0,
-      // Pending profit estimation
-      totalPendingHpp,
-      estimatedPendingProfit,
-      ordersWithHpp,
-      ordersPartialHpp,
-      ordersNoHpp,
-      hppCoverage,
     }
-  }, [filteredOrdersAll, filteredOrders, masterProducts])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredOrdersAll, filteredOrders])
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
@@ -754,32 +775,46 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
 
       {/* KPI Cards */}
       {(() => {
-        const pct = (v: number) => (kpis.totalOmzet > 0 ? (v / kpis.totalOmzet) * 100 : 0)
-        // Rata-rata per order (buat MoM delta yang ngebandingin "per-produk" bukan total).
-        // Total naik sering cuma karena omzet naik; avg/order lebih informatif.
+        // If pending data exists, show combined (confirmed + pending) values
+        const p = pendingKpis.hasPendingData
+        const omzet    = kpis.totalOmzet      + (p ? pendingKpis.totalOmzet    : 0)
+        const diskon   = kpis.totalDiskonPromo + (p ? pendingKpis.totalDiskon   : 0)
+        const gross    = kpis.grossIncome      + (p ? pendingKpis.grossIncome   : 0)
+        const fees     = kpis.totalFees        + (p ? pendingKpis.totalFees     : 0)
+        const hpp      = kpis.totalHppCost     + (p ? pendingKpis.totalHpp      : 0)
+        const adSpend  = kpis.totalAdSpend     // Ads tidak dialokasikan ke pending
+        const profit   = kpis.realProfit       + (p ? pendingKpis.realProfit    : 0)
+        const orders   = kpis.orderCount       + (p ? pendingKpis.orderCount    : 0)
+        const hasHpp   = kpis.hasHppData || (p && pendingKpis.hasHppData)
+
+        const pct = (v: number) => (omzet > 0 ? (v / omzet) * 100 : 0)
         const avg = (total: number, count: number) => (count > 0 ? total / count : 0)
         const curCount = kpis.orderCount
         const prevCount = prevKpis.orderCount
+
+        const pendingLabel = p ? ` (+${pendingKpis.orderCount} pending)` : ''
+        const pendingNote  = p ? ' · incl. estimasi pending' : ''
+
         return (
           <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
             <KpiCard
               label="Total Omzet"
-              value={formatRp(kpis.totalOmzet)}
-              sub={`${kpis.orderCount.toLocaleString('id-ID')} order`}
+              value={formatRp(omzet)}
+              sub={`${orders.toLocaleString('id-ID')} order${pendingLabel}`}
               accent="blue"
               icon={ShoppingBag}
-              tooltip="Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee)."
-              pctOmzet={kpis.totalOmzet > 0 ? 100 : null}
+              tooltip={`Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee).${p ? ' Termasuk estimasi dari pesanan yang belum dilepas dananya.' : ''}`}
+              pctOmzet={omzet > 0 ? 100 : null}
               delta={{ current: kpis.totalOmzet, prev: prevKpis.totalOmzet, context: 'income' }}
             />
             <KpiCard
               label="Total Diskon & Promo"
-              value={formatRp(kpis.totalDiskonPromo)}
-              sub="Diskon produk + voucher + cashback + refund"
+              value={formatRp(diskon)}
+              sub={`Diskon produk + voucher${pendingNote}`}
               accent="orange"
               icon={Tag}
-              tooltip="Total pengurang yang kamu tanggung sendiri: diskon produk, voucher seller, cashback koin, promo gratis ongkir penjual, dan pengembalian dana."
-              pctOmzet={pct(kpis.totalDiskonPromo)}
+              tooltip={`Total pengurang yang kamu tanggung sendiri: diskon produk, voucher seller, cashback koin, promo gratis ongkir, dan pengembalian dana.${p ? ' Pending: diskon produk + voucher penjual.' : ''}`}
+              pctOmzet={pct(diskon)}
               delta={{
                 current: avg(kpis.totalDiskonPromo, curCount),
                 prev: avg(prevKpis.totalDiskonPromo, prevCount),
@@ -788,23 +823,23 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               }}
             />
             <KpiCard
-              label="Pendapatan Kotor (Gross Income)"
-              value={formatRp(kpis.grossIncome)}
-              sub="Setelah diskon & promo"
+              label="Pendapatan Kotor"
+              value={formatRp(gross)}
+              sub={`Setelah diskon & promo${pendingNote}`}
               accent="green"
               icon={Banknote}
-              tooltip="Pendapatan setelah dikurangi diskon dan promo yang kamu tanggung, sebelum biaya marketplace dan iklan."
-              pctOmzet={pct(kpis.grossIncome)}
+              tooltip={`Pendapatan setelah dikurangi diskon dan promo yang kamu tanggung, sebelum biaya marketplace dan iklan.${p ? ' Pending dihitung dari harga jual setelah diskon.' : ''}`}
+              pctOmzet={pct(gross)}
               delta={{ current: kpis.grossIncome, prev: prevKpis.grossIncome, context: 'income' }}
             />
             <KpiCard
               label="Total Biaya"
-              value={formatRp(kpis.totalFees)}
-              sub="Fee marketplace (Shopee)"
+              value={formatRp(fees)}
+              sub={`Fee marketplace (Shopee)${p ? ' · est. pending' : ''}`}
               accent="red"
               icon={Receipt}
-              tooltip="Biaya marketplace murni: komisi AMS, biaya admin, layanan, proses pesanan, transaksi, kampanye, premi, dan program hemat ongkir."
-              pctOmzet={pct(kpis.totalFees)}
+              tooltip={`Biaya marketplace murni: komisi AMS, biaya admin, layanan, proses pesanan, transaksi, kampanye, premi, dan program hemat ongkir.${p ? ' Pending diestimasi menggunakan rata-rata fee rate dari order terkonfirmasi.' : ''}`}
+              pctOmzet={pct(fees)}
               delta={{
                 current: avg(kpis.totalFees, curCount),
                 prev: avg(prevKpis.totalFees, prevCount),
@@ -814,20 +849,20 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
             />
             <KpiCard
               label="HPP + Packaging"
-              value={kpis.hasHppData ? formatRp(kpis.totalHppCost) : '—'}
+              value={hasHpp ? formatRp(hpp) : '—'}
               sub={
-                kpis.hasHppData
+                hasHpp
                   ? noHppCount > 0
-                    ? `${noHppCount} produk belum HPP`
-                    : 'Harga pokok + packaging'
+                    ? `${noHppCount} produk belum HPP${pendingNote}`
+                    : `Harga pokok + packaging${pendingNote}`
                   : 'Isi HPP dulu'
               }
-              accent={kpis.hasHppData ? 'orange' : 'muted'}
+              accent={hasHpp ? 'orange' : 'muted'}
               icon={Package}
-              tooltip="Total harga pokok produksi (HPP) + biaya packaging untuk semua produk yang terjual di periode ini."
-              pctOmzet={kpis.hasHppData ? pct(kpis.totalHppCost) : null}
+              tooltip={`Total HPP + biaya packaging untuk semua produk yang terjual.${p ? ' Pending: dihitung dari HPP × qty setiap SKU.' : ''}`}
+              pctOmzet={hasHpp ? pct(hpp) : null}
               delta={
-                kpis.hasHppData
+                hasHpp
                   ? {
                       current: avg(kpis.totalHppCost, curCount),
                       prev: avg(prevKpis.totalHppCost, prevCount),
@@ -836,38 +871,38 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                     }
                   : undefined
               }
-              cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
+              cta={!hasHpp ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
             />
             <KpiCard
               label="Biaya Iklan"
-              value={formatRp(kpis.totalAdSpend)}
-              sub={kpis.totalAdSpend > 0 ? 'Ad spend' : 'Belum ada'}
-              accent={kpis.totalAdSpend > 0 ? 'orange' : 'muted'}
+              value={formatRp(adSpend)}
+              sub={adSpend > 0 ? 'Ad spend (confirmed)' : 'Belum ada'}
+              accent={adSpend > 0 ? 'orange' : 'muted'}
               icon={Zap}
-              tooltip="Total biaya iklan yang dikeluarkan untuk mempromosikan produk di platform."
-              pctOmzet={pct(kpis.totalAdSpend)}
+              tooltip="Total biaya iklan dari file Ads. Belum dialokasikan ke pesanan pending karena tidak ada data atribusi per-order."
+              pctOmzet={pct(adSpend)}
               delta={{ current: kpis.totalAdSpend, prev: prevKpis.totalAdSpend, context: 'cost' }}
             />
             <KpiCard
               label="Real Profit"
-              value={kpis.hasHppData ? formatRp(kpis.realProfit) : '—'}
-              accent={kpis.hasHppData ? (kpis.realProfit >= 0 ? 'green' : 'red') : 'muted'}
+              value={hasHpp ? formatRp(profit) : '—'}
+              accent={hasHpp ? (profit >= 0 ? 'green' : 'red') : 'muted'}
               sub={
-                kpis.hasHppData
+                hasHpp
                   ? noHppCount > 0
-                    ? `Estimasi (${noHppCount} produk belum HPP)`
-                    : 'Net Income − HPP & packaging − iklan'
+                    ? `Estimasi (${noHppCount} produk belum HPP)${pendingNote}`
+                    : `Net Income − HPP − iklan${pendingNote}`
                   : 'Isi HPP dulu untuk melihat'
               }
               icon={TrendingUp}
-              tooltip="Profit sebenarnya setelah memperhitungkan HPP (harga pokok), biaya packaging, dan biaya iklan. Rumus: Net Income − HPP − Packaging − Biaya Iklan."
-              pctOmzet={kpis.hasHppData ? pct(kpis.realProfit) : null}
+              tooltip={`Profit sebenarnya: Net Income − HPP − Packaging − Biaya Iklan.${p ? ' Pending: total_pembayaran − HPP (tanpa alokasi iklan).' : ''}`}
+              pctOmzet={hasHpp ? pct(profit) : null}
               delta={
-                kpis.hasHppData
+                hasHpp
                   ? { current: kpis.realProfit, prev: prevKpis.realProfit, context: 'income' }
                   : undefined
               }
-              cta={!kpis.hasHppData ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
+              cta={!hasHpp ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
             />
           </div>
         )
@@ -877,97 +912,32 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       {pendingSummary.hasData && (
         <Card className="border-teal-200 bg-teal-50/30">
           <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-md bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
-                <span className="text-base">⏳</span>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-md bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
+                  <span className="text-base">⏳</span>
+                </div>
+                <div>
+                  <CardTitle className="text-base">Dana Pending & Rekonsiliasi</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Dari file Order.all · angka KPI di atas sudah termasuk estimasi pending
+                  </p>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-base">Dana Pending & Estimasi Profit Total</CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Dari file Order.all — termasuk estimasi profit pesanan yang belum dilepas
-                </p>
-              </div>
+              {pendingSummary.countPending > 0 && (
+                <div className="text-right">
+                  <p className="text-xl font-bold text-teal-700">{formatRp(pendingSummary.totalPending)}</p>
+                  <p className="text-xs text-muted-foreground">{pendingSummary.countPending} pesanan pending</p>
+                </div>
+              )}
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-
-            {/* === Estimasi Profit Total (confirmed + pending) === */}
-            {kpis.hasHppData && pendingSummary.countPending > 0 && (
-              <div className="rounded-xl border-2 border-teal-300 bg-teal-50 p-4 space-y-3">
-                <p className="text-xs font-semibold text-teal-800 uppercase tracking-wide">Estimasi Profit Total (Confirmed + Pending)</p>
-                <div className="grid grid-cols-3 gap-2 text-sm">
-                  {/* Real Profit terkonfirmasi */}
-                  <div className="bg-white rounded-lg border p-3 text-center">
-                    <p className="text-[11px] text-muted-foreground mb-1">Real Profit<br/>(Dana Cair)</p>
-                    <p className={`text-base font-bold tabular-nums ${kpis.realProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                      {formatRp(kpis.realProfit)}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {filteredOrders.length} order · terkonfirmasi
-                    </p>
-                  </div>
-                  {/* Plus sign */}
-                  <div className="flex items-center justify-center">
-                    <div className="text-center space-y-1">
-                      <p className="text-2xl font-light text-teal-400">+</p>
-                      <p className="text-[10px] text-muted-foreground">Estimasi<br/>Pending</p>
-                    </div>
-                  </div>
-                  {/* Estimasi profit pending */}
-                  <div className="bg-white rounded-lg border border-teal-200 p-3 text-center">
-                    <p className="text-[11px] text-muted-foreground mb-1">Est. Profit<br/>(Dana Pending)</p>
-                    <p className={`text-base font-bold tabular-nums ${pendingSummary.estimatedPendingProfit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>
-                      {formatRp(pendingSummary.estimatedPendingProfit)}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {pendingSummary.countPending} order · estimasi
-                    </p>
-                  </div>
-                </div>
-                {/* Total */}
-                <div className={`rounded-lg p-3 flex items-center justify-between gap-2 ${
-                  kpis.realProfit + pendingSummary.estimatedPendingProfit >= 0
-                    ? 'bg-green-100 border border-green-300'
-                    : 'bg-red-50 border border-red-200'
-                }`}>
-                  <div>
-                    <p className="text-xs font-semibold text-muted-foreground">Estimasi Total Profit Periode Ini</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      Net income − HPP − packaging − iklan (confirmed) + estimasi pending
-                      {pendingSummary.hppCoverage < 100 && ` · HPP coverage pending: ${pendingSummary.hppCoverage}%`}
-                    </p>
-                  </div>
-                  <p className={`text-2xl font-bold tabular-nums shrink-0 ${
-                    kpis.realProfit + pendingSummary.estimatedPendingProfit >= 0 ? 'text-green-700' : 'text-red-600'
-                  }`}>
-                    {formatRp(kpis.realProfit + pendingSummary.estimatedPendingProfit)}
-                  </p>
-                </div>
-                {/* HPP breakdown pending */}
-                <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
-                  <div>
-                    <p className="font-medium text-foreground tabular-nums">{formatRp(pendingSummary.totalPending)}</p>
-                    <p>Est. Pendapatan<br/>Pending</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-orange-600 tabular-nums">−{formatRp(pendingSummary.totalPendingHpp)}</p>
-                    <p>Est. HPP &<br/>Packaging</p>
-                  </div>
-                  <div>
-                    <p className={`font-medium tabular-nums ${pendingSummary.estimatedPendingProfit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>
-                      = {formatRp(pendingSummary.estimatedPendingProfit)}
-                    </p>
-                    <p>Est. Profit<br/>Pending</p>
-                  </div>
-                </div>
-                {pendingSummary.ordersNoHpp > 0 && (
-                  <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1.5 border border-amber-200">
-                    ⚠️ {pendingSummary.ordersNoHpp} pesanan pending tidak bisa dihitung HPP-nya
-                    {pendingSummary.ordersPartialHpp > 0 && `, ${pendingSummary.ordersPartialHpp} pesanan HPP sebagian`}
-                    {' '}— estimasi profit bisa lebih rendah dari actual.
-                  </p>
-                )}
-              </div>
+            {/* HPP coverage warning */}
+            {pendingKpis.ordersNoHpp > 0 && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1.5 border border-amber-200">
+                ⚠️ {pendingKpis.ordersNoHpp} pesanan pending tidak dapat dihitung HPP-nya — pastikan HPP semua produk sudah diisi agar estimasi lebih akurat.
+              </p>
             )}
 
             {/* Pending breakdown by status */}

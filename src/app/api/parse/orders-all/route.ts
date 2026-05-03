@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
       order_number: o.order_number,
       status_pesanan: o.status_pesanan,
       total_pembayaran: o.total_pembayaran,
+      seller_voucher: o.seller_voucher,
       order_date: o.order_date,
       order_complete_date: o.order_complete_date,
       products_json: o.products_json,

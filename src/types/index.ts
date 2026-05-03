@@ -250,14 +250,17 @@ export interface DbOrderAll {
   marketplace: string
   order_number: string
   status_pesanan: string | null  // Selesai | Batal | Telah Dikirim | Sedang Dikirim | Perlu Dikirim | Belum Bayar
-  total_pembayaran: number
+  total_pembayaran: number       // Estimated seller payout after Shopee fees
+  seller_voucher: number | null  // Voucher Ditanggung Penjual + Paket Diskon Penjual (order-level)
   order_date: string | null
   order_complete_date: string | null
-  /** Per-SKU breakdown for HPP estimation. Null on old rows uploaded before migration 010. */
+  /** Per-SKU breakdown for KPI estimation. Null on old rows uploaded before migration 010. */
   products_json: Array<{
     marketplace_product_id: string | null
     product_name: string | null
     quantity: number
+    harga_awal: number             // original price per unit → for omzet calc
+    harga_setelah_diskon: number   // price after product discount → for diskon calc
   }> | null
 }
 
