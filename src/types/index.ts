@@ -242,6 +242,34 @@ export interface CashFlowStats {
   ordersWithBothDates: number
 }
 
+// DB row from `orders_all` table (Shopee Order.all export)
+export interface DbOrderAll {
+  id: string
+  store_id: string
+  upload_batch_id: string
+  marketplace: string
+  order_number: string
+  status_pesanan: string | null  // Selesai | Batal | Telah Dikirim | Sedang Dikirim | Perlu Dikirim | Belum Bayar
+  total_pembayaran: number
+  order_date: string | null
+  order_complete_date: string | null
+}
+
+// Summary of pending orders from orders_all
+export interface PendingSummary {
+  totalPending: number       // sum total_pembayaran for non-Selesai & non-Batal
+  countPending: number       // number of pending orders
+  byStatus: {
+    status: string
+    count: number
+    total: number
+  }[]
+  // Reconciliation fields
+  totalSelesai: number       // sum total_pembayaran for Selesai orders
+  countSelesai: number
+  matchedWithIncome: number  // orders appearing in both orders_all & income file
+}
+
 // DB row from `ads_data` table
 export interface DbAdsRow {
   id: string

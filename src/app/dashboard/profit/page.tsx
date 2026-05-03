@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Upload } from 'lucide-react'
 import ProfitDashboard from '@/components/profit/profit-dashboard'
-import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct } from '@/types'
+import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct, DbOrderAll } from '@/types'
 
 export default async function ProfitPage({
   searchParams,
@@ -28,17 +28,24 @@ export default async function ProfitPage({
   const adsDataQ = supabase.from('ads_data').select('*')
   if (storeId) adsDataQ.eq('store_id', storeId)
 
+  const ordersAllQ = supabase
+    .from('orders_all')
+    .select('id,order_number,status_pesanan,total_pembayaran,order_date,order_complete_date')
+  if (storeId) ordersAllQ.eq('store_id', storeId)
+
   const [
     { data: orders },
     { data: orderProducts },
     { data: masterProducts },
     { data: adsData },
-  ] = await Promise.all([ordersQ, orderProductsQ, masterProductsQ, adsDataQ])
+    { data: ordersAll },
+  ] = await Promise.all([ordersQ, orderProductsQ, masterProductsQ, adsDataQ, ordersAllQ])
 
   const typedOrders = (orders ?? []) as DbOrder[]
   const typedOrderProducts = (orderProducts ?? []) as DbOrderProduct[]
   const typedMasterProducts = (masterProducts ?? []) as MasterProduct[]
   const typedAdsData = (adsData ?? []) as DbAdsRow[]
+  const typedOrdersAll = (ordersAll ?? []) as DbOrderAll[]
 
   if (typedOrders.length === 0) {
     return (
@@ -72,6 +79,7 @@ export default async function ProfitPage({
       orderProducts={typedOrderProducts}
       masterProducts={typedMasterProducts}
       adsData={typedAdsData}
+      ordersAll={typedOrdersAll}
       noHppCount={noHppCount}
     />
   )

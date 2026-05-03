@@ -30,7 +30,7 @@ import Link from 'next/link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import type { Store } from '@/types'
 
-type UploadType = 'income' | 'ads' | 'ads_product'
+type UploadType = 'income' | 'ads' | 'ads_product' | 'orders_all'
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
 
 interface UploadState {
@@ -78,27 +78,35 @@ function DropZone({
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const Icon = type === 'income' ? FileSpreadsheet : FileText
+  const Icon = type === 'income' || type === 'orders_all' ? FileSpreadsheet : FileText
   const label = type === 'income'
     ? 'Data Penghasilan'
     : type === 'ads'
     ? 'Data Iklan (Summary)'
-    : 'Data per Produk (GMV Max Auto)'
+    : type === 'ads_product'
+    ? 'Data per Produk (GMV Max Auto)'
+    : 'Semua Pesanan (Order.all)'
   const desc = type === 'income'
-    ? 'File .xlsx dari Shopee Income'
+    ? 'File .xlsx dari Shopee Income (Sudah Dilepas)'
     : type === 'ads'
     ? 'File .csv dari Shopee Ads'
-    : 'File .csv dari Shop GMV Max Detail Produk'
+    : type === 'ads_product'
+    ? 'File .csv dari Shop GMV Max Detail Produk'
+    : 'File .xlsx dari Seller Center → Pesanan Saya → Export'
   const color = type === 'income'
     ? 'text-blue-600'
     : type === 'ads'
     ? 'text-orange-600'
-    : 'text-purple-600'
+    : type === 'ads_product'
+    ? 'text-purple-600'
+    : 'text-teal-600'
   const bg = type === 'income'
     ? 'bg-blue-50'
     : type === 'ads'
     ? 'bg-orange-50'
-    : 'bg-purple-50'
+    : type === 'ads_product'
+    ? 'bg-purple-50'
+    : 'bg-teal-50'
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -247,6 +255,9 @@ export default function UploadPage() {
   const [adsProductState, setAdsProductState] = useState<UploadState>({
     file: null, status: 'idle', progress: 0, result: null,
   })
+  const [ordersAllState, setOrdersAllState] = useState<UploadState>({
+    file: null, status: 'idle', progress: 0, result: null,
+  })
 
   // Load stores on mount
   useEffect(() => {
@@ -276,28 +287,22 @@ export default function UploadPage() {
   }, [storeId, stores])
 
   function setFile(type: UploadType, file: File) {
-    if (type === 'income') {
-      setIncomeState({ file, status: 'idle', progress: 0, result: null })
-    } else if (type === 'ads') {
-      setAdsState({ file, status: 'idle', progress: 0, result: null })
-    } else {
-      setAdsProductState({ file, status: 'idle', progress: 0, result: null })
-    }
+    if (type === 'income') setIncomeState({ file, status: 'idle', progress: 0, result: null })
+    else if (type === 'ads') setAdsState({ file, status: 'idle', progress: 0, result: null })
+    else if (type === 'ads_product') setAdsProductState({ file, status: 'idle', progress: 0, result: null })
+    else setOrdersAllState({ file, status: 'idle', progress: 0, result: null })
   }
 
   function removeFile(type: UploadType) {
-    if (type === 'income') {
-      setIncomeState({ file: null, status: 'idle', progress: 0, result: null })
-    } else if (type === 'ads') {
-      setAdsState({ file: null, status: 'idle', progress: 0, result: null })
-    } else {
-      setAdsProductState({ file: null, status: 'idle', progress: 0, result: null })
-    }
+    if (type === 'income') setIncomeState({ file: null, status: 'idle', progress: 0, result: null })
+    else if (type === 'ads') setAdsState({ file: null, status: 'idle', progress: 0, result: null })
+    else if (type === 'ads_product') setAdsProductState({ file: null, status: 'idle', progress: 0, result: null })
+    else setOrdersAllState({ file: null, status: 'idle', progress: 0, result: null })
   }
 
   async function uploadFile(type: UploadType) {
-    const state = type === 'income' ? incomeState : type === 'ads' ? adsState : adsProductState
-    const setState = type === 'income' ? setIncomeState : type === 'ads' ? setAdsState : setAdsProductState
+    const state = type === 'income' ? incomeState : type === 'ads' ? adsState : type === 'ads_product' ? adsProductState : ordersAllState
+    const setState = type === 'income' ? setIncomeState : type === 'ads' ? setAdsState : type === 'ads_product' ? setAdsProductState : setOrdersAllState
     if (!state.file) return
 
     setState((prev) => ({ ...prev, status: 'uploading', progress: 30 }))
@@ -307,7 +312,11 @@ export default function UploadPage() {
     formData.append('marketplace', marketplace)
     if (storeId) formData.append('storeId', storeId)
 
-    const endpoint = type === 'ads_product' ? '/api/parse/ads-product' : `/api/parse/${type}`
+    const endpoint = type === 'ads_product'
+      ? '/api/parse/ads-product'
+      : type === 'orders_all'
+      ? '/api/parse/orders-all'
+      : `/api/parse/${type}`
 
     try {
       setState((prev) => ({ ...prev, progress: 60 }))
@@ -350,11 +359,12 @@ export default function UploadPage() {
     }
   }
 
-  const hasFiles = incomeState.file || adsState.file || adsProductState.file
+  const hasFiles = incomeState.file || adsState.file || adsProductState.file || ordersAllState.file
   const canUploadIncome = incomeState.file && incomeState.status === 'idle'
   const canUploadAds = adsState.file && adsState.status === 'idle'
   const canUploadAdsProduct = adsProductState.file && adsProductState.status === 'idle'
-  const canUploadAny = canUploadIncome || canUploadAds || canUploadAdsProduct
+  const canUploadOrdersAll = ordersAllState.file && ordersAllState.status === 'idle'
+  const canUploadAny = canUploadIncome || canUploadAds || canUploadAdsProduct || canUploadOrdersAll
 
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-6">
@@ -451,13 +461,20 @@ export default function UploadPage() {
           <CardTitle className="text-base">File Upload</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid sm:grid-cols-3 gap-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <DropZone
               type="income"
               accept=".xlsx"
               state={incomeState}
               onChange={(f) => setFile('income', f)}
               onRemove={() => removeFile('income')}
+            />
+            <DropZone
+              type="orders_all"
+              accept=".xlsx"
+              state={ordersAllState}
+              onChange={(f) => setFile('orders_all', f)}
+              onRemove={() => removeFile('orders_all')}
             />
             <DropZone
               type="ads"
@@ -509,12 +526,24 @@ export default function UploadPage() {
                   Proses Data per Produk
                 </Button>
               )}
-              {canUploadAny && [canUploadIncome, canUploadAds, canUploadAdsProduct].filter(Boolean).length > 1 && (
+              {canUploadOrdersAll && (
+                <Button
+                  variant={canUploadIncome || canUploadAds || canUploadAdsProduct ? 'outline' : 'default'}
+                  className="gap-2"
+                  onClick={() => uploadFile('orders_all')}
+                  disabled={ordersAllState.status === 'uploading'}
+                >
+                  <Upload className="h-4 w-4" />
+                  Proses Semua Pesanan
+                </Button>
+              )}
+              {canUploadAny && [canUploadIncome, canUploadAds, canUploadAdsProduct, canUploadOrdersAll].filter(Boolean).length > 1 && (
                 <Button
                   variant="secondary"
                   className="gap-2 sm:ml-auto"
                   onClick={async () => {
                     if (canUploadIncome) await uploadFile('income')
+                    if (canUploadOrdersAll) await uploadFile('orders_all')
                     if (canUploadAds) await uploadFile('ads')
                     if (canUploadAdsProduct) await uploadFile('ads_product')
                   }}
@@ -528,7 +557,7 @@ export default function UploadPage() {
       </Card>
 
       {/* Next steps after success */}
-      {(incomeState.status === 'success' || adsState.status === 'success' || adsProductState.status === 'success') && (
+      {(incomeState.status === 'success' || adsState.status === 'success' || adsProductState.status === 'success' || ordersAllState.status === 'success') && (
         <Card className="border-green-200 bg-green-50/50">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center gap-2 text-green-700 font-medium">
@@ -587,6 +616,10 @@ export default function UploadPage() {
             <div>
               <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv):</span>
               {' '}Shopee Ads → Shop GMV Max → Laporan → Download Detail Produk
+            </div>
+            <div>
+              <span className="font-medium text-foreground">Semua Pesanan / Order.all (.xlsx):</span>
+              {' '}Seller Center → Pesanan Saya → Export Pesanan (pilih semua status)
             </div>
           </div>
         </CardContent>

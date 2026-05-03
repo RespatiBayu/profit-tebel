@@ -78,7 +78,7 @@ import {
   TopBuyersSection,
   DailyDetailSection,
 } from '@/components/profit/dashboard-sections'
-import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct, ProductProfitRow } from '@/types'
+import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct, ProductProfitRow, DbOrderAll } from '@/types'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -411,10 +411,11 @@ interface Props {
   orderProducts: DbOrderProduct[]
   masterProducts: MasterProduct[]
   adsData: DbAdsRow[]
+  ordersAll: DbOrderAll[]
   noHppCount: number
 }
 
-export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, noHppCount }: Props) {
+export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, ordersAll, noHppCount }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
   // Period filter — sumber dari global Zustand store (shared dgn Detail Iklan)
   const selectedYears = usePeriodStore((s) => s.selectedYears)
@@ -605,6 +606,47 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   const hppFilled = totalProducts - noHppCount
   const hppProgress = totalProducts > 0 ? Math.round((hppFilled / totalProducts) * 100) : 0
 
+  // --- Dana Pending dari orders_all ---
+  // Filter orders_all sesuai periode yang dipilih (pakai order_date)
+  const filteredOrdersAll = useMemo(() => {
+    if (selectedYears.length === 0 && effectiveMonths.length === 0) return ordersAll
+    return ordersAll.filter((o) => matchesPeriod(o.order_date))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordersAll, selectedYears, effectiveMonths])
+
+  const pendingSummary = useMemo(() => {
+    const PENDING_STATUSES = ['Telah Dikirim', 'Sedang Dikirim', 'Perlu Dikirim', 'Belum Bayar']
+    const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
+    const selesai = filteredOrdersAll.filter((o) => o.status_pesanan === 'Selesai')
+
+    // Reconciliation: orders in orders_all that are also Selesai — cross-check with income orders
+    const selesaiNumbers = new Set(selesai.map((o) => o.order_number))
+    const incomeNumbers = new Set(filteredOrders.map((o) => o.order_number))
+    const matchedCount = Array.from(selesaiNumbers).filter((n) => incomeNumbers.has(n)).length
+
+    // Breakdown by status
+    const statusMap = new Map<string, { count: number; total: number }>()
+    for (const o of pending) {
+      const s = o.status_pesanan ?? 'Lainnya'
+      const cur = statusMap.get(s) ?? { count: 0, total: 0 }
+      cur.count += 1
+      cur.total += o.total_pembayaran
+      statusMap.set(s, cur)
+    }
+    const byStatus = Array.from(statusMap.entries()).map(([status, v]) => ({ status, ...v }))
+      .sort((a, b) => b.total - a.total)
+
+    return {
+      totalPending: pending.reduce((s, o) => s + o.total_pembayaran, 0),
+      countPending: pending.length,
+      byStatus,
+      totalSelesai: selesai.reduce((s, o) => s + o.total_pembayaran, 0),
+      countSelesai: selesai.length,
+      matchedWithIncome: matchedCount,
+      hasData: filteredOrdersAll.length > 0,
+    }
+  }, [filteredOrdersAll, filteredOrders])
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -779,6 +821,97 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
           </div>
         )
       })()}
+
+      {/* Dana Pending & Rekonsiliasi */}
+      {pendingSummary.hasData && (
+        <Card className="border-teal-200 bg-teal-50/30">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-md bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
+                  <span className="text-base">⏳</span>
+                </div>
+                <div>
+                  <CardTitle className="text-base">Dana Pending & Rekonsiliasi</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Dari file Order.all — pesanan yang belum dilepas dananya
+                  </p>
+                </div>
+              </div>
+              {pendingSummary.countPending > 0 && (
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-teal-700">{formatRp(pendingSummary.totalPending)}</p>
+                  <p className="text-xs text-muted-foreground">{pendingSummary.countPending} pesanan pending</p>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Pending breakdown */}
+            {pendingSummary.countPending > 0 ? (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Breakdown Status Pending</p>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {pendingSummary.byStatus.map(({ status, count, total }) => {
+                    const color = status === 'Telah Dikirim'
+                      ? 'bg-blue-50 border-blue-200 text-blue-700'
+                      : status === 'Sedang Dikirim'
+                      ? 'bg-amber-50 border-amber-200 text-amber-700'
+                      : status === 'Perlu Dikirim'
+                      ? 'bg-orange-50 border-orange-200 text-orange-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-600'
+                    return (
+                      <div key={status} className={`rounded-lg border p-3 flex items-center justify-between gap-2 ${color}`}>
+                        <div>
+                          <p className="text-xs font-semibold">{status}</p>
+                          <p className="text-xs opacity-80">{count} pesanan</p>
+                        </div>
+                        <p className="text-sm font-bold tabular-nums">{formatRp(total)}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">✅ Semua pesanan di periode ini sudah dilepas</p>
+            )}
+
+            {/* Rekonsiliasi */}
+            <div className="border-t pt-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Rekonsiliasi Order</p>
+              <div className="grid sm:grid-cols-3 gap-3 text-sm">
+                <div className="bg-white rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Order Selesai (Order.all)</p>
+                  <p className="font-bold text-lg">{pendingSummary.countSelesai}</p>
+                  <p className="text-xs text-muted-foreground">{formatRp(pendingSummary.totalSelesai)} (GMV Pembeli)</p>
+                </div>
+                <div className="bg-white rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Order di Income File</p>
+                  <p className="font-bold text-lg">{filteredOrders.length}</p>
+                  <p className="text-xs text-muted-foreground">{formatRp(kpis.totalNetIncome)} (Net Income)</p>
+                </div>
+                <div className={`rounded-lg border p-3 ${pendingSummary.matchedWithIncome === pendingSummary.countSelesai && pendingSummary.countSelesai > 0 ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+                  <p className="text-xs text-muted-foreground">Order Cocok (Match)</p>
+                  <p className={`font-bold text-lg ${pendingSummary.matchedWithIncome === pendingSummary.countSelesai && pendingSummary.countSelesai > 0 ? 'text-green-700' : 'text-amber-700'}`}>
+                    {pendingSummary.matchedWithIncome}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {pendingSummary.matchedWithIncome === pendingSummary.countSelesai && pendingSummary.countSelesai > 0
+                      ? '✅ Semua cocok'
+                      : `⚠️ ${pendingSummary.countSelesai - pendingSummary.matchedWithIncome} belum di income file`}
+                  </p>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                * GMV Pembeli ≠ Net Income — GMV adalah jumlah dibayar pembeli, Net Income adalah jumlah diterima penjual setelah biaya platform.
+                {pendingSummary.countSelesai > 0 && filteredOrders.length > pendingSummary.matchedWithIncome &&
+                  ` ${filteredOrders.length - pendingSummary.matchedWithIncome} order di income file kemungkinan dari periode sebelumnya (pesanan Maret dilepas April).`
+                }
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Alur Dana: Omzet → Real Profit (waterfall) */}
       {kpis.totalOmzet > 0 && (
