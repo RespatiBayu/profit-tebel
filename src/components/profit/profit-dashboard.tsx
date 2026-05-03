@@ -619,10 +619,10 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
     const selesai = filteredOrdersAll.filter((o) => o.status_pesanan === 'Selesai')
 
-    // Reconciliation: orders in orders_all that are also Selesai — cross-check with income orders
+    // Reconciliation
     const selesaiNumbers = new Set(selesai.map((o) => o.order_number))
-    const incomeNumbers = new Set(filteredOrders.map((o) => o.order_number))
-    const matchedCount = Array.from(selesaiNumbers).filter((n) => incomeNumbers.has(n)).length
+    const incomeNumbers  = new Set(filteredOrders.map((o) => o.order_number))
+    const matchedCount   = Array.from(selesaiNumbers).filter((n) => incomeNumbers.has(n)).length
 
     // Breakdown by status
     const statusMap = new Map<string, { count: number; total: number }>()
@@ -636,16 +636,67 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     const byStatus = Array.from(statusMap.entries()).map(([status, v]) => ({ status, ...v }))
       .sort((a, b) => b.total - a.total)
 
+    // --- Estimasi HPP untuk pending orders ---
+    // total_pembayaran di Order.all = estimated seller payout setelah fee Shopee (mirip net income)
+    // Kita kurangi HPP+packaging dari master_products untuk dapat estimasi profit
+    const hppMap = new Map(masterProducts.map((p) => [
+      p.marketplace_product_id,
+      { hpp: p.hpp ?? 0, packaging: p.packaging_cost ?? 0 },
+    ]))
+
+    let totalPendingHpp       = 0
+    let ordersWithHpp         = 0    // order yang semua produknya ada HPP
+    let ordersPartialHpp      = 0    // order yang sebagian produknya ada HPP
+    let ordersNoHpp           = 0    // order yang tidak ada HPP sama sekali / tidak ada produk
+
+    for (const order of pending) {
+      const products = order.products_json ?? []
+      if (products.length === 0) { ordersNoHpp++; continue }
+
+      let orderHpp = 0
+      let matchedCount = 0
+      let skuCount = 0
+
+      for (const prod of products) {
+        if (!prod.marketplace_product_id) continue
+        skuCount++
+        const master = hppMap.get(prod.marketplace_product_id)
+        if (master && (master.hpp > 0 || master.packaging > 0)) {
+          orderHpp += (master.hpp + master.packaging) * prod.quantity
+          matchedCount++
+        }
+      }
+
+      totalPendingHpp += orderHpp
+      if (skuCount === 0)                        ordersNoHpp++
+      else if (matchedCount === skuCount)         ordersWithHpp++
+      else if (matchedCount > 0)                  ordersPartialHpp++
+      else                                        ordersNoHpp++
+    }
+
+    const totalPendingIncome   = pending.reduce((s, o) => s + o.total_pembayaran, 0)
+    const estimatedPendingProfit = totalPendingIncome - totalPendingHpp
+    const hppCoverage          = pending.length > 0
+      ? Math.round(((ordersWithHpp + ordersPartialHpp) / pending.length) * 100)
+      : 0
+
     return {
-      totalPending: pending.reduce((s, o) => s + o.total_pembayaran, 0),
+      totalPending: totalPendingIncome,
       countPending: pending.length,
       byStatus,
       totalSelesai: selesai.reduce((s, o) => s + o.total_pembayaran, 0),
       countSelesai: selesai.length,
       matchedWithIncome: matchedCount,
       hasData: filteredOrdersAll.length > 0,
+      // Pending profit estimation
+      totalPendingHpp,
+      estimatedPendingProfit,
+      ordersWithHpp,
+      ordersPartialHpp,
+      ordersNoHpp,
+      hppCoverage,
     }
-  }, [filteredOrdersAll, filteredOrders])
+  }, [filteredOrdersAll, filteredOrders, masterProducts])
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
@@ -826,28 +877,100 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       {pendingSummary.hasData && (
         <Card className="border-teal-200 bg-teal-50/30">
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-md bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
-                  <span className="text-base">⏳</span>
-                </div>
-                <div>
-                  <CardTitle className="text-base">Dana Pending & Rekonsiliasi</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Dari file Order.all — pesanan yang belum dilepas dananya
-                  </p>
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-md bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
+                <span className="text-base">⏳</span>
               </div>
-              {pendingSummary.countPending > 0 && (
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-teal-700">{formatRp(pendingSummary.totalPending)}</p>
-                  <p className="text-xs text-muted-foreground">{pendingSummary.countPending} pesanan pending</p>
-                </div>
-              )}
+              <div>
+                <CardTitle className="text-base">Dana Pending & Estimasi Profit Total</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Dari file Order.all — termasuk estimasi profit pesanan yang belum dilepas
+                </p>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Pending breakdown */}
+
+            {/* === Estimasi Profit Total (confirmed + pending) === */}
+            {kpis.hasHppData && pendingSummary.countPending > 0 && (
+              <div className="rounded-xl border-2 border-teal-300 bg-teal-50 p-4 space-y-3">
+                <p className="text-xs font-semibold text-teal-800 uppercase tracking-wide">Estimasi Profit Total (Confirmed + Pending)</p>
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  {/* Real Profit terkonfirmasi */}
+                  <div className="bg-white rounded-lg border p-3 text-center">
+                    <p className="text-[11px] text-muted-foreground mb-1">Real Profit<br/>(Dana Cair)</p>
+                    <p className={`text-base font-bold tabular-nums ${kpis.realProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                      {formatRp(kpis.realProfit)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {filteredOrders.length} order · terkonfirmasi
+                    </p>
+                  </div>
+                  {/* Plus sign */}
+                  <div className="flex items-center justify-center">
+                    <div className="text-center space-y-1">
+                      <p className="text-2xl font-light text-teal-400">+</p>
+                      <p className="text-[10px] text-muted-foreground">Estimasi<br/>Pending</p>
+                    </div>
+                  </div>
+                  {/* Estimasi profit pending */}
+                  <div className="bg-white rounded-lg border border-teal-200 p-3 text-center">
+                    <p className="text-[11px] text-muted-foreground mb-1">Est. Profit<br/>(Dana Pending)</p>
+                    <p className={`text-base font-bold tabular-nums ${pendingSummary.estimatedPendingProfit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>
+                      {formatRp(pendingSummary.estimatedPendingProfit)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {pendingSummary.countPending} order · estimasi
+                    </p>
+                  </div>
+                </div>
+                {/* Total */}
+                <div className={`rounded-lg p-3 flex items-center justify-between gap-2 ${
+                  kpis.realProfit + pendingSummary.estimatedPendingProfit >= 0
+                    ? 'bg-green-100 border border-green-300'
+                    : 'bg-red-50 border border-red-200'
+                }`}>
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground">Estimasi Total Profit Periode Ini</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Net income − HPP − packaging − iklan (confirmed) + estimasi pending
+                      {pendingSummary.hppCoverage < 100 && ` · HPP coverage pending: ${pendingSummary.hppCoverage}%`}
+                    </p>
+                  </div>
+                  <p className={`text-2xl font-bold tabular-nums shrink-0 ${
+                    kpis.realProfit + pendingSummary.estimatedPendingProfit >= 0 ? 'text-green-700' : 'text-red-600'
+                  }`}>
+                    {formatRp(kpis.realProfit + pendingSummary.estimatedPendingProfit)}
+                  </p>
+                </div>
+                {/* HPP breakdown pending */}
+                <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
+                  <div>
+                    <p className="font-medium text-foreground tabular-nums">{formatRp(pendingSummary.totalPending)}</p>
+                    <p>Est. Pendapatan<br/>Pending</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-orange-600 tabular-nums">−{formatRp(pendingSummary.totalPendingHpp)}</p>
+                    <p>Est. HPP &<br/>Packaging</p>
+                  </div>
+                  <div>
+                    <p className={`font-medium tabular-nums ${pendingSummary.estimatedPendingProfit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>
+                      = {formatRp(pendingSummary.estimatedPendingProfit)}
+                    </p>
+                    <p>Est. Profit<br/>Pending</p>
+                  </div>
+                </div>
+                {pendingSummary.ordersNoHpp > 0 && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1.5 border border-amber-200">
+                    ⚠️ {pendingSummary.ordersNoHpp} pesanan pending tidak bisa dihitung HPP-nya
+                    {pendingSummary.ordersPartialHpp > 0 && `, ${pendingSummary.ordersPartialHpp} pesanan HPP sebagian`}
+                    {' '}— estimasi profit bisa lebih rendah dari actual.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Pending breakdown by status */}
             {pendingSummary.countPending > 0 ? (
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Breakdown Status Pending</p>
@@ -873,7 +996,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">✅ Semua pesanan di periode ini sudah dilepas</p>
+              <p className="text-sm text-muted-foreground">✅ Semua pesanan di periode ini sudah dilepas dananya</p>
             )}
 
             {/* Rekonsiliasi */}
@@ -903,9 +1026,9 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 </div>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                * GMV Pembeli ≠ Net Income — GMV adalah jumlah dibayar pembeli, Net Income adalah jumlah diterima penjual setelah biaya platform.
+                * GMV Pembeli ≠ Net Income — GMV adalah jumlah dibayar pembeli, Net Income adalah penerimaan penjual setelah biaya platform.
                 {pendingSummary.countSelesai > 0 && filteredOrders.length > pendingSummary.matchedWithIncome &&
-                  ` ${filteredOrders.length - pendingSummary.matchedWithIncome} order di income file kemungkinan dari periode sebelumnya (pesanan Maret dilepas April).`
+                  ` ${filteredOrders.length - pendingSummary.matchedWithIncome} order di income file kemungkinan dari periode sebelumnya.`
                 }
               </p>
             </div>

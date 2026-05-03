@@ -92,7 +92,12 @@ export async function POST(request: NextRequest) {
     const CHUNK = 500
     let insertedCount = 0
     const rows = orders.map((o) => ({
-      ...o,
+      order_number: o.order_number,
+      status_pesanan: o.status_pesanan,
+      total_pembayaran: o.total_pembayaran,
+      order_date: o.order_date,
+      order_complete_date: o.order_complete_date,
+      products_json: o.products_json,
       user_id: user.id,
       store_id: storeId,
       upload_batch_id: batch.id,

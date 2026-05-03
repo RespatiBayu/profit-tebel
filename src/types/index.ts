@@ -253,6 +253,12 @@ export interface DbOrderAll {
   total_pembayaran: number
   order_date: string | null
   order_complete_date: string | null
+  /** Per-SKU breakdown for HPP estimation. Null on old rows uploaded before migration 010. */
+  products_json: Array<{
+    marketplace_product_id: string | null
+    product_name: string | null
+    quantity: number
+  }> | null
 }
 
 // Summary of pending orders from orders_all
