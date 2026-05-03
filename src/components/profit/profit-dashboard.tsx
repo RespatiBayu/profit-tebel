@@ -1018,6 +1018,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 <CardTitle className="text-base">Alur Dana: Omzet → Real Profit</CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Rincian semua pengurangan dari omzet kotor sampai profit bersih
+                  {pendingKpis.hasPendingData && <span className="text-teal-600 font-medium"> · incl. estimasi pending</span>}
                   {prevPeriodLabel && (
                     <span className="ml-1">· dibanding <strong>{prevPeriodLabel}</strong></span>
                   )}
@@ -1034,7 +1035,16 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70 w-20 text-right">vs Bln Lalu</span>
             </div>
             {(() => {
-              const omzet = kpis.totalOmzet
+              // Combined = confirmed income + pending estimate (when Order.all uploaded)
+              const hasPending = pendingKpis.hasPendingData
+              const omzet        = kpis.totalOmzet      + (hasPending ? pendingKpis.totalOmzet    : 0)
+              const combinedGross = kpis.grossIncome     + (hasPending ? pendingKpis.grossIncome   : 0)
+              const combinedNet   = kpis.totalNetIncome  + (hasPending ? pendingKpis.totalNetIncome: 0)
+              const combinedHpp   = kpis.totalHppCost    + (hasPending ? pendingKpis.totalHpp      : 0)
+              const combinedAds   = kpis.totalAdSpend    // ads not attributed to pending
+              const combinedProfit= kpis.realProfit      + (hasPending ? pendingKpis.realProfit    : 0)
+              const hasHpp        = kpis.hasHppData || (hasPending && pendingKpis.hasHppData)
+
               const pct = (v: number) => (omzet > 0 ? (v / omzet) * 100 : 0)
 
               type Row =
@@ -1043,7 +1053,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 | { kind: 'group'; label: string; subtotal: number; prevSubtotal: number }
                 | { kind: 'divider' }
 
-              // Group deductions berdasarkan kategori
               const groups = [
                 { id: 'discount' as const, label: 'Diskon & Promo yang Kamu Tanggung' },
                 { id: 'marketplace_fee' as const, label: 'Biaya Marketplace (Shopee)' },
@@ -1064,11 +1073,22 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               let totalDeducted = 0
               for (const g of groups) {
                 const items = omzetDeductions.filter((d) => d.group === g.id)
-                if (items.length === 0) continue
-                const subtotal = items.reduce((a, b) => a + b.value, 0)
-                const prevSubtotal = prevDeductions
-                  .filter((d) => d.group === g.id)
-                  .reduce((a, b) => a + b.value, 0)
+
+                // For discount and marketplace_fee groups, we may inject pending items
+                const pendingItem: Row | null =
+                  hasPending && g.id === 'discount' && pendingKpis.totalDiskon > 0
+                    ? { kind: 'cost', label: 'Diskon Pending (Est.)', value: pendingKpis.totalDiskon, prev: 0, color: '#f59e0b', hint: 'Diskon produk + voucher penjual dari pesanan pending' }
+                    : hasPending && g.id === 'marketplace_fee' && pendingKpis.totalFees > 0
+                    ? { kind: 'cost', label: 'Biaya Marketplace Pending (Est.)', value: pendingKpis.totalFees, prev: 0, color: '#a78bfa', hint: 'Estimasi berdasarkan rata-rata fee rate dari order terkonfirmasi' }
+                    : null
+
+                if (items.length === 0 && !pendingItem) continue
+
+                const confirmedSubtotal = items.reduce((a, b) => a + b.value, 0)
+                const pendingSubtotal   = pendingItem?.kind === 'cost' ? pendingItem.value : 0
+                const subtotal          = confirmedSubtotal + pendingSubtotal
+                const prevSubtotal      = prevDeductions.filter((d) => d.group === g.id).reduce((a, b) => a + b.value, 0)
+
                 totalDeducted += subtotal
                 rows.push({ kind: 'divider' })
                 rows.push({ kind: 'group', label: g.label, subtotal, prevSubtotal })
@@ -1082,26 +1102,26 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                     hint: it.hint,
                   })
                 }
+                if (pendingItem) rows.push(pendingItem)
 
-                // Add Gross Income row after discount group but before other groups
+                // Gross Income row after discount group
                 if (g.id === 'discount') {
                   rows.push({ kind: 'divider' })
                   rows.push({
                     kind: 'total',
                     label: 'Pendapatan Kotor (Gross Income)',
-                    value: kpis.grossIncome,
+                    value: combinedGross,
                     prev: prevKpis.grossIncome,
                     context: 'income',
                     tone: 'neutral',
-                    sub: 'Setelah diskon & promo yang kamu tanggung',
+                    sub: hasPending ? 'Setelah diskon & promo (confirmed + pending)' : 'Setelah diskon & promo yang kamu tanggung',
                   })
                 }
               }
 
-              // Rekonsiliasi: kalau masih ada gap antara (omzet − totalDeducted) dan netIncome,
-              // tampilkan sebagai "Penyesuaian Lain" — biar angka selalu balance.
+              // Reconciliation: gap between (omzet − totalDeducted) and combinedNet
               const computedNet = omzet - totalDeducted
-              const diff = computedNet - kpis.totalNetIncome
+              const diff = computedNet - combinedNet
               if (Math.abs(diff) > 1) {
                 rows.push({ kind: 'divider' })
                 rows.push({
@@ -1118,36 +1138,36 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
               rows.push({
                 kind: 'total',
                 label: 'Net Income',
-                value: kpis.totalNetIncome,
+                value: combinedNet,
                 prev: prevKpis.totalNetIncome,
                 context: 'income',
                 tone: 'neutral',
-                sub: 'Total Penghasilan dari Shopee',
+                sub: hasPending ? 'Penghasilan cair + estimasi pendapatan pending' : 'Total Penghasilan dari Shopee',
               })
 
-              if (kpis.hasHppData) {
-                if (kpis.totalHppCost > 0 || kpis.totalAdSpend > 0) {
+              if (hasHpp) {
+                if (combinedHpp > 0 || combinedAds > 0) {
                   rows.push({ kind: 'divider' })
                   rows.push({
                     kind: 'group',
                     label: 'Biaya Kamu Sendiri',
-                    subtotal: kpis.totalHppCost + kpis.totalAdSpend,
+                    subtotal: combinedHpp + combinedAds,
                     prevSubtotal: prevKpis.totalHppCost + prevKpis.totalAdSpend,
                   })
-                  if (kpis.totalHppCost > 0) {
+                  if (combinedHpp > 0) {
                     rows.push({
                       kind: 'cost',
-                      label: 'HPP + Packaging',
-                      value: kpis.totalHppCost,
+                      label: hasPending ? 'HPP + Packaging (confirmed + pending)' : 'HPP + Packaging',
+                      value: combinedHpp,
                       prev: prevKpis.totalHppCost,
                       color: '#f97316',
                     })
                   }
-                  if (kpis.totalAdSpend > 0) {
+                  if (combinedAds > 0) {
                     rows.push({
                       kind: 'cost',
                       label: 'Biaya Iklan',
-                      value: kpis.totalAdSpend,
+                      value: combinedAds,
                       prev: prevKpis.totalAdSpend,
                       color: '#ef4444',
                     })
@@ -1156,17 +1176,18 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
                 rows.push({ kind: 'divider' })
                 rows.push({
                   kind: 'total',
-                  label: 'Real Profit',
-                  value: kpis.realProfit,
+                  label: hasPending ? 'Real Profit (Est. Total)' : 'Real Profit',
+                  value: combinedProfit,
                   prev: prevKpis.realProfit,
                   context: 'income',
-                  tone: kpis.realProfit >= 0 ? 'profit' : 'loss',
+                  tone: combinedProfit >= 0 ? 'profit' : 'loss',
+                  sub: hasPending ? 'Confirmed + estimasi pending (tanpa alokasi iklan ke pending)' : undefined,
                 })
               }
 
               return rows.map((r, i) => {
                 const pctGrossIncome = (v: number) =>
-                  kpis.grossIncome > 0 ? (v / kpis.grossIncome) * 100 : 0
+                  combinedGross > 0 ? (v / combinedGross) * 100 : 0
 
                 // Check if we've passed the Gross Income row to determine if we should show % GI
                 let hasPassedGrossIncome = false
