@@ -426,6 +426,20 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
   const orderProductMap = useMemo(() => buildOrderProductMap(orderProducts), [orderProducts])
 
+  // Build order_number → estimated_hpp from ALL orders_all rows (not just filtered period).
+  // This map is the PRIMARY HPP source — computed server-side with accurate per-SKU quantity.
+  // Used by calculateKpis and calculateTrend so confirmed income orders also get
+  // quantity-accurate HPP (orders_all covers both pending and selesai orders).
+  const ordersAllHppMap = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const oa of ordersAll) {
+      if (oa.estimated_hpp != null && oa.estimated_hpp > 0) {
+        m.set(oa.order_number, oa.estimated_hpp)
+      }
+    }
+    return m
+  }, [ordersAll])
+
   // Build year→months map dari orders + adsData (gabungan source)
   const yearMonthMap = useMemo(() => {
     const map = new Map<string, Set<string>>()
@@ -500,8 +514,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
 
   // Calculate all metrics
   const kpis = useMemo(
-    () => calculateKpis(filteredOrders, orderProductMap, hppMap, filteredAdsData),
-    [filteredOrders, orderProductMap, hppMap, filteredAdsData]
+    () => calculateKpis(filteredOrders, orderProductMap, hppMap, filteredAdsData, ordersAllHppMap),
+    [filteredOrders, orderProductMap, hppMap, filteredAdsData, ordersAllHppMap]
   )
   const feeBreakdown = useMemo(() => calculateFeeBreakdown(filteredOrders), [filteredOrders])
   const omzetDeductions = useMemo(
@@ -529,8 +543,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   }, [filteredOrders, orders, adsData])
 
   const prevKpis = useMemo(
-    () => calculateKpis(prevWindow.orders, orderProductMap, hppMap, prevWindow.ads),
-    [prevWindow, orderProductMap, hppMap]
+    () => calculateKpis(prevWindow.orders, orderProductMap, hppMap, prevWindow.ads, ordersAllHppMap),
+    [prevWindow, orderProductMap, hppMap, ordersAllHppMap]
   )
   const prevDeductions = useMemo(
     () => calculateOmzetToNetIncomeBreakdown(prevWindow.orders),
@@ -554,8 +568,8 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     return `${fmt(prevWindow.months[0])} – ${fmt(prevWindow.months[prevWindow.months.length - 1])}`
   }, [prevWindow])
   const trendData = useMemo(
-    () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData),
-    [filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData]
+    () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData, ordersAllHppMap),
+    [filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData, ordersAllHppMap]
   )
   const productRows = useMemo(
     () => calculateProductProfit(filteredOrders, orderProducts, hppMap, filteredAdsData),

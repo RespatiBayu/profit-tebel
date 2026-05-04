@@ -81,11 +81,24 @@ export function buildAdSpendMap(adsData: DbAdsRow[]): Map<string, number> {
 }
 
 // Per-order HPP cost (sum of all products in order)
+//
+// Priority:
+// 1. ordersAllHppMap (estimated_hpp from orders_all table) — most accurate because
+//    it was computed server-side with real per-SKU quantity at upload time.
+// 2. Fallback: order_products × master_products — quantity is always 1 per product
+//    (no multi-unit support in income XLSX), so less accurate for multi-unit orders.
 function orderHppCost(
   order: DbOrder,
   orderProductMap: Map<string, string[]>,
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>
+  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  ordersAllHppMap?: Map<string, number>
 ): number {
+  // Primary: use pre-computed estimated_hpp from orders_all (has accurate qty)
+  if (ordersAllHppMap) {
+    const estimated = ordersAllHppMap.get(order.order_number)
+    if (estimated !== undefined && estimated > 0) return estimated
+  }
+  // Fallback: order_products path (qty = 1 per unique product)
   const productIds = orderProductMap.get(order.order_number) ?? []
   if (productIds.length === 0) return 0
   return productIds.reduce((sum, pid) => {
@@ -102,7 +115,10 @@ export function calculateKpis(
   orders: DbOrder[],
   orderProductMap: Map<string, string[]>,
   hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
-  adsData: DbAdsRow[] = []
+  adsData: DbAdsRow[] = [],
+  /** Pre-computed HPP map from orders_all (order_number → estimated_hpp).
+   *  When provided, used as the primary HPP source (overrides order_products path). */
+  ordersAllHppMap?: Map<string, number>
 ): ProfitKpis {
   let totalOmzet = 0
   let totalNetIncome = 0
@@ -135,7 +151,7 @@ export function calculateKpis(
       Math.abs(o.campaign_fee)
     totalFees += fees
 
-    const hpp = orderHppCost(o, orderProductMap, hppMap)
+    const hpp = orderHppCost(o, orderProductMap, hppMap, ordersAllHppMap)
     totalHppCost += hpp
     if (hpp > 0) hasHppData = true
   }
@@ -360,7 +376,8 @@ export function calculateTrend(
   groupBy: 'day' | 'week',
   orderProductMap: Map<string, string[]>,
   hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
-  adsData: DbAdsRow[] = []
+  adsData: DbAdsRow[] = [],
+  ordersAllHppMap?: Map<string, number>
 ): TrendPoint[] {
   const grouped = new Map<
     string,
@@ -372,7 +389,7 @@ export function calculateTrend(
     if (!o.order_date) continue
     const key = groupBy === 'week' ? weekKey(o.order_date) : o.order_date
     const existing = grouped.get(key) ?? { omzet: 0, netIncome: 0, hpp: 0, adSpend: 0, hasHpp: false }
-    const hpp = orderHppCost(o, orderProductMap, hppMap)
+    const hpp = orderHppCost(o, orderProductMap, hppMap, ordersAllHppMap)
     existing.omzet += o.original_price
     existing.netIncome += o.total_income
     existing.hpp += hpp
