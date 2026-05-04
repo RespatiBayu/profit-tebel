@@ -199,16 +199,18 @@ export function parseShopeeIncome(buffer: Buffer): IncomeParseResult {
   const orderProducts: ParsedOrderProduct[] = []
 
   if (opfSheet) {
+    // Use raw:true so numeric product IDs come back as numbers (avoids "1.23E+10"
+    // or "12,345,678" formatting issues that raw:false can produce).
     const opfRows: unknown[][] = XLSX.utils.sheet_to_json(opfSheet, {
       header: 1,
       defval: null,
-      raw: false,
+      raw: true,
     })
 
     let currentOrderNumber: string | null = null
 
-    // Skip header rows (row 0 = title, row 1 = headers typically)
-    for (let i = 2; i < opfRows.length; i++) {
+    // Scan from row 1 onwards (row 0 might be title; we look for "Order"/"Sku" markers)
+    for (let i = 1; i < opfRows.length; i++) {
       const row = opfRows[i]
       if (!row) continue
 
@@ -218,8 +220,13 @@ export function parseShopeeIncome(buffer: Buffer): IncomeParseResult {
         // "Order" row — capture order number
         currentOrderNumber = parseStr(row[OPF_COL.ORDER_NUMBER])
       } else if ((rowType === 'sku' || rowType === 'produk') && currentOrderNumber) {
-        // "Sku" row — has product ID and name
-        const productId = parseStr(row[OPF_COL.PRODUCT_ID])
+        // "Sku" row — has product ID and name.
+        // Normalize product ID: strip thousand-separators / whitespace to ensure
+        // it matches the ID stored in master_products (e.g. "24142481111").
+        const rawId = row[OPF_COL.PRODUCT_ID]
+        const productId = rawId != null
+          ? String(rawId).replace(/[,.\s]/g, '').trim() || null
+          : null
         if (productId) {
           orderProducts.push({
             order_number: currentOrderNumber,

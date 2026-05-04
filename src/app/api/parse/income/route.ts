@@ -403,6 +403,66 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // -----------------------------------------------------------------------
+    // Compute estimated_hpp for confirmed income orders in `orders` table.
+    // Unlike orders_all (which uses seller SKU codes), order_products already
+    // stores Shopee numeric product IDs, so no cross-mapping is needed — we
+    // can look up HPP directly from master_products.
+    // -----------------------------------------------------------------------
+    if (orderProducts.length > 0) {
+      try {
+        // Build order_number → [numeric_ids] from OPF parsed data
+        const opByOrderMap = new Map<string, string[]>()
+        for (const op of orderProducts) {
+          const arr = opByOrderMap.get(op.order_number) ?? []
+          arr.push(op.marketplace_product_id)
+          opByOrderMap.set(op.order_number, arr)
+        }
+
+        // Unique numeric product IDs from OPF
+        const uniquePids = Array.from(new Set(orderProducts.map((op) => op.marketplace_product_id)))
+
+        // Fetch HPP from master_products for those IDs
+        const hppLookup = new Map<string, { hpp: number; packaging: number }>()
+        const HP_CHUNK = 200
+        for (let i = 0; i < uniquePids.length; i += HP_CHUNK) {
+          const { data } = await serviceClient
+            .from('master_products')
+            .select('marketplace_product_id,hpp,packaging_cost')
+            .eq('user_id', user.id)
+            .in('marketplace_product_id', uniquePids.slice(i, i + HP_CHUNK))
+          if (data) {
+            for (const mp of data as { marketplace_product_id: string; hpp: number; packaging_cost: number }[]) {
+              hppLookup.set(mp.marketplace_product_id, { hpp: mp.hpp ?? 0, packaging: mp.packaging_cost ?? 0 })
+            }
+          }
+        }
+
+        // Compute estimated_hpp per order and update the orders table
+        let updatedOrderCount = 0
+        for (const order of orders) {
+          const productIds = opByOrderMap.get(order.order_number) ?? []
+          let estimatedHpp = 0
+          for (const pid of productIds) {
+            const master = hppLookup.get(pid)
+            if (master && (master.hpp > 0 || master.packaging > 0)) {
+              estimatedHpp += master.hpp + master.packaging
+            }
+          }
+          const { error: updErr } = await serviceClient
+            .from('orders')
+            .update({ estimated_hpp: estimatedHpp })
+            .eq('store_id', storeId)
+            .eq('order_number', order.order_number)
+          if (!updErr) updatedOrderCount++
+        }
+        console.log(`Computed estimated_hpp for ${updatedOrderCount}/${orders.length} income orders`)
+      } catch (ordersHppErr) {
+        // Non-fatal
+        console.error('Income orders estimated_hpp compute error:', ordersHppErr)
+      }
+    }
+
     // Auto-create master_products for new products
     const uniqueProducts = new Map<string, { name: string }>()
     for (const op of orderProducts) {

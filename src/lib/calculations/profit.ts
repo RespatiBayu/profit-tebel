@@ -83,9 +83,11 @@ export function buildAdSpendMap(adsData: DbAdsRow[]): Map<string, number> {
 // Per-order HPP cost (sum of all products in order)
 //
 // Priority:
-// 1. ordersAllHppMap (estimated_hpp from orders_all table) — most accurate because
-//    it was computed server-side with real per-SKU quantity at upload time.
-// 2. Fallback: order_products × master_products — quantity is always 1 per product
+// 1. order.estimated_hpp (pre-computed from income OPF at upload time) — most direct
+//    for confirmed income orders; already has correct product → HPP mapping.
+// 2. ordersAllHppMap (estimated_hpp from orders_all table) — accurate qty for
+//    pending orders computed server-side at Order.all upload time.
+// 3. Fallback: order_products × master_products — quantity is always 1 per product
 //    (no multi-unit support in income XLSX), so less accurate for multi-unit orders.
 function orderHppCost(
   order: DbOrder,
@@ -93,11 +95,15 @@ function orderHppCost(
   hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
   ordersAllHppMap?: Map<string, number>
 ): number {
-  // Primary: use pre-computed estimated_hpp from orders_all (has accurate qty)
+  // Priority 1: pre-computed estimated_hpp stored directly in the income order row
+  if (order.estimated_hpp != null && order.estimated_hpp > 0) return order.estimated_hpp
+
+  // Priority 2: pre-computed estimated_hpp from orders_all (covers pending orders)
   if (ordersAllHppMap) {
     const estimated = ordersAllHppMap.get(order.order_number)
     if (estimated !== undefined && estimated > 0) return estimated
   }
+
   // Fallback: order_products path (qty = 1 per unique product)
   const productIds = orderProductMap.get(order.order_number) ?? []
   if (productIds.length === 0) return 0

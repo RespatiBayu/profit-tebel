@@ -39,98 +39,145 @@ export async function PATCH(
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
     // -----------------------------------------------------------------------
-    // Backfill estimated_hpp in orders_all for this user.
-    // We recompute ALL orders_all rows (not just this product) because:
-    // - seller SKU → numeric ID mapping is built from cross-referencing
-    //   order_numbers, so we need to rebuild the full mapping.
-    // - The volume is manageable (single user's orders).
+    // Recalculate estimated_hpp for ALL orders belonging to this user:
+    //   - orders_all (pending/Order.all) — uses seller SKU → numeric ID mapping
+    //   - orders (confirmed income) — uses order_products numeric IDs directly
+    // We recompute everything so a single HPP change propagates everywhere.
     // -----------------------------------------------------------------------
     try {
       const serviceClient = await createServiceClient()
       const storeId = product.store_id as string | null
 
-      // Fetch all orders_all rows for this user (or this store if scoped)
-      const oaQuery = serviceClient
-        .from('orders_all')
-        .select('id,order_number,products_json')
+      // --- Step 1: Fetch ALL master_products HPP for this user (shared lookup) ---
+      const { data: masterRows } = await serviceClient
+        .from('master_products')
+        .select('marketplace_product_id,hpp,packaging_cost')
         .eq('user_id', user.id)
-      if (storeId) oaQuery.eq('store_id', storeId)
-      const { data: oaRows } = await oaQuery
 
-      if (oaRows && oaRows.length > 0) {
-        type ProdJson = { marketplace_product_id: string | null; quantity: number }
+      const hppLookup = new Map<string, { hpp: number; packaging: number }>()
+      for (const mp of (masterRows ?? []) as { marketplace_product_id: string; hpp: number; packaging_cost: number }[]) {
+        hppLookup.set(mp.marketplace_product_id, { hpp: mp.hpp ?? 0, packaging: mp.packaging_cost ?? 0 })
+      }
 
-        // Collect all order_numbers to look up order_products
-        const oaOrderNumbers = oaRows.map((r: { order_number: string }) => r.order_number)
+      const OP_CHUNK = 200
 
-        // Fetch order_products for those orders
-        const OP_CHUNK = 200
-        const opRows: { order_number: string; marketplace_product_id: string }[] = []
-        for (let i = 0; i < oaOrderNumbers.length; i += OP_CHUNK) {
-          const { data } = await serviceClient
-            .from('order_products')
-            .select('order_number,marketplace_product_id')
-            .in('order_number', oaOrderNumbers.slice(i, i + OP_CHUNK))
-          if (data) opRows.push(...(data as typeof opRows))
-        }
-
-        // Build order_number → [numeric_ids]
-        const opByOrder = new Map<string, string[]>()
-        for (const row of opRows) {
-          const arr = opByOrder.get(row.order_number) ?? []
-          arr.push(row.marketplace_product_id)
-          opByOrder.set(row.order_number, arr)
-        }
-
-        // Build seller_sku → numeric_id mapping
-        const sellerSkuToNumericId = new Map<string, string>()
-        for (const row of oaRows as { order_number: string; products_json: unknown }[]) {
-          const numericIds = opByOrder.get(row.order_number)
-          if (!numericIds?.length) continue
-          const prods = ((row.products_json ?? []) as ProdJson[]).filter((p) => p.marketplace_product_id)
-          if (!prods.length) continue
-          if (prods.length === 1 && numericIds.length === 1) {
-            sellerSkuToNumericId.set(prods[0].marketplace_product_id!, numericIds[0])
-          } else if (prods.length === numericIds.length) {
-            for (let i = 0; i < prods.length; i++) {
-              const sk = prods[i].marketplace_product_id!
-              if (!sellerSkuToNumericId.has(sk)) sellerSkuToNumericId.set(sk, numericIds[i])
-            }
-          }
-        }
-
-        // Fetch ALL master_products HPP for this user
-        const { data: masterRows } = await serviceClient
-          .from('master_products')
-          .select('marketplace_product_id,hpp,packaging_cost')
+      // --- Step 2: Update orders_all.estimated_hpp ---
+      {
+        const oaQuery = serviceClient
+          .from('orders_all')
+          .select('id,order_number,products_json')
           .eq('user_id', user.id)
+        if (storeId) oaQuery.eq('store_id', storeId)
+        const { data: oaRows } = await oaQuery
 
-        const hppLookup = new Map<string, { hpp: number; packaging: number }>()
-        for (const mp of (masterRows ?? []) as { marketplace_product_id: string; hpp: number; packaging_cost: number }[]) {
-          hppLookup.set(mp.marketplace_product_id, { hpp: mp.hpp ?? 0, packaging: mp.packaging_cost ?? 0 })
-        }
+        if (oaRows && oaRows.length > 0) {
+          type ProdJson = { marketplace_product_id: string | null; quantity: number }
 
-        const resolveHpp = (sellerSku: string | null) => {
-          if (!sellerSku) return undefined
-          if (hppLookup.has(sellerSku)) return hppLookup.get(sellerSku)
-          const numericId = sellerSkuToNumericId.get(sellerSku)
-          return numericId ? hppLookup.get(numericId) : undefined
-        }
+          const oaOrderNumbers = oaRows.map((r: { order_number: string }) => r.order_number)
 
-        // Recompute estimated_hpp for all orders_all rows
-        for (const row of oaRows as { id: string; products_json: unknown }[]) {
-          const prods = ((row.products_json ?? []) as ProdJson[])
-          let estimatedHpp = 0
-          for (const prod of prods) {
-            const master = resolveHpp(prod.marketplace_product_id)
-            if (master && (master.hpp > 0 || master.packaging > 0)) {
-              estimatedHpp += (master.hpp + master.packaging) * prod.quantity
+          // Fetch order_products to build seller SKU → numeric ID mapping
+          const opRows: { order_number: string; marketplace_product_id: string }[] = []
+          for (let i = 0; i < oaOrderNumbers.length; i += OP_CHUNK) {
+            const { data } = await serviceClient
+              .from('order_products')
+              .select('order_number,marketplace_product_id')
+              .in('order_number', oaOrderNumbers.slice(i, i + OP_CHUNK))
+            if (data) opRows.push(...(data as typeof opRows))
+          }
+
+          const opByOrder = new Map<string, string[]>()
+          for (const row of opRows) {
+            const arr = opByOrder.get(row.order_number) ?? []
+            arr.push(row.marketplace_product_id)
+            opByOrder.set(row.order_number, arr)
+          }
+
+          // Build seller_sku → numeric_id mapping via cross-reference
+          const sellerSkuToNumericId = new Map<string, string>()
+          for (const row of oaRows as { order_number: string; products_json: unknown }[]) {
+            const numericIds = opByOrder.get(row.order_number)
+            if (!numericIds?.length) continue
+            const prods = ((row.products_json ?? []) as ProdJson[]).filter((p) => p.marketplace_product_id)
+            if (!prods.length) continue
+            if (prods.length === 1 && numericIds.length === 1) {
+              sellerSkuToNumericId.set(prods[0].marketplace_product_id!, numericIds[0])
+            } else if (prods.length === numericIds.length) {
+              for (let i = 0; i < prods.length; i++) {
+                const sk = prods[i].marketplace_product_id!
+                if (!sellerSkuToNumericId.has(sk)) sellerSkuToNumericId.set(sk, numericIds[i])
+              }
             }
           }
-          await serviceClient
-            .from('orders_all')
-            .update({ estimated_hpp: estimatedHpp })
-            .eq('id', row.id)
+
+          const resolveHpp = (sellerSku: string | null) => {
+            if (!sellerSku) return undefined
+            if (hppLookup.has(sellerSku)) return hppLookup.get(sellerSku)
+            const numericId = sellerSkuToNumericId.get(sellerSku)
+            return numericId ? hppLookup.get(numericId) : undefined
+          }
+
+          for (const row of oaRows as { id: string; products_json: unknown }[]) {
+            const prods = (row.products_json ?? []) as ProdJson[]
+            let estimatedHpp = 0
+            for (const prod of prods) {
+              const master = resolveHpp(prod.marketplace_product_id)
+              if (master && (master.hpp > 0 || master.packaging > 0)) {
+                estimatedHpp += (master.hpp + master.packaging) * prod.quantity
+              }
+            }
+            await serviceClient
+              .from('orders_all')
+              .update({ estimated_hpp: estimatedHpp })
+              .eq('id', row.id)
+          }
+          console.log(`Recomputed estimated_hpp for ${oaRows.length} orders_all rows`)
+        }
+      }
+
+      // --- Step 3: Update orders.estimated_hpp (confirmed income orders) ---
+      {
+        const incomeQuery = serviceClient
+          .from('orders')
+          .select('id,order_number')
+          .eq('user_id', user.id)
+        if (storeId) incomeQuery.eq('store_id', storeId)
+        const { data: incomeOrders } = await incomeQuery
+
+        if (incomeOrders && incomeOrders.length > 0) {
+          const incomeOrderNums = (incomeOrders as { id: string; order_number: string }[]).map((r) => r.order_number)
+
+          // Fetch order_products (numeric IDs, no mapping needed)
+          const opRows2: { order_number: string; marketplace_product_id: string }[] = []
+          for (let i = 0; i < incomeOrderNums.length; i += OP_CHUNK) {
+            const { data } = await serviceClient
+              .from('order_products')
+              .select('order_number,marketplace_product_id')
+              .in('order_number', incomeOrderNums.slice(i, i + OP_CHUNK))
+            if (data) opRows2.push(...(data as typeof opRows2))
+          }
+
+          const opByOrderIncome = new Map<string, string[]>()
+          for (const row of opRows2) {
+            const arr = opByOrderIncome.get(row.order_number) ?? []
+            arr.push(row.marketplace_product_id)
+            opByOrderIncome.set(row.order_number, arr)
+          }
+
+          for (const order of incomeOrders as { id: string; order_number: string }[]) {
+            const productIds = opByOrderIncome.get(order.order_number) ?? []
+            let estimatedHpp = 0
+            for (const pid of productIds) {
+              const master = hppLookup.get(pid)
+              if (master && (master.hpp > 0 || master.packaging > 0)) {
+                estimatedHpp += master.hpp + master.packaging
+              }
+            }
+            await serviceClient
+              .from('orders')
+              .update({ estimated_hpp: estimatedHpp })
+              .eq('id', order.id)
+          }
+          console.log(`Recomputed estimated_hpp for ${incomeOrders.length} income orders`)
         }
       }
     } catch (backfillErr) {

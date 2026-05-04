@@ -159,6 +159,8 @@ export interface DbOrder {
   shipping_type: string | null
   courier_name: string | null
   seller_free_shipping_promo: number
+  /** Pre-computed HPP estimate (migration 013). 0 if no HPP found at upload time. */
+  estimated_hpp: number | null
 }
 
 // DB row from `order_products` table
