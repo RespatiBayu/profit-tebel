@@ -29,6 +29,7 @@ import {
 import Link from 'next/link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import { ResetDataDialog } from '@/components/upload/reset-data-dialog'
+import { RecalculateHppButton } from '@/components/upload/recalculate-hpp-button'
 import type { Store } from '@/types'
 
 type UploadType = 'income' | 'ads' | 'ads_product' | 'orders_all'
@@ -377,7 +378,12 @@ export default function UploadPage() {
             Upload laporan dari Shopee Seller Center untuk mulai analisis.
           </p>
         </div>
-        <ResetDataDialog storeId={storeId || null} />
+        <div className="flex flex-col sm:items-end gap-2">
+          <div className="flex gap-2">
+            <RecalculateHppButton storeId={storeId || null} />
+            <ResetDataDialog storeId={storeId || null} />
+          </div>
+        </div>
       </div>
 
       {/* Store + marketplace selector */}
