@@ -284,6 +284,15 @@ export async function POST(request: NextRequest) {
     //   3. Upsert (order_number, master_id, qty=1) — accumulates with Order.all
     //      mappings (qty is meaningful from Order.all; OPF defaults to 1)
     // -----------------------------------------------------------------------
+    // OPF diagnostic counters surfaced to upload response so users can see
+    // matching health without opening server logs.
+    let opfRowsTotal = opfRows.length
+    let opfMatchedTotal = 0
+    let opfUnmatchedTotal = 0
+    let opfUnmatchedSamples: Array<{ id: string | null; name: string | null }> = []
+    let opUpsertSuccess = 0
+    let opUpsertFailed = 0
+
     if (opfRows.length > 0) {
       try {
         const { data: masterRows } = await serviceClient
@@ -307,6 +316,12 @@ export async function POST(request: NextRequest) {
           })
           if (!master) {
             opfUnmatched++
+            if (opfUnmatchedSamples.length < 10) {
+              opfUnmatchedSamples.push({
+                id: op.marketplace_product_id,
+                name: op.product_name,
+              })
+            }
             continue
           }
           opfMatched++
@@ -376,8 +391,13 @@ export async function POST(request: NextRequest) {
           if (error) {
             console.error('Income OPF order_products upsert error:', error.message)
             warnings.push(`Sebagian mapping produk dari OPF gagal disimpan: ${error.message}`)
+            opUpsertFailed += chunk.length
+          } else {
+            opUpsertSuccess += chunk.length
           }
         }
+        opfMatchedTotal = opfMatched
+        opfUnmatchedTotal = opfUnmatched
         console.log(`Income OPF mapping: ${opfMatched} rows matched, ${opfUnmatched} unmatched`)
         if (opfUnmatched > 0 && opfMatched === 0) {
           warnings.push(
@@ -511,7 +531,28 @@ export async function POST(request: NextRequest) {
       warnings.push(`${orphanCount} produk duplikat/orphan dihapus otomatis`)
     }
 
-    const summary: UploadSummary = {
+    // Add OPF diagnostic warning if matching was incomplete
+    if (opfRowsTotal === 0) {
+      warnings.push(
+        `⚠️ Sheet "Order Processing Fee" di file income kosong / tidak ditemukan. HPP tidak bisa dihitung tanpa data OPF. Pastikan kamu download file dari Keuangan → Penghasilan Saya (bukan Income Summary saja).`
+      )
+    } else if (opfUnmatchedTotal > 0) {
+      const pct = Math.round((opfUnmatchedTotal / opfRowsTotal) * 100)
+      warnings.push(
+        `OPF: ${opfMatchedTotal}/${opfRowsTotal} baris match master (${pct}% gagal match). Sample produk gagal match: ${opfUnmatchedSamples
+          .slice(0, 3)
+          .map((s) => s.name ?? s.id ?? '?')
+          .join(' · ')}. Upload Order.all dulu supaya master produk lengkap.`
+      )
+    }
+
+    const summary: UploadSummary & {
+      opfRowsTotal?: number
+      opfMatched?: number
+      opfUnmatched?: number
+      orderProductsCreated?: number
+      opfUnmatchedSamples?: Array<{ id: string | null; name: string | null }>
+    } = {
       batchId: batch.id,
       recordCount: orders.length,
       insertedCount,
@@ -522,6 +563,11 @@ export async function POST(request: NextRequest) {
       periodStart,
       periodEnd,
       warnings,
+      opfRowsTotal,
+      opfMatched: opfMatchedTotal,
+      opfUnmatched: opfUnmatchedTotal,
+      orderProductsCreated: opUpsertSuccess,
+      opfUnmatchedSamples,
     }
 
     return NextResponse.json(summary)
