@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { CheckCircle, XCircle, AlertCircle, RefreshCw } from 'lucide-react'
+import { CheckCircle, XCircle, AlertCircle, RefreshCw, Upload } from 'lucide-react'
 
 type MatchedBy = 'name' | 'sku' | 'numeric' | null
 
@@ -81,6 +81,32 @@ function formatRp(n: number) {
   return 'Rp ' + n.toLocaleString('id-ID')
 }
 
+interface OpfTrace {
+  sheet_names: string[]
+  opfSheetName: string | null
+  opfSheetRawRowCount: number
+  colB_marker_distribution: Record<string, number>
+  allRowTypesLowercase: string[]
+  orderMarkerRows: number
+  skuMarkerRows: number
+  skuRowsWithoutCurrentOrder: number
+  skuRowsWithoutProductId: number
+  parsedOpfRows: number
+  distinctOrderNumbersInOpf: number
+  sample_parsed: Array<{ order_number: string; marketplace_product_id: string; product_name: string | null }>
+  dbOrdersCount: number
+  inOpfButNotInDb_count: number
+  inOpfButNotInDb_sample: string[]
+  inDbButNotInOpf_count: number
+  inDbButNotInOpf_sample: Array<{ order_number: string; order_date: string | null }>
+  masterMatching: {
+    matched: number
+    unmatched: number
+    total: number
+    unmatchedSamples: Array<{ order_number: string; marketplace_product_id: string; product_name: string | null }>
+  }
+}
+
 export default function DebugPage() {
   const searchParams = useSearchParams()
   const storeId = searchParams.get('store') ?? ''
@@ -88,6 +114,34 @@ export default function DebugPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showAllItems, setShowAllItems] = useState(false)
+
+  // OPF trace state
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [opfData, setOpfData] = useState<OpfTrace | null>(null)
+  const [opfLoading, setOpfLoading] = useState(false)
+  const [opfError, setOpfError] = useState<string | null>(null)
+
+  async function handleOpfTrace(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const file = fileInputRef.current?.files?.[0]
+    if (!file) return
+    setOpfLoading(true)
+    setOpfError(null)
+    setOpfData(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      if (storeId) fd.append('storeId', storeId)
+      const res = await fetch('/api/debug/opf-trace', { method: 'POST', body: fd })
+      const json = await res.json()
+      if (!res.ok) setOpfError(json.error ?? `HTTP ${res.status}`)
+      else setOpfData(json as OpfTrace)
+    } catch (err) {
+      setOpfError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOpfLoading(false)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -347,6 +401,162 @@ export default function DebugPage() {
           </div>
         </>
       )}
+
+      {/* ============== OPF TRACE (upload income XLSX → tracer) ============== */}
+      <Card className="border-blue-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">
+            🔬 OPF Tracer — upload file Income XLSX (TIDAK disimpan)
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Trace langsung sheet &quot;Order Processing Fee&quot; tanpa write ke DB. Liat
+            berapa baris OPF yang ada, berapa yang match master, dan mana income
+            order yang TIDAK punya OPF row.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleOpfTrace} className="flex items-end gap-2 flex-wrap">
+            <input
+              ref={fileInputRef}
+              type="file"
+              name="file"
+              accept=".xlsx,.xls"
+              className="text-sm"
+              required
+            />
+            <Button type="submit" disabled={opfLoading} size="sm" className="gap-2">
+              <Upload className="h-4 w-4" />
+              {opfLoading ? 'Memproses...' : 'Trace OPF'}
+            </Button>
+          </form>
+
+          {opfError && (
+            <Alert variant="destructive" className="mt-3">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="text-xs font-mono">{opfError}</AlertDescription>
+            </Alert>
+          )}
+
+          {opfData && (
+            <div className="mt-4 space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <Stat label="Sheet OPF" value={opfData.opfSheetName ?? '—'} />
+                <Stat label="Total raw rows" value={opfData.opfSheetRawRowCount} />
+                <Stat
+                  label='Order marker (col B)'
+                  value={opfData.orderMarkerRows}
+                  highlight={opfData.orderMarkerRows === 0 ? 'red' : 'green'}
+                />
+                <Stat
+                  label='Sku marker (col B)'
+                  value={opfData.skuMarkerRows}
+                  highlight={opfData.skuMarkerRows === 0 ? 'red' : 'green'}
+                />
+                <Stat label="Parsed OPF rows" value={opfData.parsedOpfRows} />
+                <Stat label="Distinct order# in OPF" value={opfData.distinctOrderNumbersInOpf} />
+                <Stat label="Income orders di DB" value={opfData.dbOrdersCount} />
+                <Stat
+                  label="Income TANPA OPF row"
+                  value={opfData.inDbButNotInOpf_count}
+                  highlight={opfData.inDbButNotInOpf_count > 0 ? 'red' : 'green'}
+                />
+                <Stat
+                  label="Resolver matched"
+                  value={`${opfData.masterMatching.matched}/${opfData.masterMatching.total}`}
+                  highlight={
+                    opfData.masterMatching.unmatched > 0
+                      ? opfData.masterMatching.matched === 0
+                        ? 'red'
+                        : 'amber'
+                      : 'green'
+                  }
+                />
+              </div>
+
+              {opfData.skuRowsWithoutCurrentOrder > 0 && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-xs">
+                    {opfData.skuRowsWithoutCurrentOrder} baris Sku tanpa Order parent — parser nggak bisa kaitkan ke
+                    order_number. Mungkin struktur OPF berbeda dari yang diasumsikan.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <details className="text-xs">
+                <summary className="cursor-pointer font-medium">Distribusi nilai column B (rowType marker)</summary>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-xs border">
+                    <thead className="bg-muted">
+                      <tr>
+                        <th className="text-left p-2 border">Value</th>
+                        <th className="text-right p-2 border">Count</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(opfData.colB_marker_distribution).map(([k, v]) => (
+                        <tr key={k} className="border-b">
+                          <td className="p-2 border font-mono">{k}</td>
+                          <td className="p-2 border text-right">{v}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+
+              {opfData.inDbButNotInOpf_count > 0 && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium text-red-700">
+                    Sample 10 income order yang TIDAK ada di OPF
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {opfData.inDbButNotInOpf_sample.map((r) => (
+                      <li key={r.order_number} className="font-mono">
+                        {r.order_number} <span className="text-muted-foreground">({r.order_date ?? '?'})</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              {opfData.masterMatching.unmatchedSamples.length > 0 && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium text-amber-700">
+                    Sample OPF row yang gagal match master
+                  </summary>
+                  <table className="w-full text-xs border mt-2">
+                    <thead className="bg-muted">
+                      <tr>
+                        <th className="text-left p-2 border">Order#</th>
+                        <th className="text-left p-2 border">Product ID</th>
+                        <th className="text-left p-2 border">Product Name</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {opfData.masterMatching.unmatchedSamples.map((r, i) => (
+                        <tr key={i} className="border-b">
+                          <td className="p-2 border font-mono">{r.order_number}</td>
+                          <td className="p-2 border font-mono">{r.marketplace_product_id}</td>
+                          <td className="p-2 border">{r.product_name ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigator.clipboard.writeText(JSON.stringify(opfData, null, 2))}
+              >
+                Copy OPF trace JSON
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }
