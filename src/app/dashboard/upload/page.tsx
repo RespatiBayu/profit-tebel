@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
+import { ResetDataDialog } from '@/components/upload/reset-data-dialog'
 import type { Store } from '@/types'
 
 type UploadType = 'income' | 'ads' | 'ads_product' | 'orders_all'
@@ -369,11 +370,14 @@ export default function UploadPage() {
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Upload Data</h1>
-        <p className="text-muted-foreground mt-1">
-          Upload laporan dari Shopee Seller Center untuk mulai analisis.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Upload Data</h1>
+          <p className="text-muted-foreground mt-1">
+            Upload laporan dari Shopee Seller Center untuk mulai analisis.
+          </p>
+        </div>
+        <ResetDataDialog storeId={storeId || null} />
       </div>
 
       {/* Store + marketplace selector */}
