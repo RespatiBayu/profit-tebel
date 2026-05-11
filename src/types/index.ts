@@ -170,6 +170,8 @@ export interface DbOrderProduct {
   marketplace_product_id: string
   product_name: string | null
   processing_fee_prorata: number
+  /** Quantity from Order.all per-SKU rows (migration 014). Defaults to 1 for legacy income-OPF rows. */
+  quantity: number
 }
 
 // Calculated profit results

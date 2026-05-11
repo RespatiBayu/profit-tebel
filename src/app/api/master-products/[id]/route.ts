@@ -3,9 +3,14 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 
 // ---------------------------------------------------------------------------
 // PATCH /api/master-products/[id]
-// Save HPP + packaging_cost, then recalculate estimated_hpp in orders_all
-// for any rows belonging to this user whose products_json contains this
-// product (via the seller_sku → numeric_id mapping).
+// Save HPP + packaging_cost, then recalculate estimated_hpp for ALL of this
+// user's orders (orders + orders_all) using direct SKU lookup.
+//
+// Architecture (post-refactor):
+//   - master_products keyed by seller SKU (e.g. "#BNYWGIEDP-AMERTA30ML")
+//   - order_products has SKU + quantity (populated by Order.all uploads)
+//   - orders_all.products_json has SKU + quantity per row
+//   - HPP per order = SUM(master_products[SKU].hpp + packaging) × qty
 // ---------------------------------------------------------------------------
 export async function PATCH(
   request: NextRequest,
@@ -20,7 +25,6 @@ export async function PATCH(
     const hpp = typeof body.hpp === 'number' ? body.hpp : 0
     const packaging_cost = typeof body.packaging_cost === 'number' ? body.packaging_cost : 0
 
-    // Verify ownership + get marketplace_product_id for backfill
     const { data: product, error: fetchErr } = await supabase
       .from('master_products')
       .select('id,user_id,marketplace_product_id,store_id')
@@ -39,88 +43,45 @@ export async function PATCH(
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
     // -----------------------------------------------------------------------
-    // Recalculate estimated_hpp for ALL orders belonging to this user:
-    //   - orders_all (pending/Order.all) — uses seller SKU → numeric ID mapping
-    //   - orders (confirmed income) — uses order_products numeric IDs directly
-    // We recompute everything so a single HPP change propagates everywhere.
+    // Recalculate estimated_hpp for ALL user orders (income + orders_all).
     // -----------------------------------------------------------------------
     try {
       const serviceClient = await createServiceClient()
       const storeId = product.store_id as string | null
 
-      // --- Step 1: Fetch ALL master_products HPP for this user (shared lookup) ---
+      // 1. Build SKU → HPP lookup from ALL master_products for this user
       const { data: masterRows } = await serviceClient
         .from('master_products')
         .select('marketplace_product_id,hpp,packaging_cost')
         .eq('user_id', user.id)
 
-      const hppLookup = new Map<string, { hpp: number; packaging: number }>()
+      const hppMap = new Map<string, { hpp: number; packaging: number }>()
       for (const mp of (masterRows ?? []) as { marketplace_product_id: string; hpp: number; packaging_cost: number }[]) {
-        hppLookup.set(mp.marketplace_product_id, { hpp: mp.hpp ?? 0, packaging: mp.packaging_cost ?? 0 })
+        hppMap.set(mp.marketplace_product_id, {
+          hpp: mp.hpp ?? 0,
+          packaging: mp.packaging_cost ?? 0,
+        })
       }
 
       const OP_CHUNK = 200
 
-      // --- Step 2: Update orders_all.estimated_hpp ---
+      // 2. Recalculate orders_all.estimated_hpp from products_json (SKU + qty)
       {
         const oaQuery = serviceClient
           .from('orders_all')
-          .select('id,order_number,products_json')
+          .select('id,products_json')
           .eq('user_id', user.id)
         if (storeId) oaQuery.eq('store_id', storeId)
         const { data: oaRows } = await oaQuery
 
         if (oaRows && oaRows.length > 0) {
           type ProdJson = { marketplace_product_id: string | null; quantity: number }
-
-          const oaOrderNumbers = oaRows.map((r: { order_number: string }) => r.order_number)
-
-          // Fetch order_products to build seller SKU → numeric ID mapping
-          const opRows: { order_number: string; marketplace_product_id: string }[] = []
-          for (let i = 0; i < oaOrderNumbers.length; i += OP_CHUNK) {
-            const { data } = await serviceClient
-              .from('order_products')
-              .select('order_number,marketplace_product_id')
-              .in('order_number', oaOrderNumbers.slice(i, i + OP_CHUNK))
-            if (data) opRows.push(...(data as typeof opRows))
-          }
-
-          const opByOrder = new Map<string, string[]>()
-          for (const row of opRows) {
-            const arr = opByOrder.get(row.order_number) ?? []
-            arr.push(row.marketplace_product_id)
-            opByOrder.set(row.order_number, arr)
-          }
-
-          // Build seller_sku → numeric_id mapping via cross-reference
-          const sellerSkuToNumericId = new Map<string, string>()
-          for (const row of oaRows as { order_number: string; products_json: unknown }[]) {
-            const numericIds = opByOrder.get(row.order_number)
-            if (!numericIds?.length) continue
-            const prods = ((row.products_json ?? []) as ProdJson[]).filter((p) => p.marketplace_product_id)
-            if (!prods.length) continue
-            if (prods.length === 1 && numericIds.length === 1) {
-              sellerSkuToNumericId.set(prods[0].marketplace_product_id!, numericIds[0])
-            } else if (prods.length === numericIds.length) {
-              for (let i = 0; i < prods.length; i++) {
-                const sk = prods[i].marketplace_product_id!
-                if (!sellerSkuToNumericId.has(sk)) sellerSkuToNumericId.set(sk, numericIds[i])
-              }
-            }
-          }
-
-          const resolveHpp = (sellerSku: string | null) => {
-            if (!sellerSku) return undefined
-            if (hppLookup.has(sellerSku)) return hppLookup.get(sellerSku)
-            const numericId = sellerSkuToNumericId.get(sellerSku)
-            return numericId ? hppLookup.get(numericId) : undefined
-          }
-
           for (const row of oaRows as { id: string; products_json: unknown }[]) {
             const prods = (row.products_json ?? []) as ProdJson[]
             let estimatedHpp = 0
             for (const prod of prods) {
-              const master = resolveHpp(prod.marketplace_product_id)
+              if (!prod.marketplace_product_id) continue
+              const master = hppMap.get(prod.marketplace_product_id)
               if (master && (master.hpp > 0 || master.packaging > 0)) {
                 estimatedHpp += (master.hpp + master.packaging) * prod.quantity
               }
@@ -130,11 +91,11 @@ export async function PATCH(
               .update({ estimated_hpp: estimatedHpp })
               .eq('id', row.id)
           }
-          console.log(`Recomputed estimated_hpp for ${oaRows.length} orders_all rows`)
+          console.log(`Recalculated estimated_hpp for ${oaRows.length} orders_all rows`)
         }
       }
 
-      // --- Step 3: Update orders.estimated_hpp (confirmed income orders) ---
+      // 3. Recalculate orders.estimated_hpp using order_products (SKU + qty)
       {
         const incomeQuery = serviceClient
           .from('orders')
@@ -146,30 +107,32 @@ export async function PATCH(
         if (incomeOrders && incomeOrders.length > 0) {
           const incomeOrderNums = (incomeOrders as { id: string; order_number: string }[]).map((r) => r.order_number)
 
-          // Fetch order_products (numeric IDs, no mapping needed)
-          const opRows2: { order_number: string; marketplace_product_id: string }[] = []
+          // Fetch order_products (SKU + qty)
+          type OpRow = { order_number: string; marketplace_product_id: string; quantity: number | null }
+          const opRows: OpRow[] = []
           for (let i = 0; i < incomeOrderNums.length; i += OP_CHUNK) {
             const { data } = await serviceClient
               .from('order_products')
-              .select('order_number,marketplace_product_id')
+              .select('order_number,marketplace_product_id,quantity')
+              .eq('user_id', user.id)
               .in('order_number', incomeOrderNums.slice(i, i + OP_CHUNK))
-            if (data) opRows2.push(...(data as typeof opRows2))
+            if (data) opRows.push(...(data as OpRow[]))
           }
 
-          const opByOrderIncome = new Map<string, string[]>()
-          for (const row of opRows2) {
-            const arr = opByOrderIncome.get(row.order_number) ?? []
-            arr.push(row.marketplace_product_id)
-            opByOrderIncome.set(row.order_number, arr)
+          const orderToSkuQty = new Map<string, Array<{ sku: string; qty: number }>>()
+          for (const row of opRows) {
+            const arr = orderToSkuQty.get(row.order_number) ?? []
+            arr.push({ sku: row.marketplace_product_id, qty: row.quantity ?? 1 })
+            orderToSkuQty.set(row.order_number, arr)
           }
 
           for (const order of incomeOrders as { id: string; order_number: string }[]) {
-            const productIds = opByOrderIncome.get(order.order_number) ?? []
+            const skus = orderToSkuQty.get(order.order_number) ?? []
             let estimatedHpp = 0
-            for (const pid of productIds) {
-              const master = hppLookup.get(pid)
+            for (const s of skus) {
+              const master = hppMap.get(s.sku)
               if (master && (master.hpp > 0 || master.packaging > 0)) {
-                estimatedHpp += master.hpp + master.packaging
+                estimatedHpp += (master.hpp + master.packaging) * s.qty
               }
             }
             await serviceClient
@@ -177,7 +140,7 @@ export async function PATCH(
               .update({ estimated_hpp: estimatedHpp })
               .eq('id', order.id)
           }
-          console.log(`Recomputed estimated_hpp for ${incomeOrders.length} income orders`)
+          console.log(`Recalculated estimated_hpp for ${incomeOrders.length} income orders`)
         }
       }
     } catch (backfillErr) {
@@ -209,7 +172,6 @@ export async function DELETE(
 
     const productId = params.id
 
-    // Verify ownership — product must belong to user
     const { data: product, error: fetchError } = await supabase
       .from('master_products')
       .select('id, user_id')
@@ -238,7 +200,6 @@ export async function DELETE(
       )
     }
 
-    // Delete the product
     const { error: deleteError } = await supabase
       .from('master_products')
       .delete()
