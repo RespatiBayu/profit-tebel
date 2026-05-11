@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
 
 // ---------------------------------------------------------------------------
 // PATCH /api/master-products/[id]
@@ -49,19 +50,13 @@ export async function PATCH(
       const serviceClient = await createServiceClient()
       const storeId = product.store_id as string | null
 
-      // 1. Build SKU → HPP lookup from ALL master_products for this user
+      // 1. Build MasterResolver from ALL master_products for this user
       const { data: masterRows } = await serviceClient
         .from('master_products')
-        .select('marketplace_product_id,hpp,packaging_cost')
+        .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
         .eq('user_id', user.id)
 
-      const hppMap = new Map<string, { hpp: number; packaging: number }>()
-      for (const mp of (masterRows ?? []) as { marketplace_product_id: string; hpp: number; packaging_cost: number }[]) {
-        hppMap.set(mp.marketplace_product_id, {
-          hpp: mp.hpp ?? 0,
-          packaging: mp.packaging_cost ?? 0,
-        })
-      }
+      const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])
 
       const OP_CHUNK = 200
 
@@ -75,15 +70,17 @@ export async function PATCH(
         const { data: oaRows } = await oaQuery
 
         if (oaRows && oaRows.length > 0) {
-          type ProdJson = { marketplace_product_id: string | null; quantity: number }
+          type ProdJson = { marketplace_product_id: string | null; product_name?: string | null; quantity: number }
           for (const row of oaRows as { id: string; products_json: unknown }[]) {
             const prods = (row.products_json ?? []) as ProdJson[]
             let estimatedHpp = 0
             for (const prod of prods) {
-              if (!prod.marketplace_product_id) continue
-              const master = hppMap.get(prod.marketplace_product_id)
-              if (master && (master.hpp > 0 || master.packaging > 0)) {
-                estimatedHpp += (master.hpp + master.packaging) * prod.quantity
+              const master = resolver.resolve({
+                anyId: prod.marketplace_product_id,
+                productName: prod.product_name,
+              })
+              if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
+                estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
               }
             }
             await serviceClient
@@ -107,32 +104,32 @@ export async function PATCH(
         if (incomeOrders && incomeOrders.length > 0) {
           const incomeOrderNums = (incomeOrders as { id: string; order_number: string }[]).map((r) => r.order_number)
 
-          // Fetch order_products (SKU + qty)
-          type OpRow = { order_number: string; marketplace_product_id: string; quantity: number | null }
+          // Fetch order_products (any-ID + qty)
+          type OpRow = { order_number: string; marketplace_product_id: string; product_name: string | null; quantity: number | null }
           const opRows: OpRow[] = []
           for (let i = 0; i < incomeOrderNums.length; i += OP_CHUNK) {
             const { data } = await serviceClient
               .from('order_products')
-              .select('order_number,marketplace_product_id,quantity')
+              .select('order_number,marketplace_product_id,product_name,quantity')
               .eq('user_id', user.id)
               .in('order_number', incomeOrderNums.slice(i, i + OP_CHUNK))
             if (data) opRows.push(...(data as OpRow[]))
           }
 
-          const orderToSkuQty = new Map<string, Array<{ sku: string; qty: number }>>()
+          const orderToProducts = new Map<string, Array<{ id: string; name: string | null; qty: number }>>()
           for (const row of opRows) {
-            const arr = orderToSkuQty.get(row.order_number) ?? []
-            arr.push({ sku: row.marketplace_product_id, qty: row.quantity ?? 1 })
-            orderToSkuQty.set(row.order_number, arr)
+            const arr = orderToProducts.get(row.order_number) ?? []
+            arr.push({ id: row.marketplace_product_id, name: row.product_name, qty: row.quantity ?? 1 })
+            orderToProducts.set(row.order_number, arr)
           }
 
           for (const order of incomeOrders as { id: string; order_number: string }[]) {
-            const skus = orderToSkuQty.get(order.order_number) ?? []
+            const items = orderToProducts.get(order.order_number) ?? []
             let estimatedHpp = 0
-            for (const s of skus) {
-              const master = hppMap.get(s.sku)
-              if (master && (master.hpp > 0 || master.packaging > 0)) {
-                estimatedHpp += (master.hpp + master.packaging) * s.qty
+            for (const item of items) {
+              const master = resolver.resolve({ anyId: item.id, productName: item.name })
+              if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
+                estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
               }
             }
             await serviceClient

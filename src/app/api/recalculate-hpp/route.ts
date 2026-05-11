@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { MasterResolver, normalizeName, type MasterRow } from '@/lib/master-resolver'
 
 /**
  * POST /api/recalculate-hpp
@@ -70,15 +71,13 @@ export async function POST(request: NextRequest) {
       if (skuToName.size > 0) {
         const { data: existingMasters } = await serviceClient
           .from('master_products')
-          .select('id,marketplace_product_id,product_name,hpp,packaging_cost')
+          .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
           .eq('user_id', user.id)
 
-        type MasterRow = { id: string; marketplace_product_id: string; product_name: string | null; hpp: number; packaging_cost: number }
         const byName = new Map<string, MasterRow>()
         const bySku = new Set<string>()
         for (const mp of (existingMasters ?? []) as MasterRow[]) {
           if (mp.product_name) {
-            // Normalize name for matching (trim, collapse whitespace, normalize dashes)
             const normName = normalizeName(mp.product_name)
             const prev = byName.get(normName)
             if (!prev || /^\d+$/.test(prev.marketplace_product_id)) {
@@ -93,9 +92,13 @@ export async function POST(request: NextRequest) {
           const normName = normalizeName(name)
           const matched = byName.get(normName)
           if (matched && /^\d+$/.test(matched.marketplace_product_id)) {
+            // Rename numeric ID → SKU, preserve numeric in numeric_id column
             const { error } = await serviceClient
               .from('master_products')
-              .update({ marketplace_product_id: sku })
+              .update({
+                marketplace_product_id: sku,
+                numeric_id: matched.numeric_id ?? matched.marketplace_product_id,
+              })
               .eq('id', matched.id)
             if (!error) {
               migratedCount++
@@ -112,20 +115,14 @@ export async function POST(request: NextRequest) {
     if (migratedCount > 0) warnings.push(`${migratedCount} master produk dimigrasi dari numeric ID → SKU`)
 
     // =====================================================================
-    // STEP 2: Build SKU → HPP map from current master_products state
+    // STEP 2: Build MasterResolver from current master_products state
     // =====================================================================
     const { data: masterRows } = await serviceClient
       .from('master_products')
-      .select('marketplace_product_id,hpp,packaging_cost')
+      .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
       .eq('user_id', user.id)
 
-    const hppMap = new Map<string, { hpp: number; packaging: number }>()
-    for (const mp of (masterRows ?? []) as { marketplace_product_id: string; hpp: number; packaging_cost: number }[]) {
-      hppMap.set(mp.marketplace_product_id, {
-        hpp: mp.hpp ?? 0,
-        packaging: mp.packaging_cost ?? 0,
-      })
-    }
+    const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])
 
     // =====================================================================
     // STEP 3: Recalculate orders_all.estimated_hpp from products_json
@@ -141,15 +138,17 @@ export async function POST(request: NextRequest) {
       const { data: oaRows } = await oaQuery
 
       if (oaRows && oaRows.length > 0) {
-        type ProdJson = { marketplace_product_id: string | null; quantity: number }
+        type ProdJson = { marketplace_product_id: string | null; product_name?: string | null; quantity: number }
         for (const row of oaRows as { id: string; products_json: unknown }[]) {
           const prods = (row.products_json ?? []) as ProdJson[]
           let estimatedHpp = 0
           for (const prod of prods) {
-            if (!prod.marketplace_product_id) continue
-            const master = hppMap.get(prod.marketplace_product_id)
-            if (master && (master.hpp > 0 || master.packaging > 0)) {
-              estimatedHpp += (master.hpp + master.packaging) * prod.quantity
+            const master = resolver.resolve({
+              anyId: prod.marketplace_product_id,
+              productName: prod.product_name,
+            })
+            if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
+              estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
             }
           }
           const { error } = await serviceClient
@@ -181,33 +180,33 @@ export async function POST(request: NextRequest) {
       if (incomeOrders && incomeOrders.length > 0) {
         const orderNums = (incomeOrders as { id: string; order_number: string }[]).map((r) => r.order_number)
 
-        type OpRow = { order_number: string; marketplace_product_id: string; quantity: number | null }
+        type OpRow = { order_number: string; marketplace_product_id: string; product_name: string | null; quantity: number | null }
         const opRows: OpRow[] = []
         const OP_CHUNK = 200
         for (let i = 0; i < orderNums.length; i += OP_CHUNK) {
           const { data } = await serviceClient
             .from('order_products')
-            .select('order_number,marketplace_product_id,quantity')
+            .select('order_number,marketplace_product_id,product_name,quantity')
             .eq('user_id', user.id)
             .in('order_number', orderNums.slice(i, i + OP_CHUNK))
           if (data) opRows.push(...(data as OpRow[]))
         }
 
-        const orderToSkuQty = new Map<string, Array<{ sku: string; qty: number }>>()
+        const orderToProducts = new Map<string, Array<{ id: string; name: string | null; qty: number }>>()
         for (const row of opRows) {
-          const arr = orderToSkuQty.get(row.order_number) ?? []
-          arr.push({ sku: row.marketplace_product_id, qty: row.quantity ?? 1 })
-          orderToSkuQty.set(row.order_number, arr)
+          const arr = orderToProducts.get(row.order_number) ?? []
+          arr.push({ id: row.marketplace_product_id, name: row.product_name, qty: row.quantity ?? 1 })
+          orderToProducts.set(row.order_number, arr)
         }
 
         for (const order of incomeOrders as { id: string; order_number: string }[]) {
-          const skus = orderToSkuQty.get(order.order_number) ?? []
-          if (skus.length === 0) ordersNoMapping++
+          const items = orderToProducts.get(order.order_number) ?? []
+          if (items.length === 0) ordersNoMapping++
           let estimatedHpp = 0
-          for (const s of skus) {
-            const master = hppMap.get(s.sku)
-            if (master && (master.hpp > 0 || master.packaging > 0)) {
-              estimatedHpp += (master.hpp + master.packaging) * s.qty
+          for (const item of items) {
+            const master = resolver.resolve({ anyId: item.id, productName: item.name })
+            if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
+              estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
             }
           }
           const { error } = await serviceClient
@@ -244,12 +243,3 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Normalize product name for fuzzy matching: lowercase, collapse whitespace,
-// normalize Unicode dashes (en-dash, em-dash) → simple hyphen, trim.
-function normalizeName(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[‐-―−]/g, '-') // various dashes → hyphen
-    .replace(/\s+/g, ' ')
-    .trim()
-}

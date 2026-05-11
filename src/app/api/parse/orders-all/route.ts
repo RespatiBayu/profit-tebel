@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { parseShopeeOrdersAll } from '@/lib/parsers/shopee-orders-all'
+import { MasterResolver, normalizeName, type MasterRow as ResolverMasterRow } from '@/lib/master-resolver'
 import type { UploadSummary } from '@/types'
 
 // ---------------------------------------------------------------------------
@@ -213,10 +214,11 @@ export async function POST(request: NextRequest) {
       const existingBySku = new Set<string>()
       for (const mp of (existingMasters ?? []) as MasterRow[]) {
         if (mp.product_name) {
+          const normName = normalizeName(mp.product_name)
           // Prefer existing SKU-keyed entries over numeric ones, in case of dupes
-          const prev = existingByName.get(mp.product_name)
+          const prev = existingByName.get(normName)
           if (!prev || /^\d+$/.test(prev.marketplace_product_id)) {
-            existingByName.set(mp.product_name, mp)
+            existingByName.set(normName, mp)
           }
         }
         existingBySku.add(mp.marketplace_product_id)
@@ -225,21 +227,26 @@ export async function POST(request: NextRequest) {
       for (const [sku, name] of Array.from(skuToName.entries())) {
         if (existingBySku.has(sku)) continue  // already SKU-keyed, nothing to do
 
-        const matched = existingByName.get(name)
+        const normName = normalizeName(name)
+        const matched = existingByName.get(normName)
         const isMatchedNumeric = matched && /^\d+$/.test(matched.marketplace_product_id)
 
         if (matched && isMatchedNumeric) {
-          // Rename numeric ID → SKU (preserves HPP, packaging, store_id)
+          // Rename numeric ID → SKU. Preserve old numeric ID by writing it into
+          // master.numeric_id column so future income OPF rows can still resolve.
           const { error: renameErr } = await serviceClient
             .from('master_products')
-            .update({ marketplace_product_id: sku })
+            .update({
+              marketplace_product_id: sku,
+              numeric_id: matched.marketplace_product_id,
+            })
             .eq('id', matched.id)
           if (renameErr) {
             console.error(`Failed to migrate master "${name}" (${matched.marketplace_product_id} → ${sku}):`, renameErr.message)
           } else {
             console.log(`Migrated master "${name}": ${matched.marketplace_product_id} → ${sku} (HPP=${matched.hpp})`)
             existingBySku.add(sku)
-            existingByName.delete(name)
+            existingByName.delete(normName)
             migratedCount++
           }
         } else if (!matched) {
@@ -269,39 +276,27 @@ export async function POST(request: NextRequest) {
     if (createdCount > 0) console.log(`Auto-created ${createdCount} new master_products (HPP=0)`)
 
     // =======================================================================
-    // STEP C: Build SKU → HPP map for this user (after migration so renames apply)
+    // STEP C: Build MasterResolver for this user (after migration so renames apply)
     // =======================================================================
-    const skuList = Array.from(skuToName.keys())
-    const hppMap = new Map<string, { hpp: number; packaging: number }>()
-    if (skuList.length > 0) {
-      const MP_BATCH = 200
-      for (let i = 0; i < skuList.length; i += MP_BATCH) {
-        const chunk = skuList.slice(i, i + MP_BATCH)
-        const { data } = await serviceClient
-          .from('master_products')
-          .select('marketplace_product_id,hpp,packaging_cost')
-          .eq('user_id', user.id)
-          .in('marketplace_product_id', chunk)
-        if (data) {
-          for (const mp of data as { marketplace_product_id: string; hpp: number; packaging_cost: number }[]) {
-            hppMap.set(mp.marketplace_product_id, {
-              hpp: mp.hpp ?? 0,
-              packaging: mp.packaging_cost ?? 0,
-            })
-          }
-        }
-      }
-    }
+    const { data: allMasters } = await serviceClient
+      .from('master_products')
+      .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
+      .eq('user_id', user.id)
+    const resolver = new MasterResolver((allMasters ?? []) as ResolverMasterRow[])
 
     // =======================================================================
-    // STEP D: Compute estimated_hpp per orders_all row (direct SKU lookup)
+    // STEP D: Compute estimated_hpp per orders_all row (via resolver:
+    //   matches by SKU, numeric_id, or product_name fallback)
     // =======================================================================
     const rows = orders.map((o) => {
       let estimatedHpp = 0
       for (const prod of o.products_json ?? []) {
-        const master = prod.marketplace_product_id ? hppMap.get(prod.marketplace_product_id) : undefined
-        if (master && (master.hpp > 0 || master.packaging > 0)) {
-          estimatedHpp += (master.hpp + master.packaging) * prod.quantity
+        const master = resolver.resolve({
+          anyId: prod.marketplace_product_id,
+          productName: prod.product_name,
+        })
+        if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
+          estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
         }
       }
       return {
@@ -350,13 +345,13 @@ export async function POST(request: NextRequest) {
     // =======================================================================
     try {
       const incomeOrderNums = orders.map((o) => o.order_number)
-      const orderToSkuQty = new Map<string, Array<{ sku: string; qty: number }>>()
+      const orderToProducts = new Map<string, Array<{ id: string; name: string | null; qty: number }>>()
 
       // Build directly from what we just upserted
       for (const op of opUpsertRows) {
-        const arr = orderToSkuQty.get(op.order_number) ?? []
-        arr.push({ sku: op.marketplace_product_id, qty: op.quantity })
-        orderToSkuQty.set(op.order_number, arr)
+        const arr = orderToProducts.get(op.order_number) ?? []
+        arr.push({ id: op.marketplace_product_id, name: op.product_name, qty: op.quantity })
+        orderToProducts.set(op.order_number, arr)
       }
 
       let backfilledCount = 0
@@ -364,12 +359,12 @@ export async function POST(request: NextRequest) {
       for (let i = 0; i < incomeOrderNums.length; i += UPD_CHUNK) {
         const chunk = incomeOrderNums.slice(i, i + UPD_CHUNK)
         for (const orderNum of chunk) {
-          const skus = orderToSkuQty.get(orderNum) ?? []
+          const items = orderToProducts.get(orderNum) ?? []
           let estimatedHpp = 0
-          for (const s of skus) {
-            const master = hppMap.get(s.sku)
-            if (master && (master.hpp > 0 || master.packaging > 0)) {
-              estimatedHpp += (master.hpp + master.packaging) * s.qty
+          for (const item of items) {
+            const master = resolver.resolve({ anyId: item.id, productName: item.name })
+            if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
+              estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
             }
           }
           const { error: updErr } = await serviceClient
