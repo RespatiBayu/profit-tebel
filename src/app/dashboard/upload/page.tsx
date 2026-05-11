@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -70,12 +70,16 @@ function DropZone({
   state,
   onChange,
   onRemove,
+  disabled,
+  disabledReason,
 }: {
   type: UploadType
   accept: string
   state: UploadState
   onChange: (file: File) => void
   onRemove: () => void
+  disabled?: boolean
+  disabledReason?: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -206,6 +210,28 @@ function DropZone({
     )
   }
 
+  if (disabled) {
+    return (
+      <div
+        className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 text-center space-y-3 opacity-60 cursor-not-allowed"
+        title={disabledReason}
+      >
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto bg-muted">
+          <Icon className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <div>
+          <p className="font-semibold text-sm text-muted-foreground">{label}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+        </div>
+        {disabledReason && (
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mx-auto inline-block max-w-full">
+            {disabledReason}
+          </p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div
       className={`rounded-xl border-2 border-dashed transition-colors cursor-pointer p-6 text-center space-y-3
@@ -260,6 +286,34 @@ export default function UploadPage() {
   const [ordersAllState, setOrdersAllState] = useState<UploadState>({
     file: null, status: 'idle', progress: 0, result: null,
   })
+  // Upload prerequisite state — Order.all must exist before Income upload
+  const [hasOrdersAllData, setHasOrdersAllData] = useState<boolean>(false)
+  const [statusLoading, setStatusLoading] = useState(true)
+
+  // Fetch upload status (whether Order.all has been uploaded for this store)
+  const refreshUploadStatus = useCallback(async () => {
+    if (!storeId) {
+      setHasOrdersAllData(false)
+      setStatusLoading(false)
+      return
+    }
+    setStatusLoading(true)
+    try {
+      const res = await fetch(`/api/upload-status?store=${encodeURIComponent(storeId)}`)
+      if (res.ok) {
+        const json = await res.json()
+        setHasOrdersAllData(!!json.hasOrdersAll)
+      }
+    } catch {
+      // ignore — treat as no data
+    } finally {
+      setStatusLoading(false)
+    }
+  }, [storeId])
+
+  useEffect(() => {
+    refreshUploadStatus()
+  }, [refreshUploadStatus])
 
   // Load stores on mount
   useEffect(() => {
@@ -351,6 +405,8 @@ export default function UploadPage() {
           warnings: data.warnings,
         },
       }))
+      // After successful upload, refresh status — Order.all upload unlocks Income
+      refreshUploadStatus()
     } catch {
       setState((prev) => ({
         ...prev,
@@ -471,20 +527,39 @@ export default function UploadPage() {
           <CardTitle className="text-base">File Upload</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Workflow banner: Order.all must come first */}
+          {!statusLoading && !hasOrdersAllData && (
+            <Alert className="border-amber-200 bg-amber-50">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-amber-800 text-xs">
+                <strong>Upload <span className="text-teal-700">Order.all</span> dulu sebelum Income.</strong>{' '}
+                File Order.all berisi mapping produk per pesanan (SKU + nama + qty) yang dipakai untuk auto-create
+                master produk dan menghitung HPP. Income hanya berisi data finansial — tanpa Order.all, HPP tidak
+                bisa dihitung untuk pesanan income.{' '}
+                <span className="block mt-1 text-amber-700/80">
+                  Data Iklan (Summary &amp; per Produk) tetap bisa di-upload kapan saja.
+                </span>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Order Order.all → Income → Ads → Ads-product (enforces workflow) */}
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <DropZone
-              type="income"
-              accept=".xlsx"
-              state={incomeState}
-              onChange={(f) => setFile('income', f)}
-              onRemove={() => removeFile('income')}
-            />
             <DropZone
               type="orders_all"
               accept=".xlsx"
               state={ordersAllState}
               onChange={(f) => setFile('orders_all', f)}
               onRemove={() => removeFile('orders_all')}
+            />
+            <DropZone
+              type="income"
+              accept=".xlsx"
+              state={incomeState}
+              onChange={(f) => setFile('income', f)}
+              onRemove={() => removeFile('income')}
+              disabled={!statusLoading && !hasOrdersAllData && ordersAllState.status !== 'success'}
+              disabledReason="Upload Order.all dulu untuk mengisi master produk"
             />
             <DropZone
               type="ads"
@@ -613,23 +688,23 @@ export default function UploadPage() {
       {/* Guide */}
       <Card className="bg-muted/30">
         <CardContent className="p-4 space-y-3">
-          <p className="font-medium text-sm">Cara download file dari Shopee:</p>
+          <p className="font-medium text-sm">Urutan upload &amp; cara download dari Shopee:</p>
           <div className="space-y-2 text-sm text-muted-foreground">
             <div>
-              <span className="font-medium text-foreground">Data Penghasilan (.xlsx):</span>
-              {' '}Seller Center → Keuangan → Penghasilan Saya → Download
+              <span className="font-medium text-foreground">1. Order.all / Semua Pesanan (.xlsx)</span> <span className="text-amber-700 text-xs">— WAJIB UPLOAD DULUAN</span>
+              <div className="text-xs ml-4 mt-0.5">Seller Center → Pesanan Saya → Export Pesanan (pilih semua status). Ini sumber master produk &amp; mapping SKU.</div>
             </div>
             <div>
-              <span className="font-medium text-foreground">Data Iklan (.csv):</span>
-              {' '}Shopee Ads → Laporan → Download Laporan Produk
+              <span className="font-medium text-foreground">2. Data Penghasilan / Income (.xlsx)</span>
+              <div className="text-xs ml-4 mt-0.5">Seller Center → Keuangan → Penghasilan Saya → Download. Berisi data finansial pesanan yang dananya sudah dilepas.</div>
+            </div>
+            <div className="pt-1 border-t">
+              <span className="font-medium text-foreground">Data Iklan (.csv)</span> <span className="text-xs text-muted-foreground">— independent, boleh kapan saja</span>
+              <div className="text-xs ml-4 mt-0.5">Shopee Ads → Laporan → Download Laporan Produk</div>
             </div>
             <div>
-              <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv):</span>
-              {' '}Shopee Ads → Shop GMV Max → Laporan → Download Detail Produk
-            </div>
-            <div>
-              <span className="font-medium text-foreground">Semua Pesanan / Order.all (.xlsx):</span>
-              {' '}Seller Center → Pesanan Saya → Export Pesanan (pilih semua status)
+              <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv)</span> <span className="text-xs text-muted-foreground">— independent</span>
+              <div className="text-xs ml-4 mt-0.5">Shopee Ads → Shop GMV Max → Laporan → Download Detail Produk</div>
             </div>
           </div>
         </CardContent>

@@ -144,6 +144,26 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Enforce workflow: Order.all must be uploaded before Income so we have
+    // SKU + qty mapping to compute HPP. Income alone has no per-product info.
+    {
+      const { count: oaCount } = await supabase
+        .from('orders_all')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('store_id', storeId)
+      if (!oaCount || oaCount === 0) {
+        return NextResponse.json(
+          {
+            error:
+              'Upload file Order.all dulu untuk store ini. Order.all berisi mapping produk per pesanan ' +
+              'yang dibutuhkan untuk membuat master produk dan menghitung HPP. Income hanya berisi data finansial.',
+          },
+          { status: 412 }
+        )
+      }
+    }
+
     // Create upload batch
     const { data: batch, error: batchError } = await supabase
       .from('upload_batches')
