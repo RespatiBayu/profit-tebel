@@ -210,11 +210,50 @@ export async function POST(request: NextRequest) {
           orderToProducts.set(row.order_number, arr)
         }
 
+        // Also fetch orders_all by order_number as a fallback source of product
+        // info (so income orders that DO exist in Order.all get HPP from there
+        // when order_products is missing).
+        type OaProd = { marketplace_product_id: string | null; product_name?: string | null; quantity: number }
+        const oaByOrderNum = new Map<string, OaProd[]>()
+        for (let i = 0; i < orderNums.length; i += OP_CHUNK) {
+          const { data: oaChunk } = await serviceClient
+            .from('orders_all')
+            .select('order_number,products_json')
+            .eq('user_id', user.id)
+            .in('order_number', orderNums.slice(i, i + OP_CHUNK))
+          if (oaChunk) {
+            for (const r of oaChunk as { order_number: string; products_json: unknown }[]) {
+              oaByOrderNum.set(r.order_number, (r.products_json ?? []) as OaProd[])
+            }
+          }
+        }
+
         for (const order of incomeOrders as { id: string; order_number: string }[]) {
           const items = orderToProducts.get(order.order_number) ?? []
-          if (items.length === 0) ordersNoMapping++
+          // Fallback to orders_all products_json when order_products is empty
+          let prods: Array<{ id: string | null; name: string | null; qty: number }> = items.map((it) => ({
+            id: it.id, name: it.name, qty: it.qty,
+          }))
+          if (prods.length === 0) {
+            const oaProds = oaByOrderNum.get(order.order_number)
+            if (oaProds && oaProds.length > 0) {
+              prods = oaProds.map((p) => ({
+                id: p.marketplace_product_id,
+                name: p.product_name ?? null,
+                qty: p.quantity,
+              }))
+            }
+          }
+
+          if (prods.length === 0) {
+            // No mapping data anywhere — DO NOT overwrite. Preserve whatever the
+            // income upload parser computed from OPF originally.
+            ordersNoMapping++
+            continue
+          }
+
           let estimatedHpp = 0
-          for (const item of items) {
+          for (const item of prods) {
             const master = resolver.resolve({ anyId: item.id, productName: item.name })
             if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
               estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
@@ -234,7 +273,7 @@ export async function POST(request: NextRequest) {
 
     if (ordersNoMapping > 0) {
       warnings.push(
-        `${ordersNoMapping} dari ${ordersUpdated} order income tidak punya SKU mapping di order_products. Upload file Order.all untuk periode tersebut.`
+        `${ordersNoMapping} order income tidak punya mapping SKU (tidak ada di order_products maupun orders_all). HPP dari upload income di-preserve. Upload Order.all untuk periode tersebut supaya HPP akurat.`
       )
     }
 
