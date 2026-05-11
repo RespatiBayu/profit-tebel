@@ -70,10 +70,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 422 })
     }
 
-    const { orders } = parseResult
-    // Note: parseResult.orderProducts (from OPF sheet, numeric IDs) is intentionally
-    // ignored — order_products are now populated exclusively from Order.all uploads
-    // which carry seller SKU codes that match master_products.
+    const { orders, orderProducts: opfRows } = parseResult
+    // opfRows come from income OPF sheet (numeric Shopee product IDs + product
+    // names). We use the product_name to lookup master_products (by name) and
+    // populate order_products with whatever ID master_products is keyed by.
+    // This is the fallback path for income orders without a matching Order.all.
     // Validate dates — only pass valid ISO to DB, else null
     const isoDate = /^\d{4}-\d{2}-\d{2}$/
     const periodStart = parseResult.periodStart && isoDate.test(parseResult.periodStart)
@@ -254,12 +255,103 @@ export async function POST(request: NextRequest) {
     const duplicateCount = unchangedCount
 
     // -----------------------------------------------------------------------
-    // NOTE: We intentionally DO NOT insert order_products from income OPF data.
-    // The OPF sheet uses Shopee numeric product IDs (e.g. "24142481111") which
-    // do NOT match the seller SKU codes (e.g. "#BNYWGIEDP-AMERTA30ML") that
-    // the user enters HPP against in Master Produk. order_products is now
-    // populated exclusively from Order.all uploads (which carry SKU + qty).
+    // Populate order_products from income OPF using product_name → master ID
+    // resolution. This fills in mappings for income orders that don't have a
+    // corresponding Order.all upload (e.g. older months). Strategy:
+    //   1. Fetch all user's master_products → build name → marketplace_product_id map
+    //   2. For each OPF row, lookup master by normalized product_name
+    //   3. Upsert (order_number, master_id, qty=1) — accumulates with Order.all
+    //      mappings (qty is meaningful from Order.all; OPF defaults to 1)
     // -----------------------------------------------------------------------
+    if (opfRows.length > 0) {
+      try {
+        const { data: masterRows } = await serviceClient
+          .from('master_products')
+          .select('marketplace_product_id,product_name')
+          .eq('user_id', user.id)
+
+        const nameToMasterId = new Map<string, string>()
+        for (const mp of (masterRows ?? []) as { marketplace_product_id: string; product_name: string | null }[]) {
+          if (mp.product_name) {
+            nameToMasterId.set(normalizeName(mp.product_name), mp.marketplace_product_id)
+          }
+        }
+
+        // Build new order_products rows by matching OPF product_name → master ID
+        const opUpsertRows: Array<{
+          user_id: string
+          store_id: string
+          order_number: string
+          marketplace_product_id: string
+          product_name: string | null
+          quantity: number
+        }> = []
+        let opfMatched = 0
+        let opfUnmatched = 0
+
+        // Aggregate same product within an order (multiple OPF rows of same SKU)
+        const perOrderAgg = new Map<string, Map<string, { name: string | null; qty: number }>>()
+        for (const op of opfRows) {
+          if (!op.product_name) {
+            opfUnmatched++
+            continue
+          }
+          const masterId = nameToMasterId.get(normalizeName(op.product_name))
+          if (!masterId) {
+            opfUnmatched++
+            continue
+          }
+          opfMatched++
+          let orderMap = perOrderAgg.get(op.order_number)
+          if (!orderMap) {
+            orderMap = new Map()
+            perOrderAgg.set(op.order_number, orderMap)
+          }
+          const existing = orderMap.get(masterId)
+          if (existing) {
+            existing.qty += 1
+          } else {
+            orderMap.set(masterId, { name: op.product_name, qty: 1 })
+          }
+        }
+
+        for (const [orderNum, prodMap] of Array.from(perOrderAgg.entries())) {
+          for (const [masterId, info] of Array.from(prodMap.entries())) {
+            opUpsertRows.push({
+              user_id: user.id,
+              store_id: storeId!,
+              order_number: orderNum,
+              marketplace_product_id: masterId,
+              product_name: info.name,
+              quantity: info.qty,
+            })
+          }
+        }
+
+        const OP_INSERT_CHUNK = 500
+        for (let i = 0; i < opUpsertRows.length; i += OP_INSERT_CHUNK) {
+          const chunk = opUpsertRows.slice(i, i + OP_INSERT_CHUNK)
+          const { error } = await serviceClient
+            .from('order_products')
+            .upsert(chunk, {
+              onConflict: 'store_id,order_number,marketplace_product_id',
+              ignoreDuplicates: false,
+            })
+          if (error) {
+            console.error('Income OPF order_products upsert error:', error.message)
+            warnings.push(`Sebagian mapping produk dari OPF gagal disimpan: ${error.message}`)
+          }
+        }
+        console.log(`Income OPF mapping: ${opfMatched} rows matched, ${opfUnmatched} unmatched by product_name`)
+        if (opfUnmatched > 0 && opfMatched === 0) {
+          warnings.push(
+            `${opfUnmatched} baris OPF tidak match nama produk di master. Pastikan master produk sudah diisi (upload Order.all dulu untuk auto-create master).`
+          )
+        }
+      } catch (opfErr) {
+        console.error('Income OPF processing error:', opfErr)
+      }
+    }
 
     // -----------------------------------------------------------------------
     // Compute estimated_hpp for orders & backfill orders_all using the SKU
@@ -420,4 +512,14 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+// Normalize product name for fuzzy matching: lowercase, collapse whitespace,
+// normalize Unicode dashes (en-dash, em-dash) → simple hyphen, trim.
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[‐-―−]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
