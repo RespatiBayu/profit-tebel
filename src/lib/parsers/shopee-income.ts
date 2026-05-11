@@ -191,10 +191,15 @@ export function parseShopeeIncome(buffer: Buffer): IncomeParseResult {
     })
   }
 
-  // --- Order Processing Fee Sheet ---
-  const opfSheet =
-    workbook.Sheets['Order Processing Fee'] ??
-    workbook.Sheets[workbook.SheetNames[3]]
+  // --- Order Processing Fee / Seller Fee Sheet ---
+  // Shopee renamed this sheet to "Seller Fee" in newer exports. Detect by
+  // fuzzy name match so we work across formats.
+  const opfSheetName =
+    workbook.SheetNames.find((n) => n.toLowerCase().includes('order processing')) ??
+    workbook.SheetNames.find((n) => n.toLowerCase().includes('seller fee')) ??
+    workbook.SheetNames.find((n) => n.toLowerCase().includes('fee')) ??
+    workbook.SheetNames[3]
+  const opfSheet = opfSheetName ? workbook.Sheets[opfSheetName] : null
 
   const orderProducts: ParsedOrderProduct[] = []
 
