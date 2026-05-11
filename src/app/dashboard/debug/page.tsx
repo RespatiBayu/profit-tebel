@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { CheckCircle, XCircle, AlertCircle, RefreshCw, Upload } from 'lucide-react'
+import { CheckCircle, XCircle, AlertCircle, RefreshCw, Upload, Download } from 'lucide-react'
 
 type MatchedBy = 'name' | 'sku' | 'numeric' | null
 
@@ -182,6 +182,22 @@ export default function DebugPage() {
           Refresh
         </Button>
       </div>
+
+      {/* ============== EXPORT QTY PER PRODUK ============== */}
+      <Card className="border-emerald-200 bg-emerald-50/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Download className="h-4 w-4 text-emerald-600" />
+            Export Qty per Produk (XLSX)
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Download data agregasi qty terjual per produk untuk validasi HPP. Pilih periode di bawah.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ExportQtyForm storeId={storeId} />
+        </CardContent>
+      </Card>
 
       {error && (
         <Alert variant="destructive">
@@ -557,6 +573,57 @@ export default function DebugPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+function ExportQtyForm({ storeId }: { storeId: string }) {
+  const now = new Date()
+  const [year, setYear] = useState(String(now.getFullYear()))
+  const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'))
+  // Default to April 2026 per user's current data
+  const [yearVal, setYearVal] = useState(year === '2026' ? '2026' : '2026')
+  const [monthVal, setMonthVal] = useState('04')
+  // keep linter happy
+  void year; void month; void setYear; void setMonth
+
+  function downloadUrl() {
+    const params = new URLSearchParams({ year: yearVal, month: monthVal })
+    if (storeId) params.set('store', storeId)
+    return `/api/export/qty-by-product?${params.toString()}`
+  }
+
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">Tahun</label>
+        <input
+          type="text"
+          inputMode="numeric"
+          className="border rounded px-2 py-1 text-sm w-24"
+          value={yearVal}
+          onChange={(e) => setYearVal(e.target.value)}
+        />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">Bulan (01-12)</label>
+        <input
+          type="text"
+          inputMode="numeric"
+          className="border rounded px-2 py-1 text-sm w-24"
+          value={monthVal}
+          onChange={(e) => setMonthVal(e.target.value.padStart(2, '0'))}
+          maxLength={2}
+        />
+      </div>
+      <a
+        href={downloadUrl()}
+        download
+        className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded px-3 py-1.5"
+      >
+        <Download className="h-4 w-4" />
+        Download XLSX
+      </a>
     </div>
   )
 }
