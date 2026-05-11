@@ -121,6 +121,27 @@ function DropZone({
     if (file) onChange(file)
   }
 
+  // Show file preview immediately after selection (before upload starts)
+  if (state.file && state.status === 'idle') {
+    return (
+      <div className={`rounded-xl border-2 p-5 ${bg} space-y-3`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <Icon className={`h-8 w-8 shrink-0 ${color}`} />
+            <div className="min-w-0">
+              <p className="font-medium text-sm truncate">{state.file.name}</p>
+              <p className="text-xs text-muted-foreground">{formatFileSize(state.file.size)}</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onRemove} title="Hapus file">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground italic">Siap diproses — klik tombol upload di bawah.</p>
+      </div>
+    )
+  }
+
   if (state.file && state.status !== 'idle') {
     return (
       <div className={`rounded-xl border-2 p-5 ${bg} space-y-3`}>
@@ -418,7 +439,8 @@ export default function UploadPage() {
   }
 
   const hasFiles = incomeState.file || adsState.file || adsProductState.file || ordersAllState.file
-  const canUploadIncome = incomeState.file && incomeState.status === 'idle'
+  const incomeEnabled = !statusLoading && (hasOrdersAllData || ordersAllState.status === 'success')
+  const canUploadIncome = incomeEnabled && incomeState.file && incomeState.status === 'idle'
   const canUploadAds = adsState.file && adsState.status === 'idle'
   const canUploadAdsProduct = adsProductState.file && adsProductState.status === 'idle'
   const canUploadOrdersAll = ordersAllState.file && ordersAllState.status === 'idle'
@@ -558,8 +580,8 @@ export default function UploadPage() {
               state={incomeState}
               onChange={(f) => setFile('income', f)}
               onRemove={() => removeFile('income')}
-              disabled={!statusLoading && !hasOrdersAllData && ordersAllState.status !== 'success'}
-              disabledReason="Upload Order.all dulu untuk mengisi master produk"
+              disabled={statusLoading || (!hasOrdersAllData && ordersAllState.status !== 'success')}
+              disabledReason={statusLoading ? undefined : 'Upload Order.all dulu untuk mengisi master produk'}
             />
             <DropZone
               type="ads"

@@ -40,23 +40,43 @@ export class MasterResolver {
       if (r.numeric_id) this.byNumeric.set(r.numeric_id, r)
       if (r.product_name) {
         const n = normalizeName(r.product_name)
-        // First occurrence wins (deterministic)
-        if (!this.byName.has(n)) this.byName.set(n, r)
+        const prev = this.byName.get(n)
+        // Preference order for byName when multiple masters share a name:
+        //   1. one with HPP/packaging > 0 (real data) over zero entries
+        //   2. SKU-keyed (non-numeric ID) over numeric-only legacy entries
+        if (!prev) {
+          this.byName.set(n, r)
+        } else {
+          const prevHasHpp = (prev.hpp ?? 0) > 0 || (prev.packaging_cost ?? 0) > 0
+          const curHasHpp  = (r.hpp ?? 0) > 0 || (r.packaging_cost ?? 0) > 0
+          const prevIsNumericKeyed = /^\d+$/.test(prev.marketplace_product_id)
+          const curIsNumericKeyed  = /^\d+$/.test(r.marketplace_product_id)
+          if (
+            (curHasHpp && !prevHasHpp) ||
+            (curHasHpp === prevHasHpp && prevIsNumericKeyed && !curIsNumericKeyed)
+          ) {
+            this.byName.set(n, r)
+          }
+        }
       }
     }
   }
 
-  /** Look up a master by any combination of identifiers. Tries:
-   *   1. anyId exactly matches marketplace_product_id OR numeric_id
-   *   2. product_name (normalized) match
+  /** Look up a master, preferring NAME-based matching (most reliable when SKU
+   *  IDs are inconsistent between Order.all SKU codes and Income numeric IDs).
+   *  Strategy:
+   *    1. product_name (normalized) match — primary, picks best master per name
+   *    2. anyId exactly matches marketplace_product_id OR numeric_id — fallback
+   *       only used when name miss, so a name-keyed match with HPP filled wins
+   *       over an ID-keyed duplicate with HPP=0.
    */
   resolve(opts: { anyId?: string | null; productName?: string | null }): MasterRow | undefined {
+    if (opts.productName) {
+      const byName = this.byName.get(normalizeName(opts.productName))
+      if (byName) return byName
+    }
     if (opts.anyId) {
       const m = this.bySku.get(opts.anyId) ?? this.byNumeric.get(opts.anyId)
-      if (m) return m
-    }
-    if (opts.productName) {
-      const m = this.byName.get(normalizeName(opts.productName))
       if (m) return m
     }
     return undefined

@@ -124,6 +124,17 @@ export async function POST(request: NextRequest) {
 
     const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])
 
+    // Diagnostic: how many masters have HPP > 0?
+    const totalMasters = (masterRows ?? []).length
+    const mastersWithHpp = ((masterRows ?? []) as MasterRow[]).filter(
+      (m) => (m.hpp ?? 0) > 0 || (m.packaging_cost ?? 0) > 0
+    ).length
+    if (totalMasters > 0 && mastersWithHpp === 0) {
+      warnings.push(
+        `⚠️ Tidak ada master produk yang punya HPP terisi (0 dari ${totalMasters}). Isi HPP di menu "Master Produk" dulu, baru klik Recalculate lagi.`
+      )
+    }
+
     // =====================================================================
     // STEP 3: Recalculate orders_all.estimated_hpp from products_json
     // =====================================================================
@@ -230,6 +241,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       migratedMasters: migratedCount,
+      totalMasters,
+      mastersWithHpp,
       ordersAllUpdated: oaUpdated,
       ordersAllWithHpp: oaWithHpp,
       ordersUpdated,
