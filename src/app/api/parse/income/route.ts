@@ -286,12 +286,11 @@ export async function POST(request: NextRequest) {
     // -----------------------------------------------------------------------
     // OPF diagnostic counters surfaced to upload response so users can see
     // matching health without opening server logs.
-    let opfRowsTotal = opfRows.length
+    const opfRowsTotal = opfRows.length
     let opfMatchedTotal = 0
     let opfUnmatchedTotal = 0
-    let opfUnmatchedSamples: Array<{ id: string | null; name: string | null }> = []
+    const opfUnmatchedSamples: Array<{ id: string | null; name: string | null }> = []
     let opUpsertSuccess = 0
-    let opUpsertFailed = 0
 
     if (opfRows.length > 0) {
       try {
@@ -391,7 +390,6 @@ export async function POST(request: NextRequest) {
           if (error) {
             console.error('Income OPF order_products upsert error:', error.message)
             warnings.push(`Sebagian mapping produk dari OPF gagal disimpan: ${error.message}`)
-            opUpsertFailed += chunk.length
           } else {
             opUpsertSuccess += chunk.length
           }
