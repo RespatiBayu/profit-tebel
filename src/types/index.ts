@@ -101,6 +101,11 @@ export interface UploadSummary {
 
 export type StoreAccessRole = 'owner' | 'member'
 
+export interface AvailablePeriods {
+  years: string[]
+  monthsByYear: Record<string, string[]>
+}
+
 // Store (per-user workspace for a specific shop)
 export interface Store {
   id: string

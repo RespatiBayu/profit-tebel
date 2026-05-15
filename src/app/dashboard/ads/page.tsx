@@ -1,74 +1,223 @@
 import { createClient } from '@/lib/supabase/server'
+import {
+  buildAvailablePeriods,
+  buildPeriodOrFilter,
+  parseCsvSelection,
+  sanitizeSelection,
+} from '@/lib/period-filter'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Upload } from 'lucide-react'
 import AdsDashboard from '@/components/ads/ads-dashboard'
 import type { DbAdsRow, DbOrder, DbOrderProduct, MasterProduct } from '@/types'
 
+const ADS_SELECT = [
+  'id',
+  'upload_batch_id',
+  'marketplace',
+  'ad_name',
+  'parent_iklan',
+  'ad_status',
+  'product_name',
+  'product_code',
+  'impressions',
+  'clicks',
+  'ctr',
+  'conversions',
+  'direct_conversions',
+  'conversion_rate',
+  'direct_conversion_rate',
+  'cost_per_conversion',
+  'cost_per_direct_conversion',
+  'units_sold',
+  'direct_units_sold',
+  'gmv',
+  'direct_gmv',
+  'ad_spend',
+  'roas',
+  'direct_roas',
+  'acos',
+  'direct_acos',
+  'voucher_amount',
+  'vouchered_sales',
+  'report_period_start',
+  'report_period_end',
+].join(',')
+
+const ORDER_SELECT = [
+  'id',
+  'upload_batch_id',
+  'marketplace',
+  'order_number',
+  'buyer_username',
+  'buyer_name',
+  'order_date',
+  'release_date',
+  'payment_method',
+  'original_price',
+  'product_discount',
+  'refund_amount',
+  'seller_voucher',
+  'seller_voucher_cofund',
+  'seller_cashback',
+  'buyer_shipping_fee',
+  'shopee_shipping_subsidy',
+  'actual_shipping_cost',
+  'return_shipping_cost',
+  'ams_commission',
+  'admin_fee',
+  'service_fee',
+  'processing_fee',
+  'premium_fee',
+  'shipping_program_fee',
+  'transaction_fee',
+  'campaign_fee',
+  'total_income',
+  'voucher_code',
+  'shipping_type',
+  'courier_name',
+  'seller_free_shipping_promo',
+  'estimated_hpp',
+].join(',')
+
+const ORDER_PRODUCT_SELECT = [
+  'id',
+  'order_number',
+  'marketplace_product_id',
+  'product_name',
+  'processing_fee_prorata',
+  'quantity',
+].join(',')
+
+const MASTER_PRODUCT_SELECT = [
+  'id',
+  'marketplace_product_id',
+  'product_name',
+  'hpp',
+  'packaging_cost',
+  'marketplace',
+  'category',
+  'notes',
+].join(',')
+
+type UploadPeriodRow = {
+  file_type: string
+  period_start: string | null
+  period_end: string | null
+}
+
 export default async function AdsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ store?: string }>
+  searchParams: Promise<{ store?: string; years?: string; months?: string }>
 }) {
-  const { store: storeId } = await searchParams
+  const { store: storeId, years, months } = await searchParams
   const supabase = await createClient()
 
-  const mpQ = supabase.from('master_products').select('*')
-  const ordQ = supabase.from('orders').select('*')
-  const opQ = supabase.from('order_products').select('*')
-  if (storeId) {
-    mpQ.eq('store_id', storeId)
-    ordQ.eq('store_id', storeId)
-    opQ.eq('store_id', storeId)
+  const requestedYears = parseCsvSelection(years)
+  const requestedMonths = parseCsvSelection(months)
+
+  const uploadPeriodsQ = supabase
+    .from('upload_batches')
+    .select('file_type,period_start,period_end')
+    .in('file_type', ['ads', 'ads_product'])
+
+  if (storeId) uploadPeriodsQ.eq('store_id', storeId)
+
+  const { data: uploadPeriods } = await uploadPeriodsQ
+  const typedUploadPeriods = (uploadPeriods ?? []) as UploadPeriodRow[]
+  const availablePeriods = buildAvailablePeriods(
+    typedUploadPeriods.map((row) => ({
+      period_start: row.period_start,
+      period_end: row.period_end,
+    }))
+  )
+  const hasAnyAdsData = typedUploadPeriods.length > 0
+
+  const { selectedPeriods, hasFilter } = sanitizeSelection(
+    availablePeriods,
+    requestedYears,
+    requestedMonths
+  )
+
+  async function fetchOrderProducts(orderNumbers: string[]): Promise<DbOrderProduct[]> {
+    const uniqueOrderNumbers = Array.from(new Set(orderNumbers))
+    if (uniqueOrderNumbers.length === 0) return []
+
+    const rows: DbOrderProduct[] = []
+    const chunkSize = 500
+    for (let index = 0; index < uniqueOrderNumbers.length; index += chunkSize) {
+      const chunk = uniqueOrderNumbers.slice(index, index + chunkSize)
+      const query = supabase.from('order_products').select(ORDER_PRODUCT_SELECT)
+      if (storeId) query.eq('store_id', storeId)
+      const { data } = await query.in('order_number', chunk)
+      rows.push(...((data ?? []) as unknown as DbOrderProduct[]))
+    }
+    return rows
   }
 
-  // Fetch batch IDs for each ads type separately
-  const [{ data: summaryBatchData }, { data: productBatchData }] = await Promise.all([
-    storeId
-      ? supabase.from('upload_batches').select('id').eq('file_type', 'ads').eq('store_id', storeId)
-      : supabase.from('upload_batches').select('id').eq('file_type', 'ads'),
-    storeId
-      ? supabase.from('upload_batches').select('id').eq('file_type', 'ads_product').eq('store_id', storeId)
-      : supabase.from('upload_batches').select('id').eq('file_type', 'ads_product'),
-  ])
+  const masterProductsQ = supabase.from('master_products').select(MASTER_PRODUCT_SELECT)
+  if (storeId) masterProductsQ.eq('store_id', storeId)
+  const { data: masterProducts } = await masterProductsQ
+  const typedProducts = (masterProducts ?? []) as unknown as MasterProduct[]
 
-  const summaryBatchIds = (summaryBatchData ?? []).map((b) => b.id)
-  const productBatchIds = (productBatchData ?? []).map((b) => b.id)
+  let typedAds: DbAdsRow[] = []
+  let typedAdsProduct: DbAdsRow[] = []
+  let typedOrders: DbOrder[] = []
+  let typedOrderProducts: DbOrderProduct[] = []
 
-  // Build separate queries for summary and product ads data
-  const summaryQ = supabase.from('ads_data').select('*').order('ad_spend', { ascending: false })
-  const productQ = supabase.from('ads_data').select('*').order('ad_spend', { ascending: false })
+  const adsFilter = hasFilter ? buildPeriodOrFilter('report_period_start', selectedPeriods) : null
+  const orderFilter = hasFilter ? buildPeriodOrFilter('order_date', selectedPeriods) : null
+  const canFetchCurrent = !hasFilter || selectedPeriods.length > 0
 
-  if (summaryBatchIds.length > 0) {
-    summaryQ.in('upload_batch_id', summaryBatchIds)
+  if (canFetchCurrent) {
+    const summaryQ = supabase
+      .from('ads_data')
+      .select(ADS_SELECT)
+      .not('ad_name', 'is', null)
+      .order('ad_spend', { ascending: false })
+
+    const productQ = supabase
+      .from('ads_data')
+      .select(ADS_SELECT)
+      .is('ad_name', null)
+      .order('ad_spend', { ascending: false })
+
+    const ordersQ = supabase.from('orders').select(ORDER_SELECT)
+
+    if (storeId) {
+      summaryQ.eq('store_id', storeId)
+      productQ.eq('store_id', storeId)
+      ordersQ.eq('store_id', storeId)
+    }
+
+    if (adsFilter) {
+      summaryQ.or(adsFilter)
+      productQ.or(adsFilter)
+    }
+    if (orderFilter) ordersQ.or(orderFilter)
+
+    const [
+      { data: adsData },
+      { data: adsProductData },
+      { data: orders },
+    ] = await Promise.all([summaryQ, productQ, ordersQ])
+
+    typedAds = (adsData ?? []) as unknown as DbAdsRow[]
+    typedAdsProduct = (adsProductData ?? []) as unknown as DbAdsRow[]
+    typedOrders = (orders ?? []) as unknown as DbOrder[]
+  }
+
+  if (hasFilter) {
+    typedOrderProducts = await fetchOrderProducts(typedOrders.map((order) => order.order_number))
   } else {
-    summaryQ.eq('upload_batch_id', 'no-match') // return empty
+    const orderProductsQ = supabase.from('order_products').select(ORDER_PRODUCT_SELECT)
+    if (storeId) orderProductsQ.eq('store_id', storeId)
+    const { data: orderProducts } = await orderProductsQ
+    typedOrderProducts = (orderProducts ?? []) as unknown as DbOrderProduct[]
   }
 
-  if (productBatchIds.length > 0) {
-    productQ.in('upload_batch_id', productBatchIds)
-  } else {
-    productQ.eq('upload_batch_id', 'no-match') // return empty
-  }
-
-  const [
-    { data: adsData },
-    { data: adsProductData },
-    { data: masterProducts },
-    { data: orders },
-    { data: orderProducts },
-  ] = await Promise.all([summaryQ, productQ, mpQ, ordQ, opQ])
-
-  const typedAds = (adsData ?? []) as DbAdsRow[]
-  const typedAdsProduct = (adsProductData ?? []) as DbAdsRow[]
-  const typedProducts = (masterProducts ?? []) as MasterProduct[]
-  const typedOrders = (orders ?? []) as DbOrder[]
-  const typedOrderProducts = (orderProducts ?? []) as DbOrderProduct[]
-
-  // Filter out aggregate row for display count
-  const productAds = typedAds.filter((r) => r.product_code !== '-')
-
-  if (productAds.length === 0 && typedAdsProduct.filter((r) => r.product_code !== '-').length === 0) {
+  if (!hasAnyAdsData) {
     return (
       <div className="p-4 sm:p-6 flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
         <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center">
@@ -100,6 +249,7 @@ export default async function AdsPage({
       masterProducts={typedProducts}
       orders={typedOrders}
       orderProducts={typedOrderProducts}
+      availablePeriods={availablePeriods}
       hasIncomeData={hasIncomeData}
     />
   )

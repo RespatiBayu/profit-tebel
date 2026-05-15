@@ -1,41 +1,58 @@
 'use client'
 
 import { useMemo } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Calendar } from 'lucide-react'
 import { MultiSelect } from '@/components/ui/multi-select'
+import { parseCsvSelection } from '@/lib/period-filter'
 import { usePeriodStore } from '@/lib/stores/period-store'
 
-/**
- * Global period filter di header dashboard. Selevel sama StoreSwitcher.
- * Dropdown options di-derive dari `availableYears` + `availableMonthsByYear`
- * yang di-publish oleh halaman aktif (lihat usePublishAvailablePeriods).
- *
- * Kalau halaman aktif belum publish (misal /dashboard/upload, /master), filter
- * disembunyikan supaya nggak misleading.
- */
 export function PeriodSwitcher() {
-  const selectedYears = usePeriodStore((s) => s.selectedYears)
-  const selectedMonths = usePeriodStore((s) => s.selectedMonths)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const availableYears = usePeriodStore((s) => s.availableYears)
   const availableMonthsByYear = usePeriodStore((s) => s.availableMonthsByYear)
-  const setSelectedYears = usePeriodStore((s) => s.setSelectedYears)
-  const setSelectedMonths = usePeriodStore((s) => s.setSelectedMonths)
 
-  // Months yang muncul di dropdown — kalau ada year terpilih, intersect ke
-  // bulan yg ada di tahun tersebut. Selain itu union semua bulan available.
+  const selectedYears = useMemo(
+    () =>
+      parseCsvSelection(searchParams.get('years') ?? undefined).filter((year) =>
+        availableYears.includes(year)
+      ),
+    [searchParams, availableYears]
+  )
+
   const availableMonths = useMemo(() => {
     const relevantYears = selectedYears.length > 0 ? selectedYears : availableYears
     const set = new Set<string>()
-    for (const y of relevantYears) {
-      for (const m of availableMonthsByYear[y] ?? []) set.add(m)
+    for (const year of relevantYears) {
+      for (const month of availableMonthsByYear[year] ?? []) set.add(month)
     }
     return Array.from(set).sort()
   }, [selectedYears, availableYears, availableMonthsByYear])
 
+  const selectedMonths = useMemo(
+    () => parseCsvSelection(searchParams.get('months') ?? undefined),
+    [searchParams]
+  )
+
   const effectiveMonths = useMemo(
-    () => selectedMonths.filter((m) => availableMonths.includes(m)),
+    () => selectedMonths.filter((month) => availableMonths.includes(month)),
     [selectedMonths, availableMonths]
   )
+
+  function updateSelection(nextYears: string[], nextMonths: string[]) {
+    const params = new URLSearchParams(searchParams.toString())
+
+    if (nextYears.length > 0) params.set('years', nextYears.join(','))
+    else params.delete('years')
+
+    if (nextMonths.length > 0) params.set('months', nextMonths.join(','))
+    else params.delete('months')
+
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname)
+  }
 
   if (availableYears.length === 0) return null
 
@@ -46,22 +63,30 @@ export function PeriodSwitcher() {
         className="w-28 sm:w-32"
         allLabel="Semua Tahun"
         placeholder="Tahun"
-        options={availableYears.map((y) => ({ value: y, label: y }))}
+        options={availableYears.map((year) => ({ value: year, label: year }))}
         selected={selectedYears}
-        onChange={setSelectedYears}
+        onChange={(years) => {
+          const relevantYears = years.length > 0 ? years : availableYears
+          const allowedMonths = new Set<string>()
+          for (const year of relevantYears) {
+            for (const month of availableMonthsByYear[year] ?? []) allowedMonths.add(month)
+          }
+          const nextMonths = effectiveMonths.filter((month) => allowedMonths.has(month))
+          updateSelection(years, nextMonths)
+        }}
       />
       <MultiSelect
         className="w-32 sm:w-36"
         allLabel="Semua Bulan"
         placeholder="Bulan"
-        options={availableMonths.map((m) => ({
-          value: m,
-          label: new Date(2000, parseInt(m, 10) - 1, 1).toLocaleDateString('id-ID', {
+        options={availableMonths.map((month) => ({
+          value: month,
+          label: new Date(2000, parseInt(month, 10) - 1, 1).toLocaleDateString('id-ID', {
             month: 'long',
           }),
         }))}
         selected={effectiveMonths}
-        onChange={setSelectedMonths}
+        onChange={(months) => updateSelection(selectedYears, months)}
       />
     </div>
   )

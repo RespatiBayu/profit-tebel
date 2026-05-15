@@ -78,7 +78,15 @@ import {
   TopBuyersSection,
   DailyDetailSection,
 } from '@/components/profit/dashboard-sections'
-import type { DbOrder, DbOrderProduct, DbAdsRow, MasterProduct, ProductProfitRow, DbOrderAll } from '@/types'
+import type {
+  AvailablePeriods,
+  DbOrder,
+  DbOrderProduct,
+  DbAdsRow,
+  MasterProduct,
+  ProductProfitRow,
+  DbOrderAll,
+} from '@/types'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -408,19 +416,45 @@ function CurrencyTooltip({ active, payload, label }: { active?: boolean; payload
 
 interface Props {
   orders: DbOrder[]
+  prevOrders?: DbOrder[]
   orderProducts: DbOrderProduct[]
   masterProducts: MasterProduct[]
   adsData: DbAdsRow[]
+  prevAdsData?: DbAdsRow[]
   ordersAll: DbOrderAll[]
+  hppOrdersAll?: DbOrderAll[]
+  availablePeriods: AvailablePeriods
+  comparisonLabel?: string | null
+  useServerComparison?: boolean
   noHppCount: number
 }
 
-export default function ProfitDashboard({ orders, orderProducts, masterProducts, adsData, ordersAll, noHppCount }: Props) {
+export default function ProfitDashboard({
+  orders,
+  prevOrders = [],
+  orderProducts,
+  masterProducts,
+  adsData,
+  prevAdsData = [],
+  ordersAll,
+  hppOrdersAll,
+  availablePeriods,
+  comparisonLabel,
+  useServerComparison = false,
+  noHppCount,
+}: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
-  // Period filter — sumber dari global Zustand store (shared dgn Detail Iklan)
-  const selectedYears = usePeriodStore((s) => s.selectedYears)
-  const selectedMonths = usePeriodStore((s) => s.selectedMonths)
   const setAvailable = usePeriodStore((s) => s.setAvailable)
+  const clearAvailable = usePeriodStore((s) => s.clearAvailable)
+
+  useEffect(() => {
+    setAvailable(availablePeriods.years, availablePeriods.monthsByYear)
+    return () => clearAvailable()
+  }, [availablePeriods, clearAvailable, setAvailable])
+
+  const filteredOrders = orders
+  const filteredAdsData = adsData
+  const filteredOrdersAll = ordersAll
 
   // Build lookup maps
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
@@ -432,85 +466,13 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   // quantity-accurate HPP (orders_all covers both pending and selesai orders).
   const ordersAllHppMap = useMemo(() => {
     const m = new Map<string, number>()
-    for (const oa of ordersAll) {
+    for (const oa of hppOrdersAll ?? ordersAll) {
       if (oa.estimated_hpp != null && oa.estimated_hpp > 0) {
         m.set(oa.order_number, oa.estimated_hpp)
       }
     }
     return m
-  }, [ordersAll])
-
-  // Build year→months map dari orders + adsData (gabungan source)
-  const yearMonthMap = useMemo(() => {
-    const map = new Map<string, Set<string>>()
-    const collect = (date: string | null | undefined) => {
-      if (!date) return
-      const y = date.slice(0, 4)
-      const m = date.slice(5, 7)
-      const ms = map.get(y) ?? new Set<string>()
-      ms.add(m)
-      map.set(y, ms)
-    }
-    // Pakai order_date (Tanggal Pesanan Dibuat) sebagai sumber utama untuk konsistensi
-    for (const o of orders) collect(o.order_date)
-    for (const a of adsData) collect(a.report_period_start ?? a.report_period_end)
-    return map
-  }, [orders, adsData])
-
-  // Publish available periods ke global store supaya header PeriodSwitcher tau
-  useEffect(() => {
-    const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a))
-    const byYear: Record<string, string[]> = {}
-    for (const [y, ms] of Array.from(yearMonthMap.entries())) {
-      byYear[y] = Array.from(ms).sort()
-    }
-    setAvailable(years, byYear)
-  }, [yearMonthMap, setAvailable])
-
-  const availableMonthsForYear = useMemo(() => {
-    const years = Array.from(yearMonthMap.keys())
-    const relevantYears = selectedYears.length > 0 ? selectedYears : years
-    const allMonths = new Set<string>()
-    for (const y of relevantYears) {
-      const ms = yearMonthMap.get(y)
-      if (ms) for (const m of Array.from(ms)) allMonths.add(m)
-    }
-    return Array.from(allMonths).sort()
-  }, [yearMonthMap, selectedYears])
-
-  // Drop selected months that aren't valid anymore setelah tahun berubah
-  const effectiveMonths = useMemo(
-    () => selectedMonths.filter((m) => availableMonthsForYear.includes(m)),
-    [selectedMonths, availableMonthsForYear]
-  )
-
-  /** Test ISO (YYYY-MM-DD) apakah lulus filter slicer saat ini. */
-  const matchesPeriod = (iso: string | null | undefined): boolean => {
-    if (!iso) return selectedYears.length === 0 && effectiveMonths.length === 0
-    const y = iso.slice(0, 4)
-    const m = iso.slice(5, 7)
-    if (selectedYears.length > 0 && !selectedYears.includes(y)) return false
-    if (effectiveMonths.length > 0 && !effectiveMonths.includes(m)) return false
-    return true
-  }
-
-  // Filter orders sesuai slicer.
-  // Pakai order_date (Tanggal Pesanan Dibuat) sebagai sumber periode utama
-  const filteredOrders = useMemo(() => {
-    if (selectedYears.length === 0 && effectiveMonths.length === 0) return orders
-    return orders.filter((o) => matchesPeriod(o.order_date))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, selectedYears, effectiveMonths])
-
-  // Filter ads data — pakai YYYY-MM dari report_period_start sebagai bucket
-  const filteredAdsData = useMemo(() => {
-    if (selectedYears.length === 0 && effectiveMonths.length === 0) return adsData
-    return adsData.filter((ad) => {
-      const ref = ad.report_period_start ?? ad.report_period_end
-      return matchesPeriod(ref)
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adsData, selectedYears, effectiveMonths])
+  }, [hppOrdersAll, ordersAll])
 
   // Calculate all metrics
   const kpis = useMemo(
@@ -526,6 +488,13 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   // --- Previous period: geser semua bulan yang aktif mundur 1 bulan ---
   // Pakai order_date sebagai bucket biar konsisten dgn filter utama.
   const prevWindow = useMemo(() => {
+    if (useServerComparison) {
+      return {
+        orders: prevOrders,
+        ads: prevAdsData,
+        months: [] as string[],
+      }
+    }
     const currentMonths = new Set<string>()
     for (const o of filteredOrders) {
       const ref = o.order_date
@@ -540,7 +509,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
       ads: adsData.filter((a) => inPrev(a.report_period_start ?? a.report_period_end)),
       months: Array.from(prevMonths).sort(),
     }
-  }, [filteredOrders, orders, adsData])
+  }, [useServerComparison, prevOrders, prevAdsData, filteredOrders, orders, adsData])
 
   const prevKpis = useMemo(
     () => calculateKpis(prevWindow.orders, orderProductMap, hppMap, prevWindow.ads, ordersAllHppMap),
@@ -556,6 +525,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     return m
   }, [prevDeductions])
   const prevPeriodLabel = useMemo(() => {
+    if (useServerComparison) return comparisonLabel ?? null
     if (prevWindow.months.length === 0) return null
     const fmt = (ym: string) => {
       const [y, m] = ym.split('-')
@@ -566,7 +536,7 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
     }
     if (prevWindow.months.length === 1) return fmt(prevWindow.months[0])
     return `${fmt(prevWindow.months[0])} – ${fmt(prevWindow.months[prevWindow.months.length - 1])}`
-  }, [prevWindow])
+  }, [useServerComparison, comparisonLabel, prevWindow])
   const trendData = useMemo(
     () => calculateTrend(filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData, ordersAllHppMap),
     [filteredOrders, trendGroup, orderProductMap, hppMap, filteredAdsData, ordersAllHppMap]
@@ -619,14 +589,6 @@ export default function ProfitDashboard({ orders, orderProducts, masterProducts,
   const totalProducts = masterProducts.length
   const hppFilled = totalProducts - noHppCount
   const hppProgress = totalProducts > 0 ? Math.round((hppFilled / totalProducts) * 100) : 0
-
-  // --- Dana Pending dari orders_all ---
-  // Filter orders_all sesuai periode yang dipilih (pakai order_date)
-  const filteredOrdersAll = useMemo(() => {
-    if (selectedYears.length === 0 && effectiveMonths.length === 0) return ordersAll
-    return ordersAll.filter((o) => matchesPeriod(o.order_date))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ordersAll, selectedYears, effectiveMonths])
 
   const PENDING_STATUSES = ['Telah Dikirim', 'Sedang Dikirim', 'Perlu Dikirim', 'Belum Bayar']
 

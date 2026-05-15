@@ -42,7 +42,14 @@ import {
   calculateProductProfit,
 } from '@/lib/calculations/profit'
 import { ROAS_THRESHOLDS } from '@/lib/constants/marketplace-fees'
-import type { DbAdsRow, DbOrder, DbOrderProduct, MasterProduct, TrafficLightRow } from '@/types'
+import type {
+  AvailablePeriods,
+  DbAdsRow,
+  DbOrder,
+  DbOrderProduct,
+  MasterProduct,
+  TrafficLightRow,
+} from '@/types'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -725,73 +732,29 @@ interface Props {
   masterProducts: MasterProduct[]
   orders: DbOrder[]
   orderProducts: DbOrderProduct[]
+  availablePeriods: AvailablePeriods
   hasIncomeData: boolean
 }
 
-export default function AdsDashboard({ adsData, adsProductData, masterProducts, orders, orderProducts, hasIncomeData }: Props) {
-  // Period filter — sumber dari global Zustand store (shared dgn Dashboard Analisis)
-  const selectedYears = usePeriodStore((s) => s.selectedYears)
-  const selectedMonths = usePeriodStore((s) => s.selectedMonths)
+export default function AdsDashboard({
+  adsData,
+  adsProductData,
+  masterProducts,
+  orders,
+  orderProducts,
+  availablePeriods,
+  hasIncomeData,
+}: Props) {
   const setAvailable = usePeriodStore((s) => s.setAvailable)
+  const clearAvailable = usePeriodStore((s) => s.clearAvailable)
 
-  // Build year→months map dari ads data + adsProductData (Format 1 + Format 2)
-  const yearMonthMap = useMemo(() => {
-    const map = new Map<string, Set<string>>()
-    const collect = (date: string | null | undefined) => {
-      if (!date) return
-      const y = date.slice(0, 4)
-      const m = date.slice(5, 7)
-      const ms = map.get(y) ?? new Set<string>()
-      ms.add(m)
-      map.set(y, ms)
-    }
-    for (const ad of adsData) collect(ad.report_period_start ?? ad.report_period_end)
-    for (const ad of adsProductData) collect(ad.report_period_start ?? ad.report_period_end)
-    return map
-  }, [adsData, adsProductData])
-
-  // Publish available periods ke global store supaya header PeriodSwitcher tau
   useEffect(() => {
-    const years = Array.from(yearMonthMap.keys()).sort((a, b) => b.localeCompare(a))
-    const byYear: Record<string, string[]> = {}
-    for (const [y, ms] of Array.from(yearMonthMap.entries())) {
-      byYear[y] = Array.from(ms).sort()
-    }
-    setAvailable(years, byYear)
-  }, [yearMonthMap, setAvailable])
+    setAvailable(availablePeriods.years, availablePeriods.monthsByYear)
+    return () => clearAvailable()
+  }, [availablePeriods, clearAvailable, setAvailable])
 
-  // Compute effective months (intersect dgn data yg ada di tahun terpilih)
-  const availableMonthsForYear = useMemo(() => {
-    const years = Array.from(yearMonthMap.keys())
-    const relevantYears = selectedYears.length > 0 ? selectedYears : years
-    const allMonths = new Set<string>()
-    for (const y of relevantYears) {
-      const ms = yearMonthMap.get(y)
-      if (ms) for (const m of Array.from(ms)) allMonths.add(m)
-    }
-    return Array.from(allMonths).sort()
-  }, [yearMonthMap, selectedYears])
-
-  const effectiveMonths = useMemo(
-    () => selectedMonths.filter((m) => availableMonthsForYear.includes(m)),
-    [selectedMonths, availableMonthsForYear]
-  )
-
-  const matchesPeriod = (iso: string | null | undefined): boolean => {
-    if (!iso) return selectedYears.length === 0 && effectiveMonths.length === 0
-    const y = iso.slice(0, 4)
-    const m = iso.slice(5, 7)
-    if (selectedYears.length > 0 && !selectedYears.includes(y)) return false
-    if (effectiveMonths.length > 0 && !effectiveMonths.includes(m)) return false
-    return true
-  }
-
-  // Filter ads berdasarkan slicer (pakai report_period_start sebagai reference)
-  const filteredAds = useMemo(() => {
-    if (selectedYears.length === 0 && effectiveMonths.length === 0) return adsData
-    return adsData.filter((ad) => matchesPeriod(ad.report_period_start ?? ad.report_period_end))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adsData, selectedYears, effectiveMonths])
+  const filteredAds = adsData
+  const filteredAdsProduct = adsProductData
 
   // Period label — derive from all filtered ads (including aggregate rows)
   const periodLabel = useMemo(() => {
@@ -809,25 +772,11 @@ export default function AdsDashboard({ adsData, adsProductData, masterProducts, 
   const hasPerProductCampaigns = useMemo(
     () =>
       filteredAds.some((a) => a.product_code !== '-' && a.ad_spend > 0) ||
-      adsProductData.some(
-        (a) =>
-          a.product_code !== '-' &&
-          a.ad_spend > 0 &&
-          matchesPeriod(a.report_period_start)
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredAds, adsProductData, selectedYears, effectiveMonths]
+      filteredAdsProduct.some((a) => a.product_code !== '-' && a.ad_spend > 0),
+    [filteredAds, filteredAdsProduct]
   )
 
   const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts), [filteredAds, masterProducts])
-
-  // Filter Format 2 (per-produk detail) sesuai slicer — sumber HPP fallback
-  // saat Format 1 campaign product_code nggak match master langsung.
-  const filteredAdsProduct = useMemo(() => {
-    if (selectedYears.length === 0 && effectiveMonths.length === 0) return adsProductData
-    return adsProductData.filter((ad) => matchesPeriod(ad.report_period_start ?? ad.report_period_end))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adsProductData, selectedYears, effectiveMonths])
 
   const trafficLightRows = useMemo(
     () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct),
