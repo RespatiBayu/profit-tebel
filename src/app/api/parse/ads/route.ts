@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
 import type { UploadSummary } from '@/types'
@@ -109,9 +109,8 @@ export async function POST(request: NextRequest) {
       r.cost_per_direct_conversion = r.direct_conversions > 0 ? r.ad_spend / r.direct_conversions : 0
     }
 
-    // Ensure profile row exists (safety net — use service client to bypass RLS)
-    const serviceClient = await createServiceClient()
-    const { error: profileError } = await serviceClient.from('profiles').upsert(
+    // Ensure profile row exists as a best-effort safety net.
+    const { error: profileError } = await supabase.from('profiles').upsert(
       { id: user.id, email: user.email, is_paid: false },
       { onConflict: 'id', ignoreDuplicates: true }
     )

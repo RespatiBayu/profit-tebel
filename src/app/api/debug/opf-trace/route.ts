@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { isAdminEmail } from '@/lib/admin'
+import { createClient } from '@/lib/supabase/server'
 import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
 import * as XLSX from 'xlsx'
 
@@ -24,6 +25,9 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const formData = await request.formData()
   const file = formData.get('file') as File | null
@@ -117,8 +121,7 @@ export async function POST(request: NextRequest) {
   const distinctOrderNumbersInOpf = new Set(parsedRows.map((r) => r.order_number))
 
   // ---- Compare to income orders in DB ----
-  const serviceClient = await createServiceClient()
-  const ordersQ = serviceClient
+  const ordersQ = supabase
     .from('orders')
     .select('order_number,order_date')
     .eq('user_id', user.id)
@@ -139,7 +142,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ---- Resolve OPF rows against current master_products ----
-  const mpQ = serviceClient
+  const mpQ = supabase
     .from('master_products')
     .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
     .eq('user_id', user.id)

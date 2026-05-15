@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
 
 // ---------------------------------------------------------------------------
@@ -47,11 +47,10 @@ export async function PATCH(
     // Recalculate estimated_hpp for ALL user orders (income + orders_all).
     // -----------------------------------------------------------------------
     try {
-      const serviceClient = await createServiceClient()
       const storeId = product.store_id as string | null
 
       // 1. Build MasterResolver from ALL master_products for this user
-      const { data: masterRows } = await serviceClient
+      const { data: masterRows } = await supabase
         .from('master_products')
         .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
         .eq('user_id', user.id)
@@ -62,7 +61,7 @@ export async function PATCH(
 
       // 2. Recalculate orders_all.estimated_hpp from products_json (SKU + qty)
       {
-        const oaQuery = serviceClient
+        const oaQuery = supabase
           .from('orders_all')
           .select('id,products_json')
           .eq('user_id', user.id)
@@ -83,7 +82,7 @@ export async function PATCH(
                 estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
               }
             }
-            await serviceClient
+            await supabase
               .from('orders_all')
               .update({ estimated_hpp: estimatedHpp })
               .eq('id', row.id)
@@ -94,7 +93,7 @@ export async function PATCH(
 
       // 3. Recalculate orders.estimated_hpp using order_products (SKU + qty)
       {
-        const incomeQuery = serviceClient
+        const incomeQuery = supabase
           .from('orders')
           .select('id,order_number')
           .eq('user_id', user.id)
@@ -108,7 +107,7 @@ export async function PATCH(
           type OpRow = { order_number: string; marketplace_product_id: string; product_name: string | null; quantity: number | null }
           const opRows: OpRow[] = []
           for (let i = 0; i < incomeOrderNums.length; i += OP_CHUNK) {
-            const { data } = await serviceClient
+            const { data } = await supabase
               .from('order_products')
               .select('order_number,marketplace_product_id,product_name,quantity')
               .eq('user_id', user.id)
@@ -132,7 +131,7 @@ export async function PATCH(
                 estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
               }
             }
-            await serviceClient
+            await supabase
               .from('orders')
               .update({ estimated_hpp: estimatedHpp })
               .eq('id', order.id)

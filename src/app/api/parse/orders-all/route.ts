@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { parseShopeeOrdersAll } from '@/lib/parsers/shopee-orders-all'
 import { MasterResolver, normalizeName, type MasterRow as ResolverMasterRow } from '@/lib/master-resolver'
 import type { UploadSummary } from '@/types'
@@ -59,9 +59,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Tidak ada data pesanan ditemukan.' }, { status: 422 })
     }
 
-    // Ensure profile
-    const serviceClient = await createServiceClient()
-    await serviceClient.from('profiles').upsert(
+    // Ensure profile row exists as a best-effort safety net.
+    await supabase.from('profiles').upsert(
       { id: user.id, email: user.email, is_paid: false },
       { onConflict: 'id', ignoreDuplicates: true }
     )
@@ -173,7 +172,7 @@ export async function POST(request: NextRequest) {
     let opInserted = 0
     for (let i = 0; i < opUpsertRows.length; i += OP_CHUNK) {
       const chunk = opUpsertRows.slice(i, i + OP_CHUNK)
-      const { error } = await serviceClient
+      const { error } = await supabase
         .from('order_products')
         .upsert(chunk, {
           onConflict: 'store_id,order_number,marketplace_product_id',
@@ -204,7 +203,7 @@ export async function POST(request: NextRequest) {
     let migratedCount = 0
     let createdCount = 0
     if (skuToName.size > 0) {
-      const { data: existingMasters } = await serviceClient
+      const { data: existingMasters } = await supabase
         .from('master_products')
         .select('id,marketplace_product_id,product_name,hpp,packaging_cost,store_id')
         .eq('user_id', user.id)
@@ -234,7 +233,7 @@ export async function POST(request: NextRequest) {
         if (matched && isMatchedNumeric) {
           // Rename numeric ID → SKU. Preserve old numeric ID by writing it into
           // master.numeric_id column so future income OPF rows can still resolve.
-          const { error: renameErr } = await serviceClient
+          const { error: renameErr } = await supabase
             .from('master_products')
             .update({
               marketplace_product_id: sku,
@@ -251,7 +250,7 @@ export async function POST(request: NextRequest) {
           }
         } else if (!matched) {
           // No match by name — create new SKU-keyed master
-          const { error: createErr } = await serviceClient
+          const { error: createErr } = await supabase
             .from('master_products')
             .insert({
               user_id: user.id,
@@ -278,7 +277,7 @@ export async function POST(request: NextRequest) {
     // =======================================================================
     // STEP C: Build MasterResolver for this user (after migration so renames apply)
     // =======================================================================
-    const { data: allMasters } = await serviceClient
+    const { data: allMasters } = await supabase
       .from('master_products')
       .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
       .eq('user_id', user.id)
@@ -367,7 +366,7 @@ export async function POST(request: NextRequest) {
               estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
             }
           }
-          const { error: updErr } = await serviceClient
+          const { error: updErr } = await supabase
             .from('orders')
             .update({ estimated_hpp: estimatedHpp })
             .eq('store_id', storeId!)

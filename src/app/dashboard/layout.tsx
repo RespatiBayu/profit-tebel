@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { isAdminEmail } from '@/lib/admin'
 import { redirect } from 'next/navigation'
 import DashboardShell from '@/components/layout/dashboard-shell'
 import UpgradeGate from '@/components/layout/upgrade-gate'
@@ -22,8 +23,7 @@ export default async function DashboardLayout({
     .eq('id', user.id)
     .maybeSingle()
 
-  const adminEmails = (process.env.ADMIN_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean)
-  const isAdmin = adminEmails.includes(user.email ?? '')
+  const isAdmin = isAdminEmail(user.email)
   const isPaid = isAdmin || (profile?.is_paid ?? false)
 
   return (

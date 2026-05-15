@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { isAdminEmail } from '@/lib/admin'
+import { createClient } from '@/lib/supabase/server'
 
 /**
  * Diagnostic endpoint for HPP calculation issues.
@@ -16,12 +17,13 @@ export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { searchParams } = new URL(request.url)
   const storeFilter = searchParams.get('store')
   const orderFilter = searchParams.get('order')
-
-  const serviceClient = await createServiceClient()
 
   // --- Migration check: try to select estimated_hpp from each table ---
   const migrationCheck = {
@@ -29,7 +31,7 @@ export async function GET(request: NextRequest) {
     orders_all_estimated_hpp_exists: false,
   }
   {
-    const probe = await serviceClient
+    const probe = await supabase
       .from('orders')
       .select('estimated_hpp')
       .eq('user_id', user.id)
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
     migrationCheck.orders_estimated_hpp_exists = !probe.error
   }
   {
-    const probe = await serviceClient
+    const probe = await supabase
       .from('orders_all')
       .select('estimated_hpp')
       .eq('user_id', user.id)
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest) {
   }
 
   // --- Fetch orders ---
-  const ordersQ = serviceClient
+  const ordersQ = supabase
     .from('orders')
     .select('id,order_number,store_id,order_date,original_price,total_income' +
       (migrationCheck.orders_estimated_hpp_exists ? ',estimated_hpp' : ''))
@@ -71,7 +73,7 @@ export async function GET(request: NextRequest) {
   const orderNumbers = ordersTyped.map((o) => o.order_number)
 
   // --- Fetch order_products for those orders ---
-  const opQ = serviceClient
+  const opQ = supabase
     .from('order_products')
     .select('order_number,marketplace_product_id,product_name,store_id')
     .eq('user_id', user.id)
@@ -79,13 +81,13 @@ export async function GET(request: NextRequest) {
   const { data: opRows } = await opQ
 
   // --- Fetch ALL master_products for this user ---
-  const { data: masterRows } = await serviceClient
+  const { data: masterRows } = await supabase
     .from('master_products')
     .select('id,marketplace_product_id,product_name,hpp,packaging_cost,store_id')
     .eq('user_id', user.id)
 
   // --- Fetch orders_all for cross-reference ---
-  const oaQ = serviceClient
+  const oaQ = supabase
     .from('orders_all')
     .select('id,order_number,products_json' +
       (migrationCheck.orders_all_estimated_hpp_exists ? ',estimated_hpp' : ''))

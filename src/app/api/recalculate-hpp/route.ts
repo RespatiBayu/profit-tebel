@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { MasterResolver, normalizeName, type MasterRow } from '@/lib/master-resolver'
 
 /**
@@ -38,7 +38,6 @@ export async function POST(request: NextRequest) {
       if (!store) return NextResponse.json({ error: 'Store tidak ditemukan' }, { status: 404 })
     }
 
-    const serviceClient = await createServiceClient()
     const warnings: string[] = []
 
     // =====================================================================
@@ -48,7 +47,7 @@ export async function POST(request: NextRequest) {
     let migratedCount = 0
     {
       // Get orders_all to extract SKU → product_name mapping
-      const oaQuery = serviceClient
+      const oaQuery = supabase
         .from('orders_all')
         .select('products_json')
         .eq('user_id', user.id)
@@ -69,7 +68,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (skuToName.size > 0) {
-        const { data: existingMasters } = await serviceClient
+        const { data: existingMasters } = await supabase
           .from('master_products')
           .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
           .eq('user_id', user.id)
@@ -93,7 +92,7 @@ export async function POST(request: NextRequest) {
           const matched = byName.get(normName)
           if (matched && /^\d+$/.test(matched.marketplace_product_id)) {
             // Rename numeric ID → SKU, preserve numeric in numeric_id column
-            const { error } = await serviceClient
+            const { error } = await supabase
               .from('master_products')
               .update({
                 marketplace_product_id: sku,
@@ -117,7 +116,7 @@ export async function POST(request: NextRequest) {
     // =====================================================================
     // STEP 2: Build MasterResolver from current master_products state
     // =====================================================================
-    const { data: masterRows } = await serviceClient
+    const { data: masterRows } = await supabase
       .from('master_products')
       .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
       .eq('user_id', user.id)
@@ -141,7 +140,7 @@ export async function POST(request: NextRequest) {
     let oaUpdated = 0
     let oaWithHpp = 0
     {
-      const oaQuery = serviceClient
+      const oaQuery = supabase
         .from('orders_all')
         .select('id,products_json')
         .eq('user_id', user.id)
@@ -162,7 +161,7 @@ export async function POST(request: NextRequest) {
               estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
             }
           }
-          const { error } = await serviceClient
+          const { error } = await supabase
             .from('orders_all')
             .update({ estimated_hpp: estimatedHpp })
             .eq('id', row.id)
@@ -181,7 +180,7 @@ export async function POST(request: NextRequest) {
     let ordersWithHpp = 0
     let ordersNoMapping = 0
     {
-      const ordersQuery = serviceClient
+      const ordersQuery = supabase
         .from('orders')
         .select('id,order_number')
         .eq('user_id', user.id)
@@ -195,7 +194,7 @@ export async function POST(request: NextRequest) {
         const opRows: OpRow[] = []
         const OP_CHUNK = 200
         for (let i = 0; i < orderNums.length; i += OP_CHUNK) {
-          const { data } = await serviceClient
+          const { data } = await supabase
             .from('order_products')
             .select('order_number,marketplace_product_id,product_name,quantity')
             .eq('user_id', user.id)
@@ -216,7 +215,7 @@ export async function POST(request: NextRequest) {
         type OaProd = { marketplace_product_id: string | null; product_name?: string | null; quantity: number }
         const oaByOrderNum = new Map<string, OaProd[]>()
         for (let i = 0; i < orderNums.length; i += OP_CHUNK) {
-          const { data: oaChunk } = await serviceClient
+          const { data: oaChunk } = await supabase
             .from('orders_all')
             .select('order_number,products_json')
             .eq('user_id', user.id)
@@ -259,7 +258,7 @@ export async function POST(request: NextRequest) {
               estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
             }
           }
-          const { error } = await serviceClient
+          const { error } = await supabase
             .from('orders')
             .update({ estimated_hpp: estimatedHpp })
             .eq('id', order.id)
@@ -294,4 +293,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Server error' }, { status: 500 })
   }
 }
-

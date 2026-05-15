@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { isAdminEmail } from '@/lib/admin'
+import { createClient } from '@/lib/supabase/server'
 import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
 import * as XLSX from 'xlsx'
 
@@ -21,6 +22,9 @@ export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { searchParams } = new URL(request.url)
   const year = searchParams.get('year') ?? '2026'
@@ -32,11 +36,10 @@ export async function GET(request: NextRequest) {
   const nm = month === '12' ? '01' : String(Number(month) + 1).padStart(2, '0')
   const periodEndExclusive = `${ny}-${nm}-01`
 
-  const serviceClient = await createServiceClient()
   const PENDING_STATUSES = new Set(['Telah Dikirim', 'Sedang Dikirim', 'Perlu Dikirim', 'Belum Bayar'])
 
   // Master products + resolver
-  const mpQ = serviceClient
+  const mpQ = supabase
     .from('master_products')
     .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
     .eq('user_id', user.id)
@@ -87,7 +90,7 @@ export async function GET(request: NextRequest) {
   }
 
   // ---- orders_all in period ----
-  const oaQ = serviceClient
+  const oaQ = supabase
     .from('orders_all')
     .select('order_number,products_json,order_date,status_pesanan,total_pembayaran,seller_voucher')
     .eq('user_id', user.id)
@@ -158,7 +161,7 @@ export async function GET(request: NextRequest) {
   }
 
   // ---- income orders in period, only those NOT in orders_all to avoid double count ----
-  const ordQ = serviceClient
+  const ordQ = supabase
     .from('orders')
     .select('order_number,order_date,status,original_price,total_income,estimated_hpp')
     .eq('user_id', user.id)
@@ -183,7 +186,7 @@ export async function GET(request: NextRequest) {
     type OpRow = { order_number: string; marketplace_product_id: string; product_name: string | null; quantity: number | null }
     const opRows: OpRow[] = []
     for (let i = 0; i < incomeOrderNums.length; i += CHUNK) {
-      const opQ = serviceClient
+      const opQ = supabase
         .from('order_products')
         .select('order_number,marketplace_product_id,product_name,quantity')
         .eq('user_id', user.id)

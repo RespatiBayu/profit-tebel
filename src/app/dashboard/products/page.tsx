@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -41,6 +40,11 @@ interface EditingProduct {
   packaging_cost: string
 }
 
+interface MasterProductsResponse {
+  products: MasterProduct[]
+  error?: string
+}
+
 export default function ProductsPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -56,54 +60,52 @@ export default function ProductsPage() {
   const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
 
-  const supabase = createClient()
-
-  const fetchProducts = useCallback(async () => {
-    setLoading(true)
-    const q = supabase
-      .from('master_products')
-      .select('*')
-      .order('product_name', { ascending: true })
-    if (storeId) q.eq('store_id', storeId)
-    const { data, error } = await q
-
-    if (error) {
-      setError(error.message)
-    } else {
-      // Join with order_products and ads_data to detect sources
-      const productIds = (data ?? []).map((p) => p.marketplace_product_id)
-
-      const opQ = supabase
-        .from('order_products')
-        .select('marketplace_product_id')
-        .in('marketplace_product_id', productIds)
-      const adQ = supabase
-        .from('ads_data')
-        .select('product_code')
-        .in('product_code', productIds)
-      if (storeId) {
-        opQ.eq('store_id', storeId)
-        adQ.eq('store_id', storeId)
-      }
-      const [{ data: incomeIds }, { data: adsIds }] = await Promise.all([opQ, adQ])
-
-      const incomeSet = new Set((incomeIds ?? []).map((r) => r.marketplace_product_id))
-      const adsSet = new Set((adsIds ?? []).map((r) => r.product_code))
-
-      setProducts(
-        (data ?? []).map((p) => ({
-          ...p,
-          has_income_data: incomeSet.has(p.marketplace_product_id),
-          has_ads_data: adsSet.has(p.marketplace_product_id),
-        }))
-      )
-    }
-    setLoading(false)
-  }, [supabase, storeId])
-
   useEffect(() => {
-    fetchProducts()
-  }, [fetchProducts])
+    let active = true
+
+    async function loadProducts() {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const params = new URLSearchParams()
+        if (storeId) {
+          params.set('store', storeId)
+        }
+
+        const url = params.size > 0
+          ? `/api/master-products?${params.toString()}`
+          : '/api/master-products'
+        const response = await fetch(url, { cache: 'no-store' })
+        const json = await response.json().catch(() => null) as MasterProductsResponse | null
+
+        if (!active) return
+
+        if (!response.ok) {
+          setProducts([])
+          setError(json?.error ?? 'Gagal mengambil data produk')
+          return
+        }
+
+        setProducts(json?.products ?? [])
+      } catch (err) {
+        if (!active) return
+        const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+        setProducts([])
+        setError(`Gagal mengambil data produk: ${message}`)
+      } finally {
+        if (active) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadProducts()
+
+    return () => {
+      active = false
+    }
+  }, [storeId])
 
   function startEdit(id: string, product: MasterProduct) {
     setEditing((prev) => ({

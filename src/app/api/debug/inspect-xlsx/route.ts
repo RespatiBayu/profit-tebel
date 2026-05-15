@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAdminEmail } from '@/lib/admin'
 import { createClient } from '@/lib/supabase/server'
 import * as XLSX from 'xlsx'
 
@@ -16,6 +17,9 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const formData = await request.formData()
   const file = formData.get('file') as File | null

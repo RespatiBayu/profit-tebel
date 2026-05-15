@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { parseShopeeIncome } from '@/lib/parsers/shopee-income'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
 import { classifyIncomingRows } from '@/lib/upload/dedupe'
@@ -97,9 +97,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Ensure profile row exists (safety net — use service client to bypass RLS)
-    const serviceClient = await createServiceClient()
-    const { error: profileError } = await serviceClient.from('profiles').upsert(
+    // Ensure profile row exists as a best-effort safety net.
+    const { error: profileError } = await supabase.from('profiles').upsert(
       { id: user.id, email: user.email, is_paid: false },
       { onConflict: 'id', ignoreDuplicates: true }
     )
@@ -294,7 +293,7 @@ export async function POST(request: NextRequest) {
 
     if (opfRows.length > 0) {
       try {
-        const { data: masterRows } = await serviceClient
+        const { data: masterRows } = await supabase
           .from('master_products')
           .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
           .eq('user_id', user.id)
@@ -347,7 +346,7 @@ export async function POST(request: NextRequest) {
 
         // Apply numeric_id backfills (one update per master)
         for (const [masterId, numericId] of Array.from(numericIdUpdates.entries())) {
-          await serviceClient
+          await supabase
             .from('master_products')
             .update({ numeric_id: numericId })
             .eq('id', masterId)
@@ -381,7 +380,7 @@ export async function POST(request: NextRequest) {
         const OP_INSERT_CHUNK = 500
         for (let i = 0; i < opUpsertRows.length; i += OP_INSERT_CHUNK) {
           const chunk = opUpsertRows.slice(i, i + OP_INSERT_CHUNK)
-          const { error } = await serviceClient
+          const { error } = await supabase
             .from('order_products')
             .upsert(chunk, {
               onConflict: 'store_id,order_number,marketplace_product_id',
@@ -418,7 +417,7 @@ export async function POST(request: NextRequest) {
       const OP_CHUNK2 = 200
       for (let i = 0; i < incomeOrderNums.length; i += OP_CHUNK2) {
         const chunk = incomeOrderNums.slice(i, i + OP_CHUNK2)
-        const { data } = await serviceClient
+        const { data } = await supabase
           .from('order_products')
           .select('order_number,marketplace_product_id,product_name,quantity')
           .eq('user_id', user.id)
@@ -435,7 +434,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Build MasterResolver
-      const { data: masterRows2 } = await serviceClient
+      const { data: masterRows2 } = await supabase
         .from('master_products')
         .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
         .eq('user_id', user.id)
@@ -454,7 +453,7 @@ export async function POST(request: NextRequest) {
             estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
           }
         }
-        const { error: updErr } = await serviceClient
+        const { error: updErr } = await supabase
           .from('orders')
           .update({ estimated_hpp: estimatedHpp })
           .eq('store_id', storeId)
@@ -472,7 +471,7 @@ export async function POST(request: NextRequest) {
       const oaRows: { id: string; order_number: string; products_json: unknown }[] = []
       const OA_CHUNK = 200
       for (let i = 0; i < incomeOrderNums.length; i += OA_CHUNK) {
-        const { data } = await serviceClient
+        const { data } = await supabase
           .from('orders_all')
           .select('id,products_json,order_number')
           .eq('user_id', user.id)
@@ -494,7 +493,7 @@ export async function POST(request: NextRequest) {
               estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
             }
           }
-          await serviceClient
+          await supabase
             .from('orders_all')
             .update({ estimated_hpp: estimatedHpp })
             .eq('id', row.id)
@@ -577,4 +576,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-

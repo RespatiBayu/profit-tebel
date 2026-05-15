@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { isAdminEmail } from '@/lib/admin'
+import { createClient } from '@/lib/supabase/server'
 import { MasterResolver, normalizeName, type MasterRow } from '@/lib/master-resolver'
 
 /**
@@ -19,14 +20,15 @@ export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!isAdminEmail(user.email)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { searchParams } = new URL(request.url)
   const storeId = searchParams.get('store')
 
-  const serviceClient = await createServiceClient()
-
   // --- Master products ---
-  const mpQ = serviceClient
+  const mpQ = supabase
     .from('master_products')
     .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost,store_id')
     .eq('user_id', user.id)
@@ -55,7 +57,7 @@ export async function GET(request: NextRequest) {
   for (const c of Array.from(nameCounts.values())) if (c > 1) masterStats.duplicateNames++
 
   // --- orders_all rows ---
-  const oaQ = serviceClient
+  const oaQ = supabase
     .from('orders_all')
     .select('id,order_number,products_json,estimated_hpp,order_date')
     .eq('user_id', user.id)
@@ -150,7 +152,7 @@ export async function GET(request: NextRequest) {
   }
 
   // --- income orders + order_products ---
-  const ordQ = serviceClient
+  const ordQ = supabase
     .from('orders')
     .select('id,order_number,estimated_hpp,order_date')
     .eq('user_id', user.id)
@@ -162,7 +164,7 @@ export async function GET(request: NextRequest) {
   const opRows: OpRow[] = []
   const CHUNK = 200
   for (let i = 0; i < orderNums.length; i += CHUNK) {
-    const opQ = serviceClient
+    const opQ = supabase
       .from('order_products')
       .select('order_number,marketplace_product_id,product_name,quantity')
       .eq('user_id', user.id)
