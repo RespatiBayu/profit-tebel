@@ -43,6 +43,23 @@ async function requireAdmin() {
   return { user }
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message
+  }
+
+  return fallback
+}
+
 export async function GET() {
   const auth = await requireAdmin()
   if (auth.error) return auth.error
@@ -229,7 +246,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     await service.auth.admin.deleteUser(createdUserId)
-    const message = error instanceof Error ? error.message : 'Gagal menyimpan user baru'
+    const message = getErrorMessage(error, 'Gagal menyimpan user baru')
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
