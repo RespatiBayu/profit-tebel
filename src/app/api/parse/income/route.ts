@@ -4,6 +4,7 @@ import { parseShopeeIncome } from '@/lib/parsers/shopee-income'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
 import { classifyIncomingRows } from '@/lib/upload/dedupe'
 import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
+import { userHasStoreAccess } from '@/lib/store-access'
 import type { UploadSummary } from '@/types'
 
 // Financial fields yang mungkin direvisi Shopee antar export (settlement update,
@@ -108,13 +109,8 @@ export async function POST(request: NextRequest) {
 
     // Resolve/auto-create store
     if (storeId) {
-      const { data: storeRow } = await supabase
-        .from('stores')
-        .select('id')
-        .eq('id', storeId)
-        .eq('user_id', user.id)
-        .maybeSingle()
-      if (!storeRow) storeId = null
+      const hasAccess = await userHasStoreAccess(supabase, user.id, storeId)
+      if (!hasAccess) storeId = null
     }
     if (!storeId) {
       const { data: defaultStore } = await supabase
@@ -149,7 +145,6 @@ export async function POST(request: NextRequest) {
       const { count: oaCount } = await supabase
         .from('orders_all')
         .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
         .eq('store_id', storeId)
       if (!oaCount || oaCount === 0) {
         return NextResponse.json(
@@ -296,7 +291,7 @@ export async function POST(request: NextRequest) {
         const { data: masterRows } = await supabase
           .from('master_products')
           .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-          .eq('user_id', user.id)
+          .eq('store_id', storeId)
 
         const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])
 
@@ -420,7 +415,7 @@ export async function POST(request: NextRequest) {
         const { data } = await supabase
           .from('order_products')
           .select('order_number,marketplace_product_id,product_name,quantity')
-          .eq('user_id', user.id)
+          .eq('store_id', storeId)
           .in('order_number', chunk)
         if (data) opRows2.push(...(data as OpRow[]))
       }
@@ -437,7 +432,7 @@ export async function POST(request: NextRequest) {
       const { data: masterRows2 } = await supabase
         .from('master_products')
         .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-        .eq('user_id', user.id)
+        .eq('store_id', storeId)
       const resolver2 = new MasterResolver((masterRows2 ?? []) as MasterRow[])
 
       // Compute & update orders.estimated_hpp
@@ -474,7 +469,7 @@ export async function POST(request: NextRequest) {
         const { data } = await supabase
           .from('orders_all')
           .select('id,products_json,order_number')
-          .eq('user_id', user.id)
+          .eq('store_id', storeId)
           .in('order_number', incomeOrderNums.slice(i, i + OA_CHUNK))
         if (data) oaRows.push(...(data as typeof oaRows))
       }

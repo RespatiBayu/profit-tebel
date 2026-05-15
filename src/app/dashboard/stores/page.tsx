@@ -158,7 +158,7 @@ export default function StoresPage() {
         <div>
           <h1 className="text-2xl font-bold">Toko Saya</h1>
           <p className="text-muted-foreground mt-1">
-            Kelola beberapa toko sekaligus. Semua data upload akan dipisahkan per toko.
+            Kelola toko yang kamu miliki atau yang dibagikan ke akunmu. Semua data upload akan dipisahkan per toko.
           </p>
         </div>
         <Button onClick={openCreate} className="gap-2">
@@ -199,34 +199,43 @@ export default function StoresPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold truncate">{store.name}</p>
-                      <p className="text-xs text-muted-foreground uppercase">
-                        {store.marketplace}
-                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-muted-foreground uppercase">
+                          {store.marketplace}
+                        </p>
+                        {!store.can_manage && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            Shared Access
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => openEdit(store)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => handleDelete(store)}
-                      disabled={deletingId === store.id}
-                    >
-                      {deletingId === store.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
+                  {store.can_manage && (
+                    <div className="flex gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => openEdit(store)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => handleDelete(store)}
+                        disabled={deletingId === store.id}
+                      >
+                        {deletingId === store.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 {store.notes && (
                   <p className="text-sm text-muted-foreground border-t pt-2">
@@ -244,7 +253,7 @@ export default function StoresPage() {
         <AlertTriangle className="h-4 w-4" />
         <AlertDescription className="text-sm">
           Pakai switcher di pojok atas untuk pindah antar toko atau lihat gabungan semua
-          toko (konsolidasi).
+          toko yang bisa kamu akses.
         </AlertDescription>
       </Alert>
 

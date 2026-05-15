@@ -99,6 +99,8 @@ export interface UploadSummary {
   warnings: string[]
 }
 
+export type StoreAccessRole = 'owner' | 'member'
+
 // Store (per-user workspace for a specific shop)
 export interface Store {
   id: string
@@ -109,6 +111,8 @@ export interface Store {
   notes: string | null
   created_at: string
   updated_at: string
+  access_role?: StoreAccessRole
+  can_manage?: boolean
 }
 
 // Master product (from DB)

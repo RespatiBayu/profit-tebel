@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { MasterResolver, normalizeName, type MasterRow } from '@/lib/master-resolver'
+import { userHasStoreAccess } from '@/lib/store-access'
 
 /**
  * POST /api/recalculate-hpp
@@ -29,13 +30,8 @@ export async function POST(request: NextRequest) {
     const storeId = body.storeId?.trim() || null
 
     if (storeId) {
-      const { data: store } = await supabase
-        .from('stores')
-        .select('id')
-        .eq('id', storeId)
-        .eq('user_id', user.id)
-        .maybeSingle()
-      if (!store) return NextResponse.json({ error: 'Store tidak ditemukan' }, { status: 404 })
+      const hasAccess = await userHasStoreAccess(supabase, user.id, storeId)
+      if (!hasAccess) return NextResponse.json({ error: 'Store tidak ditemukan' }, { status: 404 })
     }
 
     const warnings: string[] = []
@@ -50,8 +46,8 @@ export async function POST(request: NextRequest) {
       const oaQuery = supabase
         .from('orders_all')
         .select('products_json')
-        .eq('user_id', user.id)
       if (storeId) oaQuery.eq('store_id', storeId)
+      else oaQuery.eq('user_id', user.id)
       const { data: oaForMap } = await oaQuery
 
       const skuToName = new Map<string, string>()
@@ -68,10 +64,12 @@ export async function POST(request: NextRequest) {
       }
 
       if (skuToName.size > 0) {
-        const { data: existingMasters } = await supabase
+        const existingMastersQuery = supabase
           .from('master_products')
           .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-          .eq('user_id', user.id)
+        if (storeId) existingMastersQuery.eq('store_id', storeId)
+        else existingMastersQuery.eq('user_id', user.id)
+        const { data: existingMasters } = await existingMastersQuery
 
         const byName = new Map<string, MasterRow>()
         const bySku = new Set<string>()
@@ -116,10 +114,12 @@ export async function POST(request: NextRequest) {
     // =====================================================================
     // STEP 2: Build MasterResolver from current master_products state
     // =====================================================================
-    const { data: masterRows } = await supabase
+    const masterRowsQuery = supabase
       .from('master_products')
       .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-      .eq('user_id', user.id)
+    if (storeId) masterRowsQuery.eq('store_id', storeId)
+    else masterRowsQuery.eq('user_id', user.id)
+    const { data: masterRows } = await masterRowsQuery
 
     const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])
 
@@ -143,8 +143,8 @@ export async function POST(request: NextRequest) {
       const oaQuery = supabase
         .from('orders_all')
         .select('id,products_json')
-        .eq('user_id', user.id)
       if (storeId) oaQuery.eq('store_id', storeId)
+      else oaQuery.eq('user_id', user.id)
       const { data: oaRows } = await oaQuery
 
       if (oaRows && oaRows.length > 0) {
@@ -183,8 +183,8 @@ export async function POST(request: NextRequest) {
       const ordersQuery = supabase
         .from('orders')
         .select('id,order_number')
-        .eq('user_id', user.id)
       if (storeId) ordersQuery.eq('store_id', storeId)
+      else ordersQuery.eq('user_id', user.id)
       const { data: incomeOrders } = await ordersQuery
 
       if (incomeOrders && incomeOrders.length > 0) {
@@ -194,11 +194,13 @@ export async function POST(request: NextRequest) {
         const opRows: OpRow[] = []
         const OP_CHUNK = 200
         for (let i = 0; i < orderNums.length; i += OP_CHUNK) {
-          const { data } = await supabase
+          const opQuery = supabase
             .from('order_products')
             .select('order_number,marketplace_product_id,product_name,quantity')
-            .eq('user_id', user.id)
             .in('order_number', orderNums.slice(i, i + OP_CHUNK))
+          if (storeId) opQuery.eq('store_id', storeId)
+          else opQuery.eq('user_id', user.id)
+          const { data } = await opQuery
           if (data) opRows.push(...(data as OpRow[]))
         }
 
@@ -215,11 +217,13 @@ export async function POST(request: NextRequest) {
         type OaProd = { marketplace_product_id: string | null; product_name?: string | null; quantity: number }
         const oaByOrderNum = new Map<string, OaProd[]>()
         for (let i = 0; i < orderNums.length; i += OP_CHUNK) {
-          const { data: oaChunk } = await supabase
+          const oaQuery = supabase
             .from('orders_all')
             .select('order_number,products_json')
-            .eq('user_id', user.id)
             .in('order_number', orderNums.slice(i, i + OP_CHUNK))
+          if (storeId) oaQuery.eq('store_id', storeId)
+          else oaQuery.eq('user_id', user.id)
+          const { data: oaChunk } = await oaQuery
           if (oaChunk) {
             for (const r of oaChunk as { order_number: string; products_json: unknown }[]) {
               oaByOrderNum.set(r.order_number, (r.products_json ?? []) as OaProd[])

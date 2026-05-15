@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { userHasStoreAccess } from '@/lib/store-access'
 
 type ResetType = 'income' | 'orders_all' | 'ads_summary' | 'ads_product'
 
@@ -16,8 +17,8 @@ const LABELS: Record<ResetType, string> = {
  * POST /api/reset-data
  * Body: { types: ResetType[], confirmation: string, storeId?: string }
  *
- * Deletes the user's data for the selected types. RLS ensures users can only
- * delete their own data; we also pass eq(user_id) defensively.
+ * Deletes data for the selected types. When `storeId` is provided, the reset is
+ * store-scoped so shared-store collaborators can operate on the same dataset.
  *
  * The `confirmation` must be literally "delete" (case-insensitive) to proceed
  * — protects against accidental fat-finger clicks.
@@ -48,15 +49,10 @@ export async function POST(request: NextRequest) {
 
     const storeId = body.storeId?.trim() || null
 
-    // Verify store ownership if storeId provided
+    // Verify store access if storeId provided
     if (storeId) {
-      const { data: store } = await supabase
-        .from('stores')
-        .select('id')
-        .eq('id', storeId)
-        .eq('user_id', user.id)
-        .maybeSingle()
-      if (!store) {
+      const hasAccess = await userHasStoreAccess(supabase, user.id, storeId)
+      if (!hasAccess) {
         return NextResponse.json({ error: 'Store tidak ditemukan' }, { status: 404 })
       }
     }
@@ -69,35 +65,40 @@ export async function POST(request: NextRequest) {
 
         if (type === 'income') {
           // Delete orders (income) — order_products keep (those came from Order.all)
-          const q = supabase.from('orders').delete({ count: 'exact' }).eq('user_id', user.id)
+          const q = supabase.from('orders').delete({ count: 'exact' })
           if (storeId) q.eq('store_id', storeId)
+          else q.eq('user_id', user.id)
           const { count, error } = await q
           if (error) throw error
           deleted = count ?? 0
         } else if (type === 'orders_all') {
           // Delete orders_all AND order_products (both come from Order.all)
-          const oaQ = supabase.from('orders_all').delete({ count: 'exact' }).eq('user_id', user.id)
+          const oaQ = supabase.from('orders_all').delete({ count: 'exact' })
           if (storeId) oaQ.eq('store_id', storeId)
+          else oaQ.eq('user_id', user.id)
           const { count: oaCount, error: oaErr } = await oaQ
           if (oaErr) throw oaErr
 
-          const opQ = supabase.from('order_products').delete({ count: 'exact' }).eq('user_id', user.id)
+          const opQ = supabase.from('order_products').delete({ count: 'exact' })
           if (storeId) opQ.eq('store_id', storeId)
+          else opQ.eq('user_id', user.id)
           const { error: opErr } = await opQ
           if (opErr) throw opErr
 
           deleted = oaCount ?? 0
         } else if (type === 'ads_summary') {
           // Format 1: ad_name IS NOT NULL (Summary per Iklan)
-          const q = supabase.from('ads_data').delete({ count: 'exact' }).eq('user_id', user.id).not('ad_name', 'is', null)
+          const q = supabase.from('ads_data').delete({ count: 'exact' }).not('ad_name', 'is', null)
           if (storeId) q.eq('store_id', storeId)
+          else q.eq('user_id', user.id)
           const { count, error } = await q
           if (error) throw error
           deleted = count ?? 0
         } else if (type === 'ads_product') {
           // Format 2: ad_name IS NULL (per-produk breakdown of GMV Max Auto)
-          const q = supabase.from('ads_data').delete({ count: 'exact' }).eq('user_id', user.id).is('ad_name', null)
+          const q = supabase.from('ads_data').delete({ count: 'exact' }).is('ad_name', null)
           if (storeId) q.eq('store_id', storeId)
+          else q.eq('user_id', user.id)
           const { count, error } = await q
           if (error) throw error
           deleted = count ?? 0

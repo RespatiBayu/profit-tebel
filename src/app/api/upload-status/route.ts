@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { userHasStoreAccess } from '@/lib/store-access'
 
 /**
  * GET /api/upload-status?store=<id>
@@ -21,18 +22,21 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const storeId = searchParams.get('store')
 
-  const oaQ = supabase
-    .from('orders_all')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', user.id)
+  if (storeId) {
+    const hasAccess = await userHasStoreAccess(supabase, user.id, storeId)
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Store tidak ditemukan' }, { status: 404 })
+    }
+  }
+
+  const oaQ = supabase.from('orders_all').select('id', { count: 'exact', head: true })
   if (storeId) oaQ.eq('store_id', storeId)
+  else oaQ.eq('user_id', user.id)
   const { count: ordersAllCount } = await oaQ
 
-  const mpQ = supabase
-    .from('master_products')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', user.id)
+  const mpQ = supabase.from('master_products').select('id', { count: 'exact', head: true })
   if (storeId) mpQ.eq('store_id', storeId)
+  else mpQ.eq('user_id', user.id)
   const { count: masterCount } = await mpQ
 
   return NextResponse.json({

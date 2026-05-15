@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
+import { userHasStoreAccess } from '@/lib/store-access'
 import type { UploadSummary } from '@/types'
 
 export async function POST(request: NextRequest) {
@@ -120,13 +121,8 @@ export async function POST(request: NextRequest) {
 
     // Resolve/auto-create store
     if (storeId) {
-      const { data: storeRow } = await supabase
-        .from('stores')
-        .select('id')
-        .eq('id', storeId)
-        .eq('user_id', user.id)
-        .maybeSingle()
-      if (!storeRow) storeId = null
+      const hasAccess = await userHasStoreAccess(supabase, user.id, storeId)
+      if (!hasAccess) storeId = null
     }
     if (!storeId) {
       const { data: defaultStore } = await supabase

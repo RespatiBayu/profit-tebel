@@ -27,11 +27,12 @@ import {
   LogOut,
   ChevronRight,
   Store,
+  ShieldCheck,
 } from 'lucide-react'
 import { StoreSwitcher } from './store-switcher'
 import { PeriodSwitcher } from './period-switcher'
 
-const navItems = [
+const baseNavItems = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true },
   { href: '/dashboard/profit', label: 'Dashboard Analisis', icon: TrendingUp },
   { href: '/dashboard/ads', label: 'Detail Iklan', icon: BarChart3 },
@@ -41,11 +42,17 @@ const navItems = [
   { href: '/dashboard/upload', label: 'Upload Data', icon: Upload },
 ]
 
+function getNavItems(isAdmin: boolean) {
+  return isAdmin
+    ? [...baseNavItems, { href: '/dashboard/admin/users', label: 'Admin User', icon: ShieldCheck }]
+    : baseNavItems
+}
+
 function NavLink({
   item,
   onClick,
 }: {
-  item: (typeof navItems)[0]
+  item: ReturnType<typeof getNavItems>[number]
   onClick?: () => void
 }) {
   const pathname = usePathname()
@@ -70,7 +77,15 @@ function NavLink({
   )
 }
 
-function Sidebar({ onClose }: { onClose?: () => void }) {
+function Sidebar({
+  isAdmin,
+  onClose,
+}: {
+  isAdmin: boolean
+  onClose?: () => void
+}) {
+  const navItems = getNavItems(isAdmin)
+
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}
@@ -97,9 +112,11 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
 export default function DashboardShell({
   children,
   user,
+  isAdmin,
 }: {
   children: React.ReactNode
   user: User
+  isAdmin: boolean
 }) {
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -121,13 +138,13 @@ export default function DashboardShell({
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-60 border-r shrink-0 bg-card">
-        <Sidebar />
+        <Sidebar isAdmin={isAdmin} />
       </aside>
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="p-0 w-60">
-          <Sidebar onClose={() => setMobileOpen(false)} />
+          <Sidebar isAdmin={isAdmin} onClose={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>
 
@@ -183,14 +200,15 @@ export default function DashboardShell({
         </main>
 
         {/* Mobile Bottom Nav */}
-        <MobileBottomNav />
+        <MobileBottomNav isAdmin={isAdmin} />
       </div>
     </div>
   )
 }
 
-function MobileBottomNav() {
+function MobileBottomNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
+  const navItems = getNavItems(isAdmin)
   return (
     <nav className="lg:hidden border-t bg-card flex items-center justify-around h-16 shrink-0">
       {navItems.slice(0, 5).map((item) => {

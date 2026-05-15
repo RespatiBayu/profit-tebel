@@ -27,7 +27,7 @@ export default async function DashboardLayout({
   const isPaid = isAdmin || (profile?.is_paid ?? false)
 
   return (
-    <DashboardShell user={user}>
+    <DashboardShell user={user} isAdmin={isAdmin}>
       {isPaid ? children : <UpgradeGate />}
     </DashboardShell>
   )

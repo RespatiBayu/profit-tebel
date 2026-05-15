@@ -28,12 +28,11 @@ export async function PATCH(
 
     const { data: product, error: fetchErr } = await supabase
       .from('master_products')
-      .select('id,user_id,marketplace_product_id,store_id')
+      .select('id,marketplace_product_id,store_id')
       .eq('id', params.id)
       .maybeSingle()
 
     if (fetchErr || !product) return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 })
-    if (product.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     // Save HPP
     const { error: updateErr } = await supabase
@@ -53,7 +52,7 @@ export async function PATCH(
       const { data: masterRows } = await supabase
         .from('master_products')
         .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-        .eq('user_id', user.id)
+        .eq('store_id', storeId)
 
       const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])
 
@@ -64,7 +63,6 @@ export async function PATCH(
         const oaQuery = supabase
           .from('orders_all')
           .select('id,products_json')
-          .eq('user_id', user.id)
         if (storeId) oaQuery.eq('store_id', storeId)
         const { data: oaRows } = await oaQuery
 
@@ -96,7 +94,6 @@ export async function PATCH(
         const incomeQuery = supabase
           .from('orders')
           .select('id,order_number')
-          .eq('user_id', user.id)
         if (storeId) incomeQuery.eq('store_id', storeId)
         const { data: incomeOrders } = await incomeQuery
 
@@ -110,7 +107,7 @@ export async function PATCH(
             const { data } = await supabase
               .from('order_products')
               .select('order_number,marketplace_product_id,product_name,quantity')
-              .eq('user_id', user.id)
+              .eq('store_id', storeId)
               .in('order_number', incomeOrderNums.slice(i, i + OP_CHUNK))
             if (data) opRows.push(...(data as OpRow[]))
           }
@@ -170,7 +167,7 @@ export async function DELETE(
 
     const { data: product, error: fetchError } = await supabase
       .from('master_products')
-      .select('id, user_id')
+      .select('id')
       .eq('id', productId)
       .maybeSingle()
 
@@ -186,13 +183,6 @@ export async function DELETE(
       return NextResponse.json(
         { error: 'Produk tidak ditemukan' },
         { status: 404 }
-      )
-    }
-
-    if (product.user_id !== user.id) {
-      return NextResponse.json(
-        { error: 'Tidak memiliki izin menghapus produk ini' },
-        { status: 403 }
       )
     }
 

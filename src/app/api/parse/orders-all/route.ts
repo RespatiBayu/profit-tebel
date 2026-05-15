@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { parseShopeeOrdersAll } from '@/lib/parsers/shopee-orders-all'
 import { MasterResolver, normalizeName, type MasterRow as ResolverMasterRow } from '@/lib/master-resolver'
+import { userHasStoreAccess } from '@/lib/store-access'
 import type { UploadSummary } from '@/types'
 
 // ---------------------------------------------------------------------------
@@ -67,8 +68,8 @@ export async function POST(request: NextRequest) {
 
     // Resolve store
     if (storeId) {
-      const { data: s } = await supabase.from('stores').select('id').eq('id', storeId).eq('user_id', user.id).maybeSingle()
-      if (!s) storeId = null
+      const hasAccess = await userHasStoreAccess(supabase, user.id, storeId)
+      if (!hasAccess) storeId = null
     }
     if (!storeId) {
       const { data: def } = await supabase.from('stores').select('id').eq('user_id', user.id).eq('marketplace', marketplace).eq('name', 'Toko Utama').maybeSingle()
@@ -206,7 +207,7 @@ export async function POST(request: NextRequest) {
       const { data: existingMasters } = await supabase
         .from('master_products')
         .select('id,marketplace_product_id,product_name,hpp,packaging_cost,store_id')
-        .eq('user_id', user.id)
+        .eq('store_id', storeId)
 
       type MasterRow = { id: string; marketplace_product_id: string; product_name: string | null; hpp: number; packaging_cost: number; store_id: string | null }
       const existingByName = new Map<string, MasterRow>()
@@ -280,7 +281,7 @@ export async function POST(request: NextRequest) {
     const { data: allMasters } = await supabase
       .from('master_products')
       .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-      .eq('user_id', user.id)
+      .eq('store_id', storeId)
     const resolver = new MasterResolver((allMasters ?? []) as ResolverMasterRow[])
 
     // =======================================================================
