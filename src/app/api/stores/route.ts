@@ -31,11 +31,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Nama toko wajib diisi' }, { status: 400 })
   }
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('stores')
     .insert({ user_id: user.id, name, marketplace, color, notes })
-    .select()
-    .single()
 
   if (error) {
     if (error.code === '23505') {
@@ -46,5 +44,5 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  return NextResponse.json({ store: data })
+  return NextResponse.json({ ok: true }, { status: 201 })
 }
