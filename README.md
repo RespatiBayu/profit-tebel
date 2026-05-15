@@ -1,4 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Profit Tebel
+
+App Next.js untuk analisis profit marketplace, iklan, dan ROAS seller Shopee/TikTok Shop.
+
+## Environment setup
+
+Copy `.env.example` ke `.env.local`, lalu isi semua value yang dibutuhkan.
+
+Field analytics yang baru:
+
+- `NEXT_PUBLIC_GA_MEASUREMENT_ID`: Measurement ID Google Analytics 4, format `G-XXXXXXXXXX`
+- `NEXT_PUBLIC_CLARITY_PROJECT_ID`: Project ID Microsoft Clarity
+
+Kalau dua env di atas belum diisi, script analytics tidak akan dimuat sehingga aman untuk local/dev environment yang belum siap tracking.
+
+## Analytics setup
+
+Integrasi yang sudah dipasang:
+
+- Google Analytics 4 via `gtag.js` global di root layout
+- Microsoft Clarity via script global di root layout
+- Event penting untuk auth, navigasi dashboard, upload data, paywall checkout, manajemen toko, reset data, dan recalculate HPP
+
+Verifikasi setelah deploy:
+
+1. Pastikan pageview muncul di GA4 Realtime.
+2. Pastikan session baru muncul di Clarity dashboard / Recordings.
+3. Coba flow login, upload, dan checkout lalu cek custom event di GA4 serta smart/API events di Clarity.
+
+Catatan privasi:
+
+- Clarity secara default mem-mask konten sensitif, tapi tetap pastikan kebijakan privasi/cookie banner aplikasi kamu sudah sesuai kebutuhan bisnis dan regulasi target user.
 
 ## Getting Started
 

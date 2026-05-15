@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { AnalyticsScripts } from '@/components/analytics/analytics-scripts'
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://profittebel.com'
+const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID
+const CLARITY_PROJECT_ID = process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
@@ -71,6 +74,10 @@ export default function RootLayout({
       </head>
       <body className="antialiased font-sans">
         {children}
+        <AnalyticsScripts
+          gaMeasurementId={GA_MEASUREMENT_ID}
+          clarityProjectId={CLARITY_PROJECT_ID}
+        />
       </body>
     </html>
   );

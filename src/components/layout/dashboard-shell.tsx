@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
+import { setAnalyticsTags, trackEvent } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -62,7 +63,10 @@ function NavLink({
   return (
     <Link
       href={item.href}
-      onClick={onClick}
+      onClick={() => {
+        trackEvent('dashboard_nav_clicked', { destination: item.href })
+        onClick?.()
+      }}
       className={cn(
         'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
         isActive
@@ -123,7 +127,16 @@ export default function DashboardShell({
 
   const supabase = createClient()
 
+  useEffect(() => {
+    setAnalyticsTags({
+      auth_state: 'logged_in',
+      user_role: isAdmin ? 'admin' : 'member',
+      app_area: 'dashboard',
+    })
+  }, [isAdmin])
+
   async function handleLogout() {
+    trackEvent('auth_logout_clicked', { surface: 'dashboard' })
     await supabase.auth.signOut()
     router.push('/login')
     router.refresh()
@@ -157,7 +170,10 @@ export default function DashboardShell({
             variant="ghost"
             size="icon"
             className="lg:hidden"
-            onClick={() => setMobileOpen(true)}
+            onClick={() => {
+              trackEvent('dashboard_mobile_menu_opened')
+              setMobileOpen(true)
+            }}
           >
             <Menu className="h-5 w-5" />
           </Button>
@@ -218,6 +234,7 @@ function MobileBottomNav({ isAdmin }: { isAdmin: boolean }) {
           <Link
             key={item.href}
             href={item.href}
+            onClick={() => trackEvent('dashboard_nav_clicked', { destination: item.href, surface: 'mobile_bottom_nav' })}
             className={cn(
               'flex flex-col items-center gap-1 px-3 py-2 text-xs rounded-lg transition-colors',
               isActive

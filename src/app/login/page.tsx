@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { BarChart3, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { setAnalyticsTags, trackEvent } from '@/lib/analytics'
 
 type Tab = 'login' | 'register'
 
@@ -37,6 +38,13 @@ export default function LoginPage() {
   const supabase = createClient()
   const router = useRouter()
 
+  useEffect(() => {
+    setAnalyticsTags({
+      auth_state: 'guest',
+      auth_surface: 'login_page',
+    })
+  }, [])
+
   function resetForm() {
     setError(null)
     setPassword('')
@@ -47,23 +55,32 @@ export default function LoginPage() {
   function switchTab(t: Tab) {
     setTab(t)
     resetForm()
+    trackEvent('auth_tab_switched', { tab: t })
   }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    trackEvent('auth_login_attempt', { method: 'password' })
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
+      let reason = 'unknown'
+
       if (error.message.includes('Invalid login credentials')) {
+        reason = 'invalid_credentials'
         setError('Email atau password salah. Coba lagi.')
       } else if (error.message.includes('Email not confirmed')) {
+        reason = 'email_not_confirmed'
         setError('Email belum diverifikasi. Cek inbox kamu.')
       } else {
+        reason = 'unexpected_error'
         setError(error.message)
       }
+
+      trackEvent('auth_login_failed', { method: 'password', reason })
       setLoading(false)
       return
     }
@@ -81,6 +98,7 @@ export default function LoginPage() {
       )
     }
 
+    trackEvent('auth_login_success', { method: 'password' })
     router.push('/dashboard')
     router.refresh()
   }
@@ -98,6 +116,7 @@ export default function LoginPage() {
 
     setLoading(true)
     setError(null)
+    trackEvent('auth_register_attempt', { method: 'password' })
 
     const { error } = await supabase.auth.signUp({
       email,
@@ -110,13 +129,16 @@ export default function LoginPage() {
     if (error) {
       if (error.message.includes('already registered')) {
         setError('Email ini sudah terdaftar. Silakan login.')
+        trackEvent('auth_register_failed', { method: 'password', reason: 'already_registered' })
       } else {
         setError(error.message)
+        trackEvent('auth_register_failed', { method: 'password', reason: 'unexpected_error' })
       }
       setLoading(false)
       return
     }
 
+    trackEvent('auth_register_success', { method: 'password' })
     setRegistered(true)
     setLoading(false)
   }
@@ -124,6 +146,7 @@ export default function LoginPage() {
   async function handleGoogleLogin() {
     setGoogleLoading(true)
     setError(null)
+    trackEvent('auth_login_attempt', { method: 'google_oauth' })
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
@@ -134,6 +157,7 @@ export default function LoginPage() {
 
     if (error) {
       setError(error.message)
+      trackEvent('auth_login_failed', { method: 'google_oauth', reason: 'oauth_start_failed' })
       setGoogleLoading(false)
     }
   }
@@ -279,6 +303,7 @@ export default function LoginPage() {
                         onClick={async () => {
                           if (!email) { setError('Masukkan email dulu.'); return }
                           setLoading(true)
+                          trackEvent('auth_password_reset_requested')
                           await supabase.auth.resetPasswordForEmail(email, {
                             redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?next=/dashboard`,
                           })

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { CheckCircle, Lock, ArrowRight, Loader2 } from 'lucide-react'
+import { setAnalyticsTags, trackEvent } from '@/lib/analytics'
 
 const features = [
   'Analisis profit unlimited dari laporan Shopee',
@@ -18,24 +19,36 @@ export default function UpgradeGate() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    setAnalyticsTags({
+      access_state: 'upgrade_required',
+      paywall_surface: 'dashboard',
+    })
+  }, [])
+
   async function handleBuy() {
     setLoading(true)
     setError('')
+    trackEvent('checkout_started', { surface: 'upgrade_gate' })
     try {
       const res = await fetch('/api/payment/create', { method: 'POST' })
       const data = await res.json() as { redirectUrl?: string; alreadyPaid?: boolean; error?: string }
 
       if (data.alreadyPaid) {
+        trackEvent('checkout_already_paid')
         // Refresh the page — layout will re-check is_paid and show dashboard
         window.location.reload()
         return
       }
       if (data.redirectUrl) {
+        trackEvent('checkout_redirected', { provider: 'midtrans' })
         window.location.href = data.redirectUrl
         return
       }
+      trackEvent('checkout_failed', { stage: 'response', reason: 'missing_redirect_url' })
       setError(data.error ?? 'Terjadi kesalahan. Coba lagi.')
     } catch {
+      trackEvent('checkout_failed', { stage: 'network' })
       setError('Gagal terhubung ke server. Coba lagi.')
     } finally {
       setLoading(false)

@@ -32,6 +32,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import type { Store } from '@/types'
+import { trackEvent } from '@/lib/analytics'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 
 type DialogMode = 'create' | 'edit' | null
@@ -70,6 +71,7 @@ export default function StoresPage() {
   }, [])
 
   function openCreate() {
+    trackEvent('store_dialog_opened', { mode: 'create' })
     setDialogMode('create')
     setEditingStore(null)
     setFormName('')
@@ -79,6 +81,7 @@ export default function StoresPage() {
   }
 
   function openEdit(store: Store) {
+    trackEvent('store_dialog_opened', { mode: 'edit', marketplace: store.marketplace })
     setDialogMode('edit')
     setEditingStore(store)
     setFormName(store.name)
@@ -102,11 +105,17 @@ export default function StoresPage() {
     setSubmitting(true)
     setError(null)
 
+    const mode = dialogMode === 'edit' ? 'edit' : 'create'
     const payload = {
       name: formName.trim(),
       marketplace: formMarketplace,
       notes: formNotes.trim() || null,
     }
+
+    trackEvent('store_save_attempt', {
+      mode,
+      marketplace: formMarketplace,
+    })
 
     const url =
       dialogMode === 'edit' && editingStore
@@ -122,11 +131,18 @@ export default function StoresPage() {
     const data = await res.json()
 
     if (!res.ok) {
+      trackEvent('store_save_failed', {
+        mode,
+        marketplace: formMarketplace,
+      })
       setError(data.error ?? 'Gagal menyimpan toko')
       setSubmitting(false)
       return
     }
 
+    trackEvent(dialogMode === 'edit' ? 'store_updated' : 'store_created', {
+      marketplace: formMarketplace,
+    })
     setSubmitting(false)
     closeDialog()
     await loadStores()
@@ -140,12 +156,23 @@ export default function StoresPage() {
     ) {
       return
     }
+
+    trackEvent('store_delete_confirmed', {
+      marketplace: store.marketplace,
+    })
+
     setDeletingId(store.id)
     const res = await fetch(`/api/stores/${store.id}`, { method: 'DELETE' })
     if (!res.ok) {
       const data = await res.json()
+      trackEvent('store_delete_failed', {
+        marketplace: store.marketplace,
+      })
       alert(`Gagal menghapus: ${data.error}`)
     } else {
+      trackEvent('store_deleted', {
+        marketplace: store.marketplace,
+      })
       await loadStores()
     }
     setDeletingId(null)

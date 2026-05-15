@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
+import { trackEvent } from '@/lib/analytics'
 
 interface Props {
   storeId: string | null
@@ -30,6 +31,9 @@ export function RecalculateHppButton({ storeId }: Props) {
     setLoading(true)
     setError(null)
     setResult(null)
+    trackEvent('hpp_recalculation_started', {
+      has_store_selected: Boolean(storeId),
+    })
     try {
       const res = await fetch('/api/recalculate-hpp', {
         method: 'POST',
@@ -38,11 +42,17 @@ export function RecalculateHppButton({ storeId }: Props) {
       })
       const json = await res.json()
       if (!res.ok) {
+        trackEvent('hpp_recalculation_failed')
         setError(json.error ?? `HTTP ${res.status}`)
       } else {
+        trackEvent('hpp_recalculation_completed', {
+          migrated_masters: json.migratedMasters,
+          updated_orders: json.ordersUpdated,
+        })
         setResult(json as Result)
       }
     } catch (err) {
+      trackEvent('hpp_recalculation_failed')
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)

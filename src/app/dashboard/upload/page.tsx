@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
+import { trackEvent } from '@/lib/analytics'
 import { ResetDataDialog } from '@/components/upload/reset-data-dialog'
 import { RecalculateHppButton } from '@/components/upload/recalculate-hpp-button'
 import type { Store, UploadJobStatusResponse } from '@/types'
@@ -65,6 +66,11 @@ function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function getFileExtension(fileName: string) {
+  const extension = fileName.split('.').pop()?.toLowerCase()
+  return extension || 'unknown'
 }
 
 function sleep(ms: number) {
@@ -371,6 +377,12 @@ export default function UploadPage() {
   }, [storeId, stores])
 
   function setFile(type: UploadType, file: File) {
+    trackEvent('upload_file_selected', {
+      upload_type: type,
+      file_extension: getFileExtension(file.name),
+      file_size_kb: Math.round(file.size / 1024),
+    })
+
     if (type === 'income') setIncomeState({ file, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
     else if (type === 'ads') setAdsState({ file, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
     else if (type === 'ads_product') setAdsProductState({ file, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
@@ -416,6 +428,11 @@ export default function UploadPage() {
       }
 
       if (data.status === 'failed') {
+        trackEvent('upload_failed', {
+          upload_type: type,
+          stage: 'processing',
+        })
+
         setState((prev) => ({
           ...prev,
           jobId,
@@ -428,6 +445,14 @@ export default function UploadPage() {
       }
 
       if (data.status === 'completed') {
+        trackEvent('upload_completed', {
+          upload_type: type,
+          record_count: data.result?.recordCount ?? 0,
+          inserted_count: data.result?.insertedCount ?? 0,
+          updated_count: data.result?.updatedCount ?? 0,
+          warnings_count: data.result?.warnings?.length ?? 0,
+        })
+
         setState((prev) => ({
           ...prev,
           jobId,
@@ -462,6 +487,12 @@ export default function UploadPage() {
     const setState = type === 'income' ? setIncomeState : type === 'ads' ? setAdsState : type === 'ads_product' ? setAdsProductState : setOrdersAllState
     if (!state.file) return
 
+    trackEvent('upload_started', {
+      upload_type: type,
+      marketplace,
+      has_store_selected: Boolean(storeId),
+    })
+
     setState((prev) => ({
       ...prev,
       status: 'uploading',
@@ -487,6 +518,11 @@ export default function UploadPage() {
       const data = await res.json()
 
       if (!res.ok) {
+        trackEvent('upload_failed', {
+          upload_type: type,
+          stage: 'request',
+        })
+
         setState((prev) => ({
           ...prev,
           status: 'error',
@@ -508,6 +544,11 @@ export default function UploadPage() {
         await pollUploadJob(type, data.id)
       }
     } catch {
+      trackEvent('upload_failed', {
+        upload_type: type,
+        stage: 'network',
+      })
+
       setState((prev) => ({
         ...prev,
         status: 'error',
@@ -574,7 +615,14 @@ export default function UploadPage() {
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Toko</label>
-                <Select value={storeId} onValueChange={(v) => v && setStoreId(v)}>
+                <Select value={storeId} onValueChange={(v) => {
+                  if (!v) return
+                  const selectedStore = stores.find((store) => store.id === v)
+                  trackEvent('upload_store_selected', {
+                    marketplace: selectedStore?.marketplace ?? marketplace,
+                  })
+                  setStoreId(v)
+                }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Pilih toko" />
                   </SelectTrigger>
@@ -729,6 +777,10 @@ export default function UploadPage() {
                   variant="secondary"
                   className="gap-2 sm:ml-auto"
                   onClick={async () => {
+                    trackEvent('upload_process_all_clicked', {
+                      marketplace,
+                      selected_types_count: [canUploadIncome, canUploadAds, canUploadAdsProduct, canUploadOrdersAll].filter(Boolean).length,
+                    })
                     if (canUploadIncome) await uploadFile('income')
                     if (canUploadOrdersAll) await uploadFile('orders_all')
                     if (canUploadAds) await uploadFile('ads')

@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Trash2, CheckCircle } from 'lucide-react'
+import { trackEvent } from '@/lib/analytics'
 
 type ResetType = 'income' | 'orders_all' | 'ads_summary' | 'ads_product'
 
@@ -68,12 +69,22 @@ export function ResetDataDialog({ storeId, onSuccess }: Props) {
       })
       const json = await res.json()
       if (!res.ok) {
+        trackEvent('reset_data_failed', {
+          selected_types_count: selected.size,
+        })
         setError(json.error ?? `HTTP ${res.status}`)
       } else {
+        trackEvent('reset_data_completed', {
+          selected_types_count: selected.size,
+          total_deleted: json.totalDeleted,
+        })
         setResult({ summary: json.summary, totalDeleted: json.totalDeleted })
         onSuccess?.()
       }
     } catch (err) {
+      trackEvent('reset_data_failed', {
+        selected_types_count: selected.size,
+      })
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
@@ -88,7 +99,10 @@ export function ResetDataDialog({ storeId, onSuccess }: Props) {
         variant="outline"
         size="sm"
         className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          trackEvent('reset_data_opened')
+          setOpen(true)
+        }}
       >
         <Trash2 className="h-4 w-4" />
         Reset Data
