@@ -9,7 +9,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
 import type { Store } from '@/types'
 import { cn } from '@/lib/utils'
@@ -82,9 +81,9 @@ export function StoreSwitcher() {
         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">
+        <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
           Pilih toko untuk difilter
-        </DropdownMenuLabel>
+        </div>
         <DropdownMenuSeparator />
 
         <DropdownMenuItem onClick={() => selectStore(null)} className="gap-2">
