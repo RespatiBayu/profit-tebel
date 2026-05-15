@@ -30,15 +30,17 @@ import Link from 'next/link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import { ResetDataDialog } from '@/components/upload/reset-data-dialog'
 import { RecalculateHppButton } from '@/components/upload/recalculate-hpp-button'
-import type { Store } from '@/types'
+import type { Store, UploadJobStatusResponse } from '@/types'
 
 type UploadType = 'income' | 'ads' | 'ads_product' | 'orders_all'
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
 
 interface UploadState {
   file: File | null
+  jobId: string | null
   status: UploadStatus
   progress: number
+  progressLabel: string | null
   result: {
     recordCount?: number
     insertedCount?: number
@@ -50,6 +52,7 @@ interface UploadState {
     periodEnd?: string | null
     error?: string
     warnings?: string[]
+    storeId?: string | null
   } | null
 }
 
@@ -62,6 +65,10 @@ function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function DropZone({
@@ -164,7 +171,7 @@ function DropZone({
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 text-sm">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Memproses file...</span>
+              <span>{state.progressLabel ?? 'Memproses file...'}</span>
             </div>
             <Progress value={state.progress} className="h-2" />
           </div>
@@ -296,16 +303,16 @@ export default function UploadPage() {
   const [storeId, setStoreId] = useState<string>(urlStoreId)
   const [storesLoading, setStoresLoading] = useState(true)
   const [incomeState, setIncomeState] = useState<UploadState>({
-    file: null, status: 'idle', progress: 0, result: null,
+    file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null,
   })
   const [adsState, setAdsState] = useState<UploadState>({
-    file: null, status: 'idle', progress: 0, result: null,
+    file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null,
   })
   const [adsProductState, setAdsProductState] = useState<UploadState>({
-    file: null, status: 'idle', progress: 0, result: null,
+    file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null,
   })
   const [ordersAllState, setOrdersAllState] = useState<UploadState>({
-    file: null, status: 'idle', progress: 0, result: null,
+    file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null,
   })
   // Upload prerequisite state — Order.all must exist before Income upload
   const [hasOrdersAllData, setHasOrdersAllData] = useState<boolean>(false)
@@ -364,17 +371,90 @@ export default function UploadPage() {
   }, [storeId, stores])
 
   function setFile(type: UploadType, file: File) {
-    if (type === 'income') setIncomeState({ file, status: 'idle', progress: 0, result: null })
-    else if (type === 'ads') setAdsState({ file, status: 'idle', progress: 0, result: null })
-    else if (type === 'ads_product') setAdsProductState({ file, status: 'idle', progress: 0, result: null })
-    else setOrdersAllState({ file, status: 'idle', progress: 0, result: null })
+    if (type === 'income') setIncomeState({ file, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
+    else if (type === 'ads') setAdsState({ file, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
+    else if (type === 'ads_product') setAdsProductState({ file, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
+    else setOrdersAllState({ file, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
   }
 
   function removeFile(type: UploadType) {
-    if (type === 'income') setIncomeState({ file: null, status: 'idle', progress: 0, result: null })
-    else if (type === 'ads') setAdsState({ file: null, status: 'idle', progress: 0, result: null })
-    else if (type === 'ads_product') setAdsProductState({ file: null, status: 'idle', progress: 0, result: null })
-    else setOrdersAllState({ file: null, status: 'idle', progress: 0, result: null })
+    if (type === 'income') setIncomeState({ file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
+    else if (type === 'ads') setAdsState({ file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
+    else if (type === 'ads_product') setAdsProductState({ file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
+    else setOrdersAllState({ file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null })
+  }
+
+  async function pollUploadJob(type: UploadType, jobId: string) {
+    const setState =
+      type === 'income'
+        ? setIncomeState
+        : type === 'ads'
+        ? setAdsState
+        : type === 'ads_product'
+        ? setAdsProductState
+        : setOrdersAllState
+
+    while (true) {
+      await sleep(1500)
+
+      const res = await fetch(`/api/upload-jobs/${jobId}`, { cache: 'no-store' })
+      const data = (await res.json()) as UploadJobStatusResponse & { error?: string }
+
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Gagal membaca status upload')
+      }
+
+      if (data.status === 'queued' || data.status === 'processing') {
+        setState((prev) => ({
+          ...prev,
+          jobId,
+          status: 'uploading',
+          progress: Math.max(5, data.progress ?? prev.progress),
+          progressLabel: data.progressLabel ?? prev.progressLabel ?? 'Memproses file...',
+        }))
+        continue
+      }
+
+      if (data.status === 'failed') {
+        setState((prev) => ({
+          ...prev,
+          jobId,
+          status: 'error',
+          progress: 0,
+          progressLabel: null,
+          result: { error: data.error ?? 'Upload gagal' },
+        }))
+        return
+      }
+
+      if (data.status === 'completed') {
+        setState((prev) => ({
+          ...prev,
+          jobId,
+          status: 'success',
+          progress: 100,
+          progressLabel: null,
+          result: {
+            recordCount: data.result?.recordCount,
+            insertedCount: data.result?.insertedCount,
+            updatedCount: data.result?.updatedCount,
+            unchangedCount: data.result?.unchangedCount,
+            duplicateCount: data.result?.duplicateCount,
+            newProducts: data.result?.newProducts,
+            periodStart: data.result?.periodStart,
+            periodEnd: data.result?.periodEnd,
+            warnings: data.result?.warnings,
+            storeId: data.result?.storeId ?? null,
+          },
+        }))
+
+        if (data.result?.storeId && !stores.some((store) => store.id === data.result?.storeId)) {
+          setStoreId(data.result.storeId)
+        }
+        refreshUploadStatus()
+        return
+      }
+    }
   }
 
   async function uploadFile(type: UploadType) {
@@ -382,7 +462,13 @@ export default function UploadPage() {
     const setState = type === 'income' ? setIncomeState : type === 'ads' ? setAdsState : type === 'ads_product' ? setAdsProductState : setOrdersAllState
     if (!state.file) return
 
-    setState((prev) => ({ ...prev, status: 'uploading', progress: 30 }))
+    setState((prev) => ({
+      ...prev,
+      status: 'uploading',
+      progress: 10,
+      progressLabel: 'Mengunggah file...',
+      result: null,
+    }))
 
     const formData = new FormData()
     formData.append('file', state.file)
@@ -396,7 +482,7 @@ export default function UploadPage() {
       : `/api/parse/${type}`
 
     try {
-      setState((prev) => ({ ...prev, progress: 60 }))
+      setState((prev) => ({ ...prev, progress: 20, progressLabel: 'Masuk antrean upload...' }))
       const res = await fetch(endpoint, { method: 'POST', body: formData })
       const data = await res.json()
 
@@ -405,6 +491,7 @@ export default function UploadPage() {
           ...prev,
           status: 'error',
           progress: 0,
+          progressLabel: null,
           result: { error: data.error ?? 'Upload gagal' },
         }))
         return
@@ -412,27 +499,20 @@ export default function UploadPage() {
 
       setState((prev) => ({
         ...prev,
-        status: 'success',
-        progress: 100,
-        result: {
-          recordCount: data.recordCount,
-          insertedCount: data.insertedCount,
-          updatedCount: data.updatedCount,
-          unchangedCount: data.unchangedCount,
-          duplicateCount: data.duplicateCount,
-          newProducts: data.newProducts,
-          periodStart: data.periodStart,
-          periodEnd: data.periodEnd,
-          warnings: data.warnings,
-        },
+        jobId: data.id ?? null,
+        status: 'uploading',
+        progress: Math.max(15, data.progress ?? 15),
+        progressLabel: data.progressLabel ?? 'Masuk antrean upload',
       }))
-      // After successful upload, refresh status — Order.all upload unlocks Income
-      refreshUploadStatus()
+      if (data.id) {
+        await pollUploadJob(type, data.id)
+      }
     } catch {
       setState((prev) => ({
         ...prev,
         status: 'error',
         progress: 0,
+        progressLabel: null,
         result: { error: 'Koneksi gagal. Cek internet kamu.' },
       }))
     }

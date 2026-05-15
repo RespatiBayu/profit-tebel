@@ -99,6 +99,33 @@ export interface UploadSummary {
   warnings: string[]
 }
 
+export type UploadFileType = 'income' | 'ads' | 'ads_product' | 'orders_all'
+
+export type UploadJobStatus = 'queued' | 'processing' | 'completed' | 'failed'
+
+export interface UploadJobResult extends UploadSummary {
+  storeId?: string | null
+  opfRowsTotal?: number
+  opfMatched?: number
+  opfUnmatched?: number
+  orderProductsCreated?: number
+  opfUnmatchedSamples?: Array<{ id: string | null; name: string | null }>
+}
+
+export interface UploadJobStatusResponse {
+  id: string
+  status: UploadJobStatus
+  progress: number
+  progressLabel: string | null
+  fileType: UploadFileType
+  fileName: string
+  result: UploadJobResult | null
+  error: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 export type StoreAccessRole = 'owner' | 'member'
 
 export interface AvailablePeriods {
