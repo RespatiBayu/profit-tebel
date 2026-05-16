@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
-import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { DashboardLink } from '@/components/layout/dashboard-link'
+import { normalizeMarketplaceFilter } from '@/lib/dashboard-filters'
 import {
   Upload,
   TrendingUp,
@@ -34,9 +35,10 @@ function formatFileType(fileType: string) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ store?: string }>
+  searchParams: Promise<{ store?: string; marketplace?: string }>
 }) {
-  const { store: storeId } = await searchParams
+  const { store: storeId, marketplace: marketplaceParam } = await searchParams
+  const marketplace = normalizeMarketplaceFilter(marketplaceParam)
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -48,6 +50,7 @@ export default async function DashboardPage({
     .order('uploaded_at', { ascending: false })
     .limit(5)
   if (storeId) uploadsQuery.eq('store_id', storeId)
+  if (marketplace) uploadsQuery.eq('marketplace', marketplace)
   const { data: recentUploads } = await uploadsQuery
 
   // Quick stats (filter by store if set)
@@ -55,18 +58,21 @@ export default async function DashboardPage({
     .from('orders')
     .select('*', { count: 'exact', head: true })
   if (storeId) ordersQuery.eq('store_id', storeId)
+  if (marketplace) ordersQuery.eq('marketplace', marketplace)
   const { count: orderCount } = await ordersQuery
 
   const adsQuery = supabase
     .from('ads_data')
     .select('*', { count: 'exact', head: true })
   if (storeId) adsQuery.eq('store_id', storeId)
+  if (marketplace) adsQuery.eq('marketplace', marketplace)
   const { count: adsCount } = await adsQuery
 
   const productsQuery = supabase
     .from('master_products')
     .select('*', { count: 'exact', head: true })
   if (storeId) productsQuery.eq('store_id', storeId)
+  if (marketplace) productsQuery.eq('marketplace', marketplace)
   const { count: productCount } = await productsQuery
 
   const hasData = (orderCount ?? 0) > 0 || (adsCount ?? 0) > 0
@@ -100,12 +106,12 @@ export default async function DashboardPage({
                 profit produk kamu.
               </p>
             </div>
-            <Link href="/dashboard/upload">
+            <DashboardLink href="/dashboard/upload">
               <Button className="gap-2">
                 <Upload className="h-4 w-4" />
                 Upload Data Sekarang
               </Button>
-            </Link>
+            </DashboardLink>
           </CardContent>
         </Card>
       )}
@@ -170,7 +176,7 @@ export default async function DashboardPage({
           ].map((action) => {
             const Icon = action.icon
             return (
-              <Link key={action.href} href={action.href}>
+              <DashboardLink key={action.href} href={action.href}>
                 <Card className="cursor-pointer h-full transition-transform duration-200 hover:-translate-y-0.5">
                   <CardContent className="flex items-start gap-3 p-4">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${action.color}`}>
@@ -183,7 +189,7 @@ export default async function DashboardPage({
                     <ArrowRight className="h-4 w-4 text-muted-foreground ml-auto shrink-0 mt-0.5" />
                   </CardContent>
                 </Card>
-              </Link>
+              </DashboardLink>
             )
           })}
         </div>
@@ -194,12 +200,12 @@ export default async function DashboardPage({
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold">Upload Terakhir</h2>
-            <Link href="/dashboard/upload">
+            <DashboardLink href="/dashboard/upload">
               <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground">
                 Lihat semua
                 <ArrowRight className="h-3 w-3" />
               </Button>
-            </Link>
+            </DashboardLink>
           </div>
           <Card>
             <CardContent className="p-0">

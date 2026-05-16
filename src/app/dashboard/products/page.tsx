@@ -25,7 +25,7 @@ import {
   Upload,
   Trash2,
 } from 'lucide-react'
-import Link from 'next/link'
+import { DashboardLink } from '@/components/layout/dashboard-link'
 import type { MasterProduct } from '@/types'
 
 function formatRp(n: number) {
@@ -49,6 +49,7 @@ export default function ProductsPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const storeId = searchParams.get('store') ?? ''
+  const marketplace = searchParams.get('marketplace') ?? ''
   const [products, setProducts] = useState<MasterProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -71,6 +72,9 @@ export default function ProductsPage() {
         const params = new URLSearchParams()
         if (storeId) {
           params.set('store', storeId)
+        }
+        if (marketplace) {
+          params.set('marketplace', marketplace)
         }
 
         const url = params.size > 0
@@ -105,7 +109,7 @@ export default function ProductsPage() {
     return () => {
       active = false
     }
-  }, [storeId])
+  }, [marketplace, storeId])
 
   function startEdit(id: string, product: MasterProduct) {
     setEditing((prev) => ({
@@ -223,12 +227,12 @@ export default function ProductsPage() {
             )}
           </p>
         </div>
-        <Link href="/dashboard/upload">
+        <DashboardLink href="/dashboard/upload">
           <Button variant="outline" size="sm" className="gap-2">
             <Upload className="h-4 w-4" />
             Upload Data
           </Button>
-        </Link>
+        </DashboardLink>
       </div>
 
       {/* HPP alert */}
@@ -260,12 +264,12 @@ export default function ProductsPage() {
               Produk akan otomatis muncul setelah kamu upload data penghasilan atau iklan.
             </p>
           </div>
-          <Link href="/dashboard/upload">
+          <DashboardLink href="/dashboard/upload">
             <Button className="gap-2">
               <Upload className="h-4 w-4" />
               Upload Data Sekarang
             </Button>
-          </Link>
+          </DashboardLink>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { Store as StoreIcon, ChevronDown, Plus, Check, Layers, Settings } from 'lucide-react'
 import {
@@ -12,8 +12,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { Store } from '@/types'
 import { cn } from '@/lib/utils'
-
-const STORAGE_KEY = 'profit-tebel:current-store'
+import {
+  buildDashboardHref,
+  normalizeMarketplaceFilter,
+  STORE_STORAGE_KEY,
+} from '@/lib/dashboard-filters'
 
 export function StoreSwitcher() {
   const router = useRouter()
@@ -23,7 +26,15 @@ export function StoreSwitcher() {
   const [loading, setLoading] = useState(true)
 
   const currentStoreId = searchParams.get('store') ?? ''
+  const currentMarketplace = normalizeMarketplaceFilter(searchParams.get('marketplace'))
   const currentStore = stores.find((s) => s.id === currentStoreId) ?? null
+  const filteredStores = useMemo(
+    () =>
+      currentMarketplace
+        ? stores.filter((store) => store.marketplace === currentMarketplace)
+        : stores,
+    [currentMarketplace, stores]
+  )
 
   useEffect(() => {
     let mounted = true
@@ -38,33 +49,46 @@ export function StoreSwitcher() {
     return () => { mounted = false }
   }, [])
 
-  // On first load, read last-selected store from localStorage and apply if no URL param
+  const selectStore = useCallback(
+    (storeId: string | null) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (storeId) {
+        params.set('store', storeId)
+        if (typeof window !== 'undefined') localStorage.setItem(STORE_STORAGE_KEY, storeId)
+      } else {
+        params.delete('store')
+        if (typeof window !== 'undefined') localStorage.removeItem(STORE_STORAGE_KEY)
+      }
+      const qs = params.toString()
+      router.push(qs ? `${pathname}?${qs}` : pathname)
+      router.refresh()
+    },
+    [pathname, router, searchParams]
+  )
+
+  // On first load, read last-selected store from localStorage and apply if no URL param.
   useEffect(() => {
     if (!currentStoreId && typeof window !== 'undefined') {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved && stores.some((s) => s.id === saved)) {
+      const saved = localStorage.getItem(STORE_STORAGE_KEY)
+      if (saved && filteredStores.some((store) => store.id === saved)) {
         selectStore(saved)
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stores])
+  }, [currentStoreId, filteredStores, selectStore])
 
-  function selectStore(storeId: string | null) {
-    const params = new URLSearchParams(searchParams.toString())
-    if (storeId) {
-      params.set('store', storeId)
-      if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEY, storeId)
-    } else {
-      params.delete('store')
-      if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEY)
+  useEffect(() => {
+    if (!currentStoreId || !currentStore || !currentMarketplace) return
+    if (currentStore.marketplace !== currentMarketplace) {
+      selectStore(null)
     }
-    const qs = params.toString()
-    router.push(qs ? `${pathname}?${qs}` : pathname)
-    router.refresh()
-  }
+  }, [currentMarketplace, currentStore, currentStoreId, selectStore])
 
   const label = currentStore
     ? currentStore.name
+    : loading
+    ? 'Memuat toko'
+    : filteredStores.length === 0 && stores.length > 0
+    ? 'Tidak ada toko'
     : stores.length === 0
     ? 'Belum ada toko'
     : 'Semua Toko'
@@ -96,9 +120,15 @@ export function StoreSwitcher() {
           <div className="px-2 py-1.5 text-xs text-muted-foreground">Memuat...</div>
         )}
 
-        {!loading && stores.length > 0 && <DropdownMenuSeparator />}
+        {!loading && filteredStores.length > 0 && <DropdownMenuSeparator />}
 
-        {stores.map((s) => (
+        {!loading && filteredStores.length === 0 && stores.length > 0 && (
+          <div className="px-2 py-2 text-xs text-muted-foreground">
+            Belum ada toko untuk marketplace ini.
+          </div>
+        )}
+
+        {filteredStores.map((s) => (
           <DropdownMenuItem
             key={s.id}
             onClick={() => selectStore(s.id)}
@@ -112,11 +142,17 @@ export function StoreSwitcher() {
         ))}
 
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => router.push('/dashboard/stores')} className="gap-2">
+        <DropdownMenuItem
+          onClick={() => router.push(buildDashboardHref('/dashboard/stores', searchParams))}
+          className="gap-2"
+        >
           <Settings className="h-4 w-4" />
           Kelola Toko
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push('/dashboard/stores?new=1')} className="gap-2">
+        <DropdownMenuItem
+          onClick={() => router.push(buildDashboardHref('/dashboard/stores?new=1', searchParams))}
+          className="gap-2"
+        >
           <Plus className="h-4 w-4" />
           Tambah Toko Baru
         </DropdownMenuItem>

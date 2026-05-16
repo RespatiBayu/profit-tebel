@@ -5,10 +5,11 @@ import {
   parseCsvSelection,
   sanitizeSelection,
 } from '@/lib/period-filter'
-import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { DashboardLink } from '@/components/layout/dashboard-link'
 import { Upload } from 'lucide-react'
 import AdsDashboard from '@/components/ads/ads-dashboard'
+import { normalizeMarketplaceFilter } from '@/lib/dashboard-filters'
 import type { DbAdsRow, DbOrder, DbOrderProduct, MasterProduct } from '@/types'
 
 const ADS_SELECT = [
@@ -109,9 +110,15 @@ type UploadPeriodRow = {
 export default async function AdsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ store?: string; years?: string; months?: string }>
+  searchParams: Promise<{ store?: string; marketplace?: string; years?: string; months?: string }>
 }) {
-  const { store: storeId, years, months } = await searchParams
+  const {
+    store: storeId,
+    marketplace: marketplaceParam,
+    years,
+    months,
+  } = await searchParams
+  const marketplace = normalizeMarketplaceFilter(marketplaceParam)
   const supabase = await createClient()
 
   const requestedYears = parseCsvSelection(years)
@@ -123,6 +130,7 @@ export default async function AdsPage({
     .in('file_type', ['ads', 'ads_product'])
 
   if (storeId) uploadPeriodsQ.eq('store_id', storeId)
+  if (marketplace) uploadPeriodsQ.eq('marketplace', marketplace)
 
   const { data: uploadPeriods } = await uploadPeriodsQ
   const typedUploadPeriods = (uploadPeriods ?? []) as UploadPeriodRow[]
@@ -158,6 +166,7 @@ export default async function AdsPage({
 
   const masterProductsQ = supabase.from('master_products').select(MASTER_PRODUCT_SELECT)
   if (storeId) masterProductsQ.eq('store_id', storeId)
+  if (marketplace) masterProductsQ.eq('marketplace', marketplace)
   const { data: masterProducts } = await masterProductsQ
   const typedProducts = (masterProducts ?? []) as unknown as MasterProduct[]
 
@@ -190,6 +199,11 @@ export default async function AdsPage({
       productQ.eq('store_id', storeId)
       ordersQ.eq('store_id', storeId)
     }
+    if (marketplace) {
+      summaryQ.eq('marketplace', marketplace)
+      productQ.eq('marketplace', marketplace)
+      ordersQ.eq('marketplace', marketplace)
+    }
 
     if (adsFilter) {
       summaryQ.or(adsFilter)
@@ -208,7 +222,7 @@ export default async function AdsPage({
     typedOrders = (orders ?? []) as unknown as DbOrder[]
   }
 
-  if (hasFilter) {
+  if (hasFilter || marketplace) {
     typedOrderProducts = await fetchOrderProducts(typedOrders.map((order) => order.order_number))
   } else {
     const orderProductsQ = supabase.from('order_products').select(ORDER_PRODUCT_SELECT)
@@ -230,12 +244,12 @@ export default async function AdsPage({
             rekomendasi SCALE / OPTIMIZE / KILL.
           </p>
         </div>
-        <Link href="/dashboard/upload">
+        <DashboardLink href="/dashboard/upload">
           <Button className="gap-2">
             <Upload className="h-4 w-4" />
             Upload Data Iklan
           </Button>
-        </Link>
+        </DashboardLink>
       </div>
     )
   }

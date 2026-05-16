@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
@@ -32,6 +31,8 @@ import {
 } from 'lucide-react'
 import { StoreSwitcher } from './store-switcher'
 import { PeriodSwitcher } from './period-switcher'
+import { MarketplaceSwitcher } from './marketplace-switcher'
+import { DashboardLink } from './dashboard-link'
 
 const baseNavItems = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true },
@@ -61,7 +62,7 @@ function NavLink({
   const Icon = item.icon
 
   return (
-    <Link
+    <DashboardLink
       href={item.href}
       onClick={() => {
         trackEvent('dashboard_nav_clicked', { destination: item.href })
@@ -77,7 +78,7 @@ function NavLink({
       <Icon className="h-4 w-4 shrink-0" />
       {item.label}
       {isActive && <ChevronRight className="h-3 w-3 ml-auto" />}
-    </Link>
+    </DashboardLink>
   )
 }
 
@@ -183,8 +184,9 @@ export default function DashboardShell({
             <Menu className="h-5 w-5" />
           </Button>
 
-          {/* Store switcher + Period filter (global) */}
+          {/* Store switcher + marketplace + period filter (global) */}
           <div className="flex-1 flex items-center gap-3 lg:justify-start justify-center flex-wrap">
+            <MarketplaceSwitcher />
             <StoreSwitcher />
             <PeriodSwitcher />
           </div>
@@ -236,7 +238,7 @@ function MobileBottomNav({ isAdmin }: { isAdmin: boolean }) {
         const Icon = item.icon
         const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
         return (
-          <Link
+          <DashboardLink
             key={item.href}
             href={item.href}
             onClick={() => trackEvent('dashboard_nav_clicked', { destination: item.href, surface: 'mobile_bottom_nav' })}
@@ -251,7 +253,7 @@ function MobileBottomNav({ isAdmin }: { isAdmin: boolean }) {
             <span className="truncate max-w-[56px] text-center leading-tight">
               {item.label.split(' ')[0]}
             </span>
-          </Link>
+          </DashboardLink>
         )
       })}
     </nav>

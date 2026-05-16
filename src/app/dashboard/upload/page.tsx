@@ -26,7 +26,7 @@ import {
   Store as StoreIcon,
   Plus,
 } from 'lucide-react'
-import Link from 'next/link'
+import { DashboardLink } from '@/components/layout/dashboard-link'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import { trackEvent } from '@/lib/analytics'
 import { ResetDataDialog } from '@/components/upload/reset-data-dialog'
@@ -605,9 +605,9 @@ export default function UploadPage() {
               <AlertDescription>
                 Kamu belum punya toko. Kami akan otomatis buat &quot;Toko Utama&quot; saat upload
                 pertama, atau kamu bisa{' '}
-                <Link href="/dashboard/stores?new=1" className="underline font-medium">
+                <DashboardLink href="/dashboard/stores?new=1" className="underline font-medium">
                   buat toko dulu di sini
-                </Link>
+                </DashboardLink>
                 .
               </AlertDescription>
             </Alert>
@@ -661,12 +661,12 @@ export default function UploadPage() {
             <p className="text-xs text-muted-foreground">
               Upload akan menambah data ke toko yang dipilih.
             </p>
-            <Link href="/dashboard/stores?new=1">
+            <DashboardLink href="/dashboard/stores?new=1">
               <Button variant="ghost" size="sm" className="gap-2 text-xs">
                 <Plus className="h-3.5 w-3.5" />
                 Tambah Toko
               </Button>
-            </Link>
+            </DashboardLink>
           </div>
         </CardContent>
       </Card>
@@ -805,35 +805,35 @@ export default function UploadPage() {
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
               {incomeState.status === 'success' && (
-                <Link href="/dashboard/profit">
+                <DashboardLink href="/dashboard/profit">
                   <Button size="sm" className="gap-2 w-full sm:w-auto">
                     Lihat Analisis Profit
                     <ArrowRight className="h-4 w-4" />
                   </Button>
-                </Link>
+                </DashboardLink>
               )}
               {adsState.status === 'success' && (
-                <Link href="/dashboard/ads">
+                <DashboardLink href="/dashboard/ads">
                   <Button size="sm" variant={incomeState.status === 'success' ? 'outline' : 'default'} className="gap-2 w-full sm:w-auto">
                     Lihat Analisis Iklan
                     <ArrowRight className="h-4 w-4" />
                   </Button>
-                </Link>
+                </DashboardLink>
               )}
               {adsProductState.status === 'success' && (
-                <Link href="/dashboard/ads">
+                <DashboardLink href="/dashboard/ads">
                   <Button size="sm" variant={(incomeState.status === 'success' || adsState.status === 'success') ? 'outline' : 'default'} className="gap-2 w-full sm:w-auto">
                     Lihat Breakdown per Produk
                     <ArrowRight className="h-4 w-4" />
                   </Button>
-                </Link>
+                </DashboardLink>
               )}
-              <Link href="/dashboard/products">
+              <DashboardLink href="/dashboard/products">
                 <Button size="sm" variant="ghost" className="gap-2 w-full sm:w-auto">
                   Isi HPP Produk
                   <ArrowRight className="h-4 w-4" />
                 </Button>
-              </Link>
+              </DashboardLink>
             </div>
           </CardContent>
         </Card>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { normalizeMarketplaceFilter } from '@/lib/dashboard-filters'
 import type { MasterProduct } from '@/types'
 
 export async function GET(request: NextRequest) {
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const storeId = searchParams.get('store')
+  const marketplace = normalizeMarketplaceFilter(searchParams.get('marketplace'))
 
   const productsQuery = supabase
     .from('master_products')
@@ -20,6 +22,9 @@ export async function GET(request: NextRequest) {
 
   if (storeId) {
     productsQuery.eq('store_id', storeId)
+  }
+  if (marketplace) {
+    productsQuery.eq('marketplace', marketplace)
   }
 
   const { data: products, error } = await productsQuery
@@ -46,6 +51,9 @@ export async function GET(request: NextRequest) {
   if (storeId) {
     orderProductsQuery.eq('store_id', storeId)
     adsProductsQuery.eq('store_id', storeId)
+  }
+  if (marketplace) {
+    adsProductsQuery.eq('marketplace', marketplace)
   }
 
   const [{ data: incomeIds }, { data: adsIds }] = await Promise.all([

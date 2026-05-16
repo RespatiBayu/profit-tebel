@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
 import { trackEvent } from '@/lib/analytics'
+import { DashboardLink } from '@/components/layout/dashboard-link'
 
 interface Props {
   storeId: string | null
@@ -112,12 +113,12 @@ export function RecalculateHppButton({ storeId }: Props) {
                 </div>
               )}
               {noMasterHpp ? (
-                <a
+                <DashboardLink
                   href="/dashboard/products"
                   className="inline-block underline font-medium text-amber-800 mt-1"
                 >
                   → Buka menu Master Produk untuk isi HPP
-                </a>
+                </DashboardLink>
               ) : (
                 <Button
                   variant="link"

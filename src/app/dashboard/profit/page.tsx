@@ -6,10 +6,11 @@ import {
   sanitizeSelection,
   shiftYearMonth,
 } from '@/lib/period-filter'
-import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { DashboardLink } from '@/components/layout/dashboard-link'
 import { Upload } from 'lucide-react'
 import ProfitDashboard from '@/components/profit/profit-dashboard'
+import { normalizeMarketplaceFilter } from '@/lib/dashboard-filters'
 import type { DbAdsRow, DbOrder, DbOrderAll, DbOrderProduct, MasterProduct } from '@/types'
 
 const ORDER_SELECT = [
@@ -149,9 +150,15 @@ function mergeOrdersAll(current: DbOrderAll[], previous: DbOrderAll[]): DbOrderA
 export default async function ProfitPage({
   searchParams,
 }: {
-  searchParams: Promise<{ store?: string; years?: string; months?: string }>
+  searchParams: Promise<{ store?: string; marketplace?: string; years?: string; months?: string }>
 }) {
-  const { store: storeId, years, months } = await searchParams
+  const {
+    store: storeId,
+    marketplace: marketplaceParam,
+    years,
+    months,
+  } = await searchParams
+  const marketplace = normalizeMarketplaceFilter(marketplaceParam)
   const supabase = await createClient()
 
   const requestedYears = parseCsvSelection(years)
@@ -163,6 +170,7 @@ export default async function ProfitPage({
     .in('file_type', ['income', 'ads', 'ads_product'])
 
   if (storeId) uploadPeriodsQ.eq('store_id', storeId)
+  if (marketplace) uploadPeriodsQ.eq('marketplace', marketplace)
 
   const { data: uploadPeriods } = await uploadPeriodsQ
   const typedUploadPeriods = (uploadPeriods ?? []) as UploadPeriodRow[]
@@ -201,6 +209,7 @@ export default async function ProfitPage({
 
   const masterProductsQ = supabase.from('master_products').select(MASTER_PRODUCT_SELECT)
   if (storeId) masterProductsQ.eq('store_id', storeId)
+  if (marketplace) masterProductsQ.eq('marketplace', marketplace)
   const { data: masterProducts } = await masterProductsQ
   const typedMasterProducts = (masterProducts ?? []) as unknown as MasterProduct[]
 
@@ -227,6 +236,11 @@ export default async function ProfitPage({
       ordersQ.eq('store_id', storeId)
       adsQ.eq('store_id', storeId)
       ordersAllQ.eq('store_id', storeId)
+    }
+    if (marketplace) {
+      ordersQ.eq('marketplace', marketplace)
+      adsQ.eq('marketplace', marketplace)
+      ordersAllQ.eq('marketplace', marketplace)
     }
 
     if (currentOrderFilter) {
@@ -255,6 +269,11 @@ export default async function ProfitPage({
         prevAdsQ.eq('store_id', storeId)
         prevOrdersAllQ.eq('store_id', storeId)
       }
+      if (marketplace) {
+        prevOrdersQ.eq('marketplace', marketplace)
+        prevAdsQ.eq('marketplace', marketplace)
+        prevOrdersAllQ.eq('marketplace', marketplace)
+      }
 
       if (previousOrderFilter) {
         prevOrdersQ.or(previousOrderFilter)
@@ -274,7 +293,7 @@ export default async function ProfitPage({
     }
   }
 
-  if (hasFilter) {
+  if (hasFilter || marketplace) {
     typedOrderProducts = await fetchOrderProducts([
       ...typedOrders.map((order) => order.order_number),
       ...prevOrders.map((order) => order.order_number),
@@ -299,12 +318,12 @@ export default async function ProfitPage({
           </p>
         </div>
         <div className="flex gap-3">
-          <Link href="/dashboard/upload">
+          <DashboardLink href="/dashboard/upload">
             <Button className="gap-2">
               <Upload className="h-4 w-4" />
               Upload Data
             </Button>
-          </Link>
+          </DashboardLink>
         </div>
       </div>
     )

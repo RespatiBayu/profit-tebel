@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { usePeriodStore } from '@/lib/stores/period-store'
-import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -78,6 +77,7 @@ import {
   TopBuyersSection,
   DailyDetailSection,
 } from '@/components/profit/dashboard-sections'
+import { DashboardLink } from '@/components/layout/dashboard-link'
 import type {
   AvailablePeriods,
   DbOrder,
@@ -258,9 +258,9 @@ function KpiCard({
           </div>
         )}
         {cta && (
-          <Link href={cta.href} className="mt-2 inline-block">
+          <DashboardLink href={cta.href} className="mt-2 inline-block">
             <span className="text-xs text-primary hover:underline font-medium">{cta.label} →</span>
-          </Link>
+          </DashboardLink>
         )}
       </CardContent>
     </Card>
@@ -716,12 +716,12 @@ export default function ProfitDashboard({
                 {hppFilled} dari {totalProducts} produk sudah diisi ({hppProgress}%)
               </p>
             </div>
-            <Link href="/dashboard/products">
+            <DashboardLink href="/dashboard/products">
               <Button size="sm" className="h-8 text-xs gap-1 bg-orange-600 hover:bg-orange-700">
                 <Package className="h-3 w-3" />
                 Isi HPP Sekarang
               </Button>
-            </Link>
+            </DashboardLink>
           </AlertDescription>
         </Alert>
       )}
