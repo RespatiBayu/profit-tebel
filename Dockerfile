@@ -25,12 +25,17 @@ ENV HOSTNAME=0.0.0.0
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid 1001 nextjs
 
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/package-lock.json ./package-lock.json
+COPY --from=builder --chown=nextjs:nodejs /app/next.config.mjs ./next.config.mjs
+
+RUN npm prune --omit=dev
 
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["npm", "run", "start"]
