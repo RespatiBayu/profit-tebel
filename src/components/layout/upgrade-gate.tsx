@@ -58,8 +58,8 @@ export default function UpgradeGate() {
   return (
     <div className="p-4 sm:p-6 flex flex-col items-center justify-center min-h-[80vh] gap-6 text-center">
       {/* Icon */}
-      <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center">
-        <Lock className="h-8 w-8 text-orange-600" />
+      <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center shadow-[0_18px_36px_-24px_hsl(var(--primary)/0.95)]">
+        <Lock className="h-8 w-8 text-primary" />
       </div>
 
       {/* Headline */}
@@ -71,7 +71,7 @@ export default function UpgradeGate() {
       </div>
 
       {/* Pricing card */}
-      <div className="rounded-2xl border-2 border-orange-500 bg-card p-6 max-w-sm w-full text-left shadow-lg">
+      <div className="brand-panel rounded-[28px] p-6 max-w-sm w-full text-left">
         <div className="text-center mb-4">
           <span className="text-3xl font-extrabold">Rp 99.000</span>
           <p className="text-muted-foreground text-sm mt-1">Bayar sekali, akses selamanya</p>
@@ -92,7 +92,7 @@ export default function UpgradeGate() {
 
         <Button
           size="lg"
-          className="w-full gap-2 bg-orange-500 hover:bg-orange-600 text-white"
+          className="w-full gap-2"
           onClick={handleBuy}
           disabled={loading}
         >

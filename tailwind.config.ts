@@ -11,7 +11,26 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: [
+          '"Avenir Next"',
+          '"SF Pro Display"',
+          '"Nunito Sans"',
+          '"Helvetica Neue"',
+          '"Segoe UI"',
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif",
+        ],
+        heading: [
+          '"Avenir Next"',
+          '"SF Pro Display"',
+          '"Nunito Sans"',
+          '"Helvetica Neue"',
+          '"Segoe UI"',
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif",
+        ],
       },
       colors: {
         background: "hsl(var(--background))",

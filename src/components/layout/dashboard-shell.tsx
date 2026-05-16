@@ -68,10 +68,10 @@ function NavLink({
         onClick?.()
       }}
       className={cn(
-        'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+        'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
         isActive
-          ? 'bg-primary text-primary-foreground'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          ? 'bg-primary/10 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.12)]'
+          : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
@@ -93,9 +93,14 @@ function Sidebar({
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="flex items-center gap-2 px-4 h-16 border-b shrink-0">
-        <BarChart3 className="h-6 w-6 text-primary" />
-        <span className="font-bold text-lg">Profit Tebel</span>
+      <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-border shrink-0">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-[0_12px_28px_-22px_hsl(var(--primary)/0.9)]">
+          <BarChart3 className="h-5 w-5" />
+        </div>
+        <div>
+          <span className="block font-heading text-base font-semibold">Profit Tebel</span>
+          <span className="block text-[11px] text-muted-foreground">Seller analytics</span>
+        </div>
       </div>
 
       {/* Nav */}
@@ -106,7 +111,7 @@ function Sidebar({
       </nav>
 
       {/* Bottom */}
-      <div className="p-3 border-t shrink-0">
+      <div className="p-3 border-t border-sidebar-border shrink-0">
         <p className="text-xs text-muted-foreground px-3">v1.0.0</p>
       </div>
     </div>
@@ -150,7 +155,7 @@ export default function DashboardShell({
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col w-60 border-r shrink-0 bg-card">
+      <aside className="hidden lg:flex flex-col w-60 border-r border-sidebar-border shrink-0 bg-[hsl(var(--sidebar-background)/0.96)] backdrop-blur-xl">
         <Sidebar isAdmin={isAdmin} />
       </aside>
 
@@ -164,7 +169,7 @@ export default function DashboardShell({
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Navbar */}
-        <header className="h-16 border-b bg-card flex items-center justify-between px-4 sm:px-6 shrink-0">
+        <header className="h-16 border-b border-sidebar-border bg-white/88 backdrop-blur-xl flex items-center justify-between px-4 sm:px-6 shrink-0">
           {/* Mobile menu toggle */}
           <Button
             variant="ghost"
@@ -186,7 +191,7 @@ export default function DashboardShell({
 
           {/* User menu */}
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <DropdownMenuTrigger className="flex items-center gap-2 rounded-xl px-2.5 py-1.5 hover:bg-secondary transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/20">
               <Avatar className="h-8 w-8">
                 <AvatarFallback className="text-xs bg-primary text-primary-foreground">
                   {initials}
@@ -226,7 +231,7 @@ function MobileBottomNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname()
   const navItems = getNavItems(isAdmin)
   return (
-    <nav className="lg:hidden border-t bg-card flex items-center justify-around h-16 shrink-0">
+    <nav className="lg:hidden border-t border-sidebar-border bg-white/92 backdrop-blur-xl flex items-center justify-around h-16 shrink-0">
       {navItems.slice(0, 5).map((item) => {
         const Icon = item.icon
         const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
@@ -236,9 +241,9 @@ function MobileBottomNav({ isAdmin }: { isAdmin: boolean }) {
             href={item.href}
             onClick={() => trackEvent('dashboard_nav_clicked', { destination: item.href, surface: 'mobile_bottom_nav' })}
             className={cn(
-              'flex flex-col items-center gap-1 px-3 py-2 text-xs rounded-lg transition-colors',
+              'flex flex-col items-center gap-1 px-3 py-2 text-xs rounded-xl transition-colors',
               isActive
-                ? 'text-primary'
+                ? 'bg-primary/10 text-primary'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >

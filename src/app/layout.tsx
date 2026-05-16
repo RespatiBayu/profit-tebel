@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { AnalyticsScripts } from '@/components/analytics/analytics-scripts'
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://profittebel.com'
 const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID
@@ -77,8 +74,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className={inter.variable}>
-      <body className="antialiased font-sans">
+    <html lang="id">
+      <body className="bg-background font-sans text-foreground antialiased">
         {children}
         <AnalyticsScripts
           gaMeasurementId={GA_MEASUREMENT_ID}

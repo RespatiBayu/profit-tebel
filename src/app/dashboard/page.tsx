@@ -88,7 +88,7 @@ export default async function DashboardPage({
 
       {/* Empty state */}
       {!hasData && (
-        <Card className="border-dashed border-2 bg-muted/20">
+        <Card className="border-dashed border-2 border-primary/18 bg-white/86">
           <CardContent className="flex flex-col items-center text-center py-12 gap-4">
             <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
               <FileSpreadsheet className="h-8 w-8 text-primary" />
@@ -144,34 +144,34 @@ export default async function DashboardPage({
               icon: Upload,
               label: 'Upload Data Baru',
               desc: 'XLSX penghasilan atau CSV iklan',
-              color: 'bg-blue-100 text-blue-600',
+              color: 'bg-primary/10 text-primary',
             },
             {
               href: '/dashboard/profit',
               icon: TrendingUp,
               label: 'Analisis Profit',
               desc: 'Lihat profit per produk & trend',
-              color: 'bg-green-100 text-green-600',
+              color: 'bg-amber-100 text-amber-700',
             },
             {
               href: '/dashboard/ads',
               icon: BarChart3,
               label: 'Analisis Iklan',
               desc: 'SCALE, OPTIMIZE, atau KILL?',
-              color: 'bg-orange-100 text-orange-600',
+              color: 'bg-orange-100 text-orange-700',
             },
             {
               href: '/dashboard/roas-calculator',
               icon: Calculator,
               label: 'Kalkulator ROAS',
               desc: 'Hitung max budget iklan',
-              color: 'bg-purple-100 text-purple-600',
+              color: 'bg-rose-100 text-rose-600',
             },
           ].map((action) => {
             const Icon = action.icon
             return (
               <Link key={action.href} href={action.href}>
-                <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
+                <Card className="cursor-pointer h-full transition-transform duration-200 hover:-translate-y-0.5">
                   <CardContent className="flex items-start gap-3 p-4">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${action.color}`}>
                       <Icon className="h-5 w-5" />
@@ -206,8 +206,8 @@ export default async function DashboardPage({
               <div className="divide-y">
                 {recentUploads.map((upload) => (
                   <div key={upload.id} className="flex items-center gap-3 p-4">
-                    <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                      <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                      <FileSpreadsheet className="h-4 w-4 text-primary" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{upload.file_name}</p>

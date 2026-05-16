@@ -67,7 +67,7 @@ export function MultiSelect({
     <DropdownMenu>
       <DropdownMenuTrigger
         className={cn(
-          'h-8 text-xs px-3 py-1 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground flex items-center justify-between gap-2 font-normal shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'h-9 text-xs px-3 py-1 rounded-xl border border-input bg-white/88 hover:border-primary/18 hover:bg-accent hover:text-accent-foreground flex items-center justify-between gap-2 font-normal shadow-[0_10px_28px_-24px_rgba(15,23,42,0.45)] transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20',
           className
         )}
       >
