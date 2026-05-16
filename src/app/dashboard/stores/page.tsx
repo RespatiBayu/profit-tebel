@@ -36,10 +36,13 @@ import { trackEvent } from '@/lib/analytics'
 import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 
 type DialogMode = 'create' | 'edit' | null
+type UserRole = 'superadmin' | 'admin' | 'member'
 
 export default function StoresPage() {
   const searchParams = useSearchParams()
   const [stores, setStores] = useState<Store[]>([])
+  const [userRole, setUserRole] = useState<UserRole>('member')
+  const [canCreateStore, setCanCreateStore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [dialogMode, setDialogMode] = useState<DialogMode>(null)
   const [editingStore, setEditingStore] = useState<Store | null>(null)
@@ -55,6 +58,8 @@ export default function StoresPage() {
     const res = await fetch('/api/stores')
     const data = await res.json()
     setStores(data.stores ?? [])
+    setUserRole(data.role ?? 'member')
+    setCanCreateStore(Boolean(data.canCreateStore))
     setLoading(false)
   }
 
@@ -71,6 +76,9 @@ export default function StoresPage() {
   }, [])
 
   function openCreate() {
+    if (!canCreateStore) {
+      return
+    }
     trackEvent('store_dialog_opened', { mode: 'create' })
     setDialogMode('create')
     setEditingStore(null)
@@ -185,13 +193,17 @@ export default function StoresPage() {
         <div>
           <h1 className="text-2xl font-bold">Toko Saya</h1>
           <p className="text-muted-foreground mt-1">
-            Kelola toko yang kamu miliki atau yang dibagikan ke akunmu. Semua data upload akan dipisahkan per toko.
+            {canCreateStore
+              ? 'Kelola toko yang kamu miliki atau yang dibagikan ke akunmu. Semua data upload akan dipisahkan per toko.'
+              : 'Lihat toko yang dibagikan ke akunmu oleh admin. Jika butuh toko baru atau akses tambahan, hubungi admin kamu.'}
           </p>
         </div>
-        <Button onClick={openCreate} className="gap-2">
-          <Plus className="h-4 w-4" />
-          Tambah Toko
-        </Button>
+        {canCreateStore && (
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Tambah Toko
+          </Button>
+        )}
       </div>
 
       {/* List */}
@@ -206,12 +218,16 @@ export default function StoresPage() {
             <StoreIcon className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
             <h3 className="font-semibold mb-1">Belum ada toko</h3>
             <p className="text-muted-foreground text-sm mb-4">
-              Tambah toko pertama kamu untuk mulai upload data.
+              {canCreateStore
+                ? 'Tambah toko pertama kamu untuk mulai upload data.'
+                : 'Belum ada toko yang dibagikan ke akun ini.'}
             </p>
-            <Button onClick={openCreate} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Tambah Toko Pertama
-            </Button>
+            {canCreateStore && (
+              <Button onClick={openCreate} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Tambah Toko Pertama
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -279,10 +295,20 @@ export default function StoresPage() {
       <Alert>
         <AlertTriangle className="h-4 w-4" />
         <AlertDescription className="text-sm">
-          Pakai switcher di pojok atas untuk pindah antar toko atau lihat gabungan semua
-          toko yang bisa kamu akses.
+          {userRole === 'member'
+            ? 'Pakai switcher di pojok atas untuk pindah antar toko yang dibagikan ke akunmu.'
+            : 'Pakai switcher di pojok atas untuk pindah antar toko atau lihat gabungan semua toko yang bisa kamu akses.'}
         </AlertDescription>
       </Alert>
+
+      {!loading && !canCreateStore && userRole === 'member' && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Akun member tidak bisa membuat toko sendiri. Akses toko akan diberikan oleh admin.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Create/Edit Dialog */}
       <Dialog open={dialogMode !== null} onOpenChange={(o) => !o && closeDialog()}>

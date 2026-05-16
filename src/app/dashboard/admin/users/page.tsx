@@ -15,13 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { MultiSelect } from '@/components/ui/multi-select'
 import {
   Loader2,
@@ -30,13 +23,19 @@ import {
   UserPlus,
   Users,
   AlertCircle,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 
-type AdminUser = {
+type UserRole = 'superadmin' | 'admin' | 'member'
+type ManagedRole = 'admin' | 'member'
+type DialogMode = 'create' | 'edit' | null
+
+type ManagedUser = {
   id: string
   email: string | null
   full_name: string | null
-  is_paid: boolean | null
+  role: ManagedRole
   created_at: string
   stores: Array<{
     id: string
@@ -45,26 +44,27 @@ type AdminUser = {
   }>
 }
 
-type AdminStore = {
+type AssignableStore = {
   id: string
   name: string
   marketplace: string
-  owner_id: string
-  owner_email: string | null
-  owner_name: string | null
 }
 
 export default function AdminUsersPage() {
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [stores, setStores] = useState<AdminStore[]>([])
+  const [users, setUsers] = useState<ManagedUser[]>([])
+  const [stores, setStores] = useState<AssignableStore[]>([])
+  const [actorRole, setActorRole] = useState<UserRole | null>(null)
+  const [managedRole, setManagedRole] = useState<ManagedRole | null>(null)
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogMode, setDialogMode] = useState<DialogMode>(null)
+  const [editingUser, setEditingUser] = useState<ManagedUser | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
-  const [isPaid, setIsPaid] = useState<'yes' | 'no'>('yes')
   const [selectedStores, setSelectedStores] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function loadData() {
@@ -75,13 +75,15 @@ export default function AdminUsersPage() {
     const data = await res.json()
 
     if (!res.ok) {
-      setError(data.error ?? 'Gagal memuat data admin')
+      setError(data.error ?? 'Gagal memuat data pengguna')
       setLoading(false)
       return
     }
 
     setUsers(data.users ?? [])
     setStores(data.stores ?? [])
+    setActorRole(data.actorRole ?? null)
+    setManagedRole(data.managedRole ?? null)
     setLoading(false)
   }
 
@@ -93,43 +95,92 @@ export default function AdminUsersPage() {
     setEmail('')
     setPassword('')
     setFullName('')
-    setIsPaid('yes')
     setSelectedStores([])
+    setEditingUser(null)
     setError(null)
   }
 
-  function openDialog() {
+  function openCreate() {
     resetForm()
+    setDialogMode('create')
     setDialogOpen(true)
   }
 
-  async function handleCreateUser(e: React.FormEvent) {
+  function openEdit(user: ManagedUser) {
+    setDialogMode('edit')
+    setEditingUser(user)
+    setFullName(user.full_name ?? '')
+    setEmail(user.email ?? '')
+    setPassword('')
+    setSelectedStores(user.stores.map((store) => store.id))
+    setError(null)
+    setDialogOpen(true)
+  }
+
+  function closeDialog() {
+    setDialogOpen(false)
+    setDialogMode(null)
+    setEditingUser(null)
+    setError(null)
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
 
-    const res = await fetch('/api/admin/users', {
-      method: 'POST',
+    const isEdit = dialogMode === 'edit' && editingUser
+    const url = isEdit ? `/api/admin/users/${editingUser.id}` : '/api/admin/users'
+    const method = isEdit ? 'PATCH' : 'POST'
+
+    const payload = {
+      email,
+      password,
+      fullName,
+      storeIds: managedRole === 'member' ? selectedStores : [],
+    }
+
+    const res = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        password,
-        fullName,
-        isPaid: isPaid === 'yes',
-        storeIds: selectedStores,
-      }),
+      body: JSON.stringify(payload),
     })
     const data = await res.json()
 
     if (!res.ok) {
-      setError(data.error ?? 'Gagal membuat akun user')
+      setError(data.error ?? 'Gagal menyimpan akun')
       setSubmitting(false)
       return
     }
 
     setSubmitting(false)
-    setDialogOpen(false)
+    closeDialog()
     resetForm()
+    await loadData()
+  }
+
+  async function handleDelete(user: ManagedUser) {
+    const targetLabel = user.full_name || user.email || 'akun ini'
+    const confirmed = confirm(
+      `Hapus ${targetLabel}?\n\nAksi ini akan menghapus akses login dan data akun tersebut.`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingId(user.id)
+
+    const res = await fetch(`/api/admin/users/${user.id}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      setError(data.error ?? 'Gagal menghapus akun')
+      setDeletingId(null)
+      return
+    }
+
+    setDeletingId(null)
     await loadData()
   }
 
@@ -138,21 +189,40 @@ export default function AdminUsersPage() {
     label: `${store.name} (${store.marketplace})`,
   }))
 
+  const pageTitle =
+    actorRole === 'superadmin' ? 'Manajemen Admin' : 'Manajemen Member'
+  const pageDescription =
+    actorRole === 'superadmin'
+      ? 'Superadmin dapat membuat, mengubah, dan menghapus akun admin yang dibuatnya.'
+      : 'Admin dapat membuat, mengubah, dan menghapus akun member di bawah akunnya sendiri.'
+  const createLabel = managedRole === 'admin' ? 'Buat Admin' : 'Buat Member'
+  const dialogTitle =
+    dialogMode === 'edit'
+      ? managedRole === 'admin'
+        ? 'Edit Akun Admin'
+        : 'Edit Akun Member'
+      : managedRole === 'admin'
+        ? 'Buat Akun Admin'
+        : 'Buat Akun Member'
+  const dialogDescription =
+    managedRole === 'admin'
+      ? 'Admin akan membuat toko dan mengelola member-nya sendiri setelah akun aktif.'
+      : 'Member bisa dibuat tanpa toko dulu. Toko bisa di-assign sekarang atau nanti.'
+  const roleBadgeLabel = managedRole === 'admin' ? 'Admin' : 'Member'
+
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <ShieldCheck className="h-6 w-6 text-primary" />
-            Admin User
+            {pageTitle}
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Buat akun user baru dan batasi aksesnya hanya ke toko yang dipilih.
-          </p>
+          <p className="text-muted-foreground mt-1">{pageDescription}</p>
         </div>
-        <Button onClick={openDialog} className="gap-2">
+        <Button onClick={openCreate} className="gap-2" disabled={!managedRole}>
           <UserPlus className="h-4 w-4" />
-          Buat User
+          {createLabel}
         </Button>
       </div>
 
@@ -166,7 +236,9 @@ export default function AdminUsersPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Total User</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">
+              Total {roleBadgeLabel}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{users.length}</p>
@@ -174,19 +246,27 @@ export default function AdminUsersPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Total Toko</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">
+              {managedRole === 'member' ? 'Toko yang Bisa Di-assign' : 'Akun Siap Dikelola'}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{stores.length}</p>
+            <p className="text-3xl font-bold">
+              {managedRole === 'member' ? stores.length : users.length}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">User Aktif Berbayar</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">
+              {managedRole === 'member' ? 'Member Tanpa Toko' : 'Admin Baru'}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">
-              {users.filter((user) => user.is_paid).length}
+              {managedRole === 'member'
+                ? users.filter((user) => user.stores.length === 0).length
+                : users.length}
             </p>
           </CardContent>
         </Card>
@@ -196,18 +276,18 @@ export default function AdminUsersPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="h-4 w-4 text-primary" />
-            Daftar User
+            Daftar {roleBadgeLabel}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="py-12 text-center text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-              Memuat data user...
+              Memuat data akun...
             </div>
           ) : users.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">
-              Belum ada user yang dibuat.
+              Belum ada akun {roleBadgeLabel.toLowerCase()} yang dibuat.
             </div>
           ) : (
             <div className="space-y-3">
@@ -219,8 +299,8 @@ export default function AdminUsersPage() {
                   <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold">{user.full_name || user.email || 'Tanpa Nama'}</p>
-                      <Badge variant={user.is_paid ? 'default' : 'secondary'}>
-                        {user.is_paid ? 'Paid' : 'Free'}
+                      <Badge variant="outline" className="capitalize">
+                        {user.role}
                       </Badge>
                     </div>
                     <p className="text-sm text-muted-foreground break-all">{user.email}</p>
@@ -228,21 +308,47 @@ export default function AdminUsersPage() {
                       Dibuat {new Date(user.created_at).toLocaleDateString('id-ID')}
                     </p>
                   </div>
-                  <div className="space-y-2 lg:max-w-[45%]">
-                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                      <StoreIcon className="h-3.5 w-3.5" />
-                      Toko yang bisa diakses
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {user.stores.length === 0 ? (
-                        <Badge variant="outline">Belum ada toko</Badge>
-                      ) : (
-                        user.stores.map((store) => (
-                          <Badge key={store.id} variant="outline">
-                            {store.name} ({store.marketplace})
-                          </Badge>
-                        ))
-                      )}
+
+                  <div className="flex flex-col gap-3 lg:items-end">
+                    {managedRole === 'member' && (
+                      <div className="space-y-2 lg:max-w-[420px]">
+                        <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <StoreIcon className="h-3.5 w-3.5" />
+                          Toko yang bisa diakses
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {user.stores.length === 0 ? (
+                            <Badge variant="outline">Belum ada toko</Badge>
+                          ) : (
+                            user.stores.map((store) => (
+                              <Badge key={store.id} variant="outline">
+                                {store.name} ({store.marketplace})
+                              </Badge>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openEdit(user)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => handleDelete(user)}
+                        disabled={deletingId === user.id}
+                      >
+                        {deletingId === user.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <Trash2 className="h-4 w-4 mr-2" />
+                        )}
+                        Hapus
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -252,23 +358,31 @@ export default function AdminUsersPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeDialog()
+            return
+          }
+
+          setDialogOpen(true)
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Buat Akun User Baru</DialogTitle>
-            <DialogDescription>
-              User yang dibuat di sini hanya akan melihat toko yang kamu assign.
-            </DialogDescription>
+            <DialogTitle>{dialogTitle}</DialogTitle>
+            <DialogDescription>{dialogDescription}</DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleCreateUser} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <Label htmlFor="fullName">Nama</Label>
               <Input
                 id="fullName"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="Nama user"
+                placeholder={`Nama ${roleBadgeLabel.toLowerCase()}`}
                 className="mt-1"
               />
             </div>
@@ -287,53 +401,46 @@ export default function AdminUsersPage() {
             </div>
 
             <div>
-              <Label htmlFor="password">Password Sementara</Label>
+              <Label htmlFor="password">
+                {dialogMode === 'edit' ? 'Password Baru (opsional)' : 'Password Sementara'}
+              </Label>
               <Input
                 id="password"
                 type="text"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Minimal 8 karakter"
-                required
+                placeholder={
+                  dialogMode === 'edit' ? 'Kosongkan jika tidak diubah' : 'Minimal 8 karakter'
+                }
+                required={dialogMode === 'create'}
                 className="mt-1"
               />
             </div>
 
-            <div>
-              <Label>Status Paket</Label>
-              <Select value={isPaid} onValueChange={(value) => setIsPaid(value as 'yes' | 'no')}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="yes">Paid</SelectItem>
-                  <SelectItem value="no">Free</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label>Toko yang Bisa Diakses</Label>
-              <div className="mt-1">
-                <MultiSelect
-                  options={storeOptions}
-                  selected={selectedStores}
-                  onChange={setSelectedStores}
-                  placeholder="Pilih toko"
-                  allLabel="Semua toko"
-                  className="w-full h-10 text-sm"
-                />
+            {managedRole === 'member' && (
+              <div>
+                <Label>Toko yang Bisa Diakses</Label>
+                <div className="mt-1">
+                  <MultiSelect
+                    options={storeOptions}
+                    selected={selectedStores}
+                    onChange={setSelectedStores}
+                    placeholder="Pilih toko (opsional)"
+                    allLabel="Semua toko"
+                    className="w-full h-10 text-sm"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Member boleh dibuat tanpa toko. Kamu bisa assign akses toko nanti.
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Pilih minimal satu toko. User hanya akan melihat toko yang dipilih di sini.
-              </p>
-            </div>
+            )}
 
-            {stores.length === 0 && (
+            {managedRole === 'member' && stores.length === 0 && (
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Belum ada toko yang tersedia untuk di-assign ke user baru.
+                  Kamu belum punya toko. Member tetap bisa dibuat sekarang tanpa akses toko.
                 </AlertDescription>
               </Alert>
             )}
@@ -349,22 +456,18 @@ export default function AdminUsersPage() {
               <Button
                 type="button"
                 variant="ghost"
-                onClick={() => setDialogOpen(false)}
+                onClick={closeDialog}
                 disabled={submitting}
               >
                 Batal
               </Button>
-              <Button
-                type="submit"
-                disabled={submitting || stores.length === 0 || selectedStores.length === 0}
-                className="gap-2"
-              >
+              <Button type="submit" disabled={submitting} className="gap-2">
                 {submitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <UserPlus className="h-4 w-4" />
                 )}
-                Buat User
+                {dialogMode === 'edit' ? 'Simpan Perubahan' : createLabel}
               </Button>
             </DialogFooter>
           </form>

@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
-import { isAdminEmail } from '@/lib/admin'
 import { createClient } from '@/lib/supabase/server'
+import { getCurrentUserAccess } from '@/lib/roles'
 
 export default async function AdminLayout({
   children,
@@ -8,13 +8,13 @@ export default async function AdminLayout({
   children: React.ReactNode
 }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const access = await getCurrentUserAccess(supabase)
 
-  if (!user) {
+  if (!access) {
     redirect('/login')
   }
 
-  if (!isAdminEmail(user.email)) {
+  if (!access.isPrivileged) {
     notFound()
   }
 

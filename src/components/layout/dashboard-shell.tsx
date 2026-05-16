@@ -6,6 +6,8 @@ import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { setAnalyticsTags, trackEvent } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
+import type { AppUserRole } from '@/types'
+import { isPrivilegedRole } from '@/lib/roles'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -44,9 +46,9 @@ const baseNavItems = [
   { href: '/dashboard/upload', label: 'Upload Data', icon: Upload },
 ]
 
-function getNavItems(isAdmin: boolean) {
-  return isAdmin
-    ? [...baseNavItems, { href: '/dashboard/admin/users', label: 'Admin User', icon: ShieldCheck }]
+function getNavItems(userRole: AppUserRole) {
+  return isPrivilegedRole(userRole)
+    ? [...baseNavItems, { href: '/dashboard/admin/users', label: 'Manajemen User', icon: ShieldCheck }]
     : baseNavItems
 }
 
@@ -83,13 +85,13 @@ function NavLink({
 }
 
 function Sidebar({
-  isAdmin,
+  userRole,
   onClose,
 }: {
-  isAdmin: boolean
+  userRole: AppUserRole
   onClose?: () => void
 }) {
-  const navItems = getNavItems(isAdmin)
+  const navItems = getNavItems(userRole)
 
   return (
     <div className="flex flex-col h-full">
@@ -122,11 +124,11 @@ function Sidebar({
 export default function DashboardShell({
   children,
   user,
-  isAdmin,
+  userRole,
 }: {
   children: React.ReactNode
   user: User
-  isAdmin: boolean
+  userRole: AppUserRole
 }) {
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -136,10 +138,10 @@ export default function DashboardShell({
   useEffect(() => {
     setAnalyticsTags({
       auth_state: 'logged_in',
-      user_role: isAdmin ? 'admin' : 'member',
+      user_role: userRole,
       app_area: 'dashboard',
     })
-  }, [isAdmin])
+  }, [userRole])
 
   async function handleLogout() {
     trackEvent('auth_logout_clicked', { surface: 'dashboard' })
@@ -157,13 +159,13 @@ export default function DashboardShell({
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-60 border-r border-sidebar-border shrink-0 bg-[hsl(var(--sidebar-background)/0.96)] backdrop-blur-xl">
-        <Sidebar isAdmin={isAdmin} />
+        <Sidebar userRole={userRole} />
       </aside>
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="p-0 w-60">
-          <Sidebar isAdmin={isAdmin} onClose={() => setMobileOpen(false)} />
+          <Sidebar userRole={userRole} onClose={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>
 
@@ -223,15 +225,15 @@ export default function DashboardShell({
         </main>
 
         {/* Mobile Bottom Nav */}
-        <MobileBottomNav isAdmin={isAdmin} />
+        <MobileBottomNav userRole={userRole} />
       </div>
     </div>
   )
 }
 
-function MobileBottomNav({ isAdmin }: { isAdmin: boolean }) {
+function MobileBottomNav({ userRole }: { userRole: AppUserRole }) {
   const pathname = usePathname()
-  const navItems = getNavItems(isAdmin)
+  const navItems = getNavItems(userRole)
   return (
     <nav className="lg:hidden border-t border-sidebar-border bg-white/92 backdrop-blur-xl flex items-center justify-around h-16 shrink-0">
       {navItems.slice(0, 5).map((item) => {

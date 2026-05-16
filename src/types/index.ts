@@ -126,6 +126,8 @@ export interface UploadJobStatusResponse {
   finishedAt: string | null
 }
 
+export type AppUserRole = 'superadmin' | 'admin' | 'member'
+
 export type StoreAccessRole = 'owner' | 'member'
 
 export interface AvailablePeriods {
