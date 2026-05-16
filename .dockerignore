@@ -1,0 +1,13 @@
+.git
+.github
+.next
+node_modules
+npm-debug.log
+README.md
+demo-account-setup.md
+deploy
+supabase
+.env
+.env.local
+.env.*.local
+.DS_Store
