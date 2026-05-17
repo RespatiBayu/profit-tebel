@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
-import { MasterResolver, normalizeName, type MasterRow as ResolverMasterRow } from '@/lib/master-resolver'
+import { MasterResolver, type MasterRow as ResolverMasterRow } from '@/lib/master-resolver'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import { parseShopeeAdsProduct } from '@/lib/parsers/shopee-ads-product'
 import { parseShopeeIncome } from '@/lib/parsers/shopee-income'
@@ -54,6 +54,228 @@ async function setProgress(ctx: UploadProcessorContext, progress: number, label:
 function ensureValidDate(value: string | null | undefined) {
   const isoDate = /^\d{4}-\d{2}-\d{2}$/
   return value && isoDate.test(value) ? value : null
+}
+
+type MasterProductRow = ResolverMasterRow & {
+  seller_sku: string | null
+}
+
+const MASTER_PRODUCT_SELECT = 'id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost'
+
+async function loadMasterRows(
+  supabase: SupabaseClient,
+  storeId: string,
+): Promise<MasterProductRow[]> {
+  const { data } = await supabase
+    .from('master_products')
+    .select(MASTER_PRODUCT_SELECT)
+    .eq('store_id', storeId)
+
+  return (data ?? []) as MasterProductRow[]
+}
+
+function replaceMasterRow(rows: MasterProductRow[], next: MasterProductRow) {
+  const index = rows.findIndex((row) => row.id === next.id)
+  if (index === -1) rows.push(next)
+  else rows[index] = next
+}
+
+async function syncMasterProductsFromNumericRows(params: {
+  supabase: SupabaseClient
+  userId: string
+  storeId: string
+  marketplace: string
+  rows: Array<{ productId: string | null; productName: string | null }>
+}): Promise<{ masterRows: MasterProductRow[]; createdCount: number; migratedCount: number }> {
+  const uniqueRows = new Map<string, { productId: string; productName: string | null }>()
+  for (const row of params.rows) {
+    if (!row.productId) continue
+    const existing = uniqueRows.get(row.productId)
+    if (!existing || (!existing.productName && row.productName)) {
+      uniqueRows.set(row.productId, {
+        productId: row.productId,
+        productName: row.productName,
+      })
+    }
+  }
+
+  const masterRows = await loadMasterRows(params.supabase, params.storeId)
+  let resolver = new MasterResolver(masterRows)
+  const byCanonicalId = new Map(masterRows.map((row) => [row.marketplace_product_id, row]))
+  let createdCount = 0
+  let migratedCount = 0
+
+  for (const row of Array.from(uniqueRows.values())) {
+    const direct = byCanonicalId.get(row.productId)
+    if (direct) {
+      if (
+        row.productName &&
+        (!direct.product_name || direct.product_name === `Produk ${row.productId}`) &&
+        direct.product_name !== row.productName
+      ) {
+        const { data: updated } = await params.supabase
+          .from('master_products')
+          .update({ product_name: row.productName })
+          .eq('id', direct.id)
+          .select(MASTER_PRODUCT_SELECT)
+          .single()
+        if (updated) {
+          const typedUpdated = updated as MasterProductRow
+          replaceMasterRow(masterRows, typedUpdated)
+          byCanonicalId.set(typedUpdated.marketplace_product_id, typedUpdated)
+          resolver = new MasterResolver(masterRows)
+        }
+      }
+      continue
+    }
+
+    const matchedByName = row.productName
+      ? resolver.resolve({ productName: row.productName })
+      : undefined
+
+    if (
+      matchedByName &&
+      matchedByName.marketplace_product_id !== row.productId &&
+      !/^\d+$/.test(matchedByName.marketplace_product_id)
+    ) {
+      const { data: updated } = await params.supabase
+        .from('master_products')
+        .update({
+          marketplace_product_id: row.productId,
+          seller_sku: matchedByName.seller_sku ?? matchedByName.marketplace_product_id,
+          numeric_id: row.productId,
+          product_name: row.productName ?? matchedByName.product_name,
+        })
+        .eq('id', matchedByName.id)
+        .select(MASTER_PRODUCT_SELECT)
+        .single()
+
+      if (updated) {
+        const typedUpdated = updated as MasterProductRow
+        replaceMasterRow(masterRows, typedUpdated)
+        byCanonicalId.delete(matchedByName.marketplace_product_id)
+        byCanonicalId.set(typedUpdated.marketplace_product_id, typedUpdated)
+        resolver = new MasterResolver(masterRows)
+        migratedCount++
+        continue
+      }
+    }
+
+    const { data: inserted } = await params.supabase
+      .from('master_products')
+      .insert({
+        user_id: params.userId,
+        store_id: params.storeId,
+        marketplace_product_id: row.productId,
+        seller_sku: null,
+        numeric_id: row.productId,
+        product_name: row.productName ?? `Produk ${row.productId}`,
+        marketplace: params.marketplace,
+        hpp: 0,
+        packaging_cost: 0,
+      })
+      .select(MASTER_PRODUCT_SELECT)
+      .single()
+
+    if (inserted) {
+      const typedInserted = inserted as MasterProductRow
+      masterRows.push(typedInserted)
+      byCanonicalId.set(typedInserted.marketplace_product_id, typedInserted)
+      resolver = new MasterResolver(masterRows)
+      createdCount++
+    }
+  }
+
+  return { masterRows, createdCount, migratedCount }
+}
+
+async function syncMasterProductsFromSellerSkus(params: {
+  supabase: SupabaseClient
+  userId: string
+  storeId: string
+  marketplace: string
+  rows: Array<{ sellerSku: string | null; productName: string | null }>
+}): Promise<{
+  masterRows: MasterProductRow[]
+  createdCount: number
+  enrichedCount: number
+  skuToCanonicalId: Map<string, string>
+}> {
+  const uniqueRows = new Map<string, { sellerSku: string; productName: string | null }>()
+  for (const row of params.rows) {
+    if (!row.sellerSku) continue
+    const existing = uniqueRows.get(row.sellerSku)
+    if (!existing || (!existing.productName && row.productName)) {
+      uniqueRows.set(row.sellerSku, {
+        sellerSku: row.sellerSku,
+        productName: row.productName,
+      })
+    }
+  }
+
+  const masterRows = await loadMasterRows(params.supabase, params.storeId)
+  let resolver = new MasterResolver(masterRows)
+  const skuToCanonicalId = new Map<string, string>()
+  let createdCount = 0
+  let enrichedCount = 0
+
+  for (const row of Array.from(uniqueRows.values())) {
+    const matched = resolver.resolve({
+      anyId: row.sellerSku,
+      productName: row.productName,
+    })
+
+    if (matched) {
+      skuToCanonicalId.set(row.sellerSku, matched.marketplace_product_id)
+
+      if (!matched.seller_sku && matched.marketplace_product_id !== row.sellerSku) {
+        const { data: updated } = await params.supabase
+          .from('master_products')
+          .update({
+            seller_sku: row.sellerSku,
+            product_name: row.productName ?? matched.product_name,
+          })
+          .eq('id', matched.id)
+          .select(MASTER_PRODUCT_SELECT)
+          .single()
+
+        if (updated) {
+          const typedUpdated = updated as MasterProductRow
+          replaceMasterRow(masterRows, typedUpdated)
+          resolver = new MasterResolver(masterRows)
+          skuToCanonicalId.set(row.sellerSku, typedUpdated.marketplace_product_id)
+          enrichedCount++
+        }
+      }
+
+      continue
+    }
+
+    const { data: inserted } = await params.supabase
+      .from('master_products')
+      .insert({
+        user_id: params.userId,
+        store_id: params.storeId,
+        marketplace_product_id: row.sellerSku,
+        seller_sku: row.sellerSku,
+        product_name: row.productName ?? row.sellerSku,
+        marketplace: params.marketplace,
+        hpp: 0,
+        packaging_cost: 0,
+      })
+      .select(MASTER_PRODUCT_SELECT)
+      .single()
+
+    if (inserted) {
+      const typedInserted = inserted as MasterProductRow
+      masterRows.push(typedInserted)
+      resolver = new MasterResolver(masterRows)
+      skuToCanonicalId.set(row.sellerSku, typedInserted.marketplace_product_id)
+      createdCount++
+    }
+  }
+
+  return { masterRows, createdCount, enrichedCount, skuToCanonicalId }
 }
 
 export async function processUploadJobByType(
@@ -277,29 +499,18 @@ export async function processAdsUpload(ctx: UploadProcessorContext): Promise<Upl
     .update({ record_count: insertedCount + updatedCount })
     .eq('id', batch.id)
 
-  let newProducts = 0
-  for (const row of rows) {
-    if (!row.product_code || row.product_code === '-') continue
-
-    const { data: existing } = await ctx.supabase
-      .from('master_products')
-      .select('id')
-      .eq('store_id', storeId)
-      .eq('marketplace_product_id', row.product_code)
-      .maybeSingle()
-
-    if (!existing) {
-      const { error } = await ctx.supabase.from('master_products').insert({
-        user_id: ctx.userId,
-        store_id: storeId,
-        marketplace_product_id: row.product_code,
-        product_name: row.product_name ?? `Produk ${row.product_code}`,
-        marketplace: ctx.marketplace,
-        hpp: 0,
-        packaging_cost: 0,
-      })
-      if (!error) newProducts++
-    }
+  const { createdCount: newProducts, migratedCount: migratedMasters } = await syncMasterProductsFromNumericRows({
+    supabase: ctx.supabase,
+    userId: ctx.userId,
+    storeId,
+    marketplace: ctx.marketplace,
+    rows: rows.map((row) => ({
+      productId: row.product_code === '-' ? null : row.product_code,
+      productName: row.product_name,
+    })),
+  })
+  if (migratedMasters > 0) {
+    warnings.push(`${migratedMasters} master produk lama disambungkan ke Product ID Shopee dari data iklan`)
   }
 
   await setProgress(ctx, 85, 'Membersihkan produk duplikat')
@@ -548,29 +759,18 @@ export async function processAdsProductUpload(ctx: UploadProcessorContext): Prom
     .update({ record_count: insertedCount + updatedCount })
     .eq('id', batch.id)
 
-  let newProducts = 0
-  for (const row of rows) {
-    if (!row.product_code || row.product_code === '-') continue
-
-    const { data: existing } = await ctx.supabase
-      .from('master_products')
-      .select('id')
-      .eq('store_id', storeId)
-      .eq('marketplace_product_id', row.product_code)
-      .maybeSingle()
-
-    if (!existing) {
-      const { error } = await ctx.supabase.from('master_products').insert({
-        user_id: ctx.userId,
-        store_id: storeId,
-        marketplace_product_id: row.product_code,
-        product_name: row.product_name ?? `Produk ${row.product_code}`,
-        marketplace: ctx.marketplace,
-        hpp: 0,
-        packaging_cost: 0,
-      })
-      if (!error) newProducts++
-    }
+  const { createdCount: newProducts, migratedCount: migratedMasters } = await syncMasterProductsFromNumericRows({
+    supabase: ctx.supabase,
+    userId: ctx.userId,
+    storeId,
+    marketplace: ctx.marketplace,
+    rows: rows.map((row) => ({
+      productId: row.product_code === '-' ? null : row.product_code,
+      productName: row.product_name,
+    })),
+  })
+  if (migratedMasters > 0) {
+    warnings.push(`${migratedMasters} master produk lama disambungkan ke Product ID Shopee dari GMV Max`)
   }
 
   await setProgress(ctx, 85, 'Membersihkan produk duplikat')
@@ -615,17 +815,6 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
 
   await ensureProfileRow(ctx.supabase, ctx.userId, ctx.userEmail)
   const storeId = await resolveUploadStore(ctx.supabase, ctx.userId, ctx.requestedStoreId, ctx.marketplace)
-
-  const { count: ordersAllCount } = await ctx.supabase
-    .from('orders_all')
-    .select('id', { count: 'exact', head: true })
-    .eq('store_id', storeId)
-
-  if (!ordersAllCount || ordersAllCount === 0) {
-    throw new Error(
-      'Upload file Order.all dulu untuk store ini. Order.all berisi mapping produk per pesanan yang dibutuhkan untuk membuat master produk dan menghitung HPP. Income hanya berisi data finansial.'
-    )
-  }
 
   await setProgress(ctx, 25, 'Menyiapkan batch upload')
 
@@ -730,6 +919,25 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
   }
 
   const duplicateCount = unchangedCount
+  let newProducts = 0
+  let migratedMasters = 0
+  let masterRowsForIncome: MasterProductRow[] = []
+
+  if (opfRows.length > 0) {
+    const synced = await syncMasterProductsFromNumericRows({
+      supabase: ctx.supabase,
+      userId: ctx.userId,
+      storeId,
+      marketplace: ctx.marketplace,
+      rows: opfRows.map((row) => ({
+        productId: row.marketplace_product_id,
+        productName: row.product_name,
+      })),
+    })
+    masterRowsForIncome = synced.masterRows
+    newProducts = synced.createdCount
+    migratedMasters = synced.migratedCount
+  }
 
   const opfRowsTotal = opfRows.length
   let opfMatchedTotal = 0
@@ -737,16 +945,55 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
   const opfUnmatchedSamples: Array<{ id: string | null; name: string | null }> = []
   let opUpsertSuccess = 0
 
+  if (migratedMasters > 0) {
+    warnings.push(`${migratedMasters} master produk lama disambungkan ke Product ID Shopee dari Seller Fee`)
+  }
+
   if (opfRows.length > 0) {
     try {
-      const { data: masterRows } = await ctx.supabase
-        .from('master_products')
-        .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-        .eq('store_id', storeId)
+      const resolver = new MasterResolver(masterRowsForIncome)
+      const existingPerOrder = new Map<string, Map<string, { name: string | null; qty: number }>>()
+      const EXISTING_CHUNK = 200
 
-      const resolver = new MasterResolver((masterRows ?? []) as ResolverMasterRow[])
-      const numericIdUpdates = new Map<string, string>()
-      const perOrderAgg = new Map<string, Map<string, { name: string | null; qty: number }>>()
+      type ExistingOpRow = {
+        order_number: string
+        marketplace_product_id: string
+        product_name: string | null
+        quantity: number | null
+      }
+
+      for (let i = 0; i < incomingOrderNumbers.length; i += EXISTING_CHUNK) {
+        const chunk = incomingOrderNumbers.slice(i, i + EXISTING_CHUNK)
+        const { data: existingOrderProducts } = await ctx.supabase
+          .from('order_products')
+          .select('order_number,marketplace_product_id,product_name,quantity')
+          .eq('store_id', storeId)
+          .in('order_number', chunk)
+
+        for (const row of (existingOrderProducts ?? []) as ExistingOpRow[]) {
+          const master = resolver.resolve({
+            anyId: row.marketplace_product_id,
+            productName: row.product_name,
+          })
+          const canonicalId = master?.marketplace_product_id ?? row.marketplace_product_id
+          let orderMap = existingPerOrder.get(row.order_number)
+          if (!orderMap) {
+            orderMap = new Map()
+            existingPerOrder.set(row.order_number, orderMap)
+          }
+          const existing = orderMap.get(canonicalId)
+          if (existing) {
+            existing.qty += row.quantity ?? 1
+          } else {
+            orderMap.set(canonicalId, {
+              name: master?.product_name ?? row.product_name,
+              qty: row.quantity ?? 1,
+            })
+          }
+        }
+      }
+
+      const opfPerOrder = new Map<string, Map<string, { name: string | null; qty: number }>>()
       let opfMatched = 0
       let opfUnmatched = 0
 
@@ -769,14 +1016,10 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
 
         opfMatched++
 
-        if (!master.numeric_id && op.marketplace_product_id) {
-          numericIdUpdates.set(master.id, op.marketplace_product_id)
-        }
-
-        let orderMap = perOrderAgg.get(op.order_number)
+        let orderMap = opfPerOrder.get(op.order_number)
         if (!orderMap) {
           orderMap = new Map()
-          perOrderAgg.set(op.order_number, orderMap)
+          opfPerOrder.set(op.order_number, orderMap)
         }
 
         const canonicalId = master.marketplace_product_id
@@ -788,13 +1031,6 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
         }
       }
 
-      for (const [masterId, numericId] of Array.from(numericIdUpdates.entries())) {
-        await ctx.supabase
-          .from('master_products')
-          .update({ numeric_id: numericId })
-          .eq('id', masterId)
-      }
-
       const opUpsertRows: Array<{
         user_id: string
         store_id: string
@@ -804,7 +1040,49 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
         quantity: number
       }> = []
 
-      for (const [orderNum, prodMap] of Array.from(perOrderAgg.entries())) {
+      const finalPerOrder = new Map<string, Map<string, { name: string | null; qty: number }>>()
+      for (const orderNum of incomingOrderNumbers) {
+        const existingMap = existingPerOrder.get(orderNum)
+        const opfMap = opfPerOrder.get(orderNum)
+        const finalMap = new Map<string, { name: string | null; qty: number }>()
+
+        if (existingMap && existingMap.size > 0) {
+          for (const [canonicalId, info] of Array.from(existingMap.entries())) {
+            finalMap.set(canonicalId, { ...info })
+          }
+        }
+        if ((!existingMap || existingMap.size === 0) && opfMap) {
+          for (const [canonicalId, info] of Array.from(opfMap.entries())) {
+            finalMap.set(canonicalId, { ...info })
+          }
+        } else if (existingMap && opfMap) {
+          for (const [canonicalId, info] of Array.from(opfMap.entries())) {
+            if (!finalMap.has(canonicalId)) {
+              finalMap.set(canonicalId, { ...info })
+            }
+          }
+        }
+
+        if (finalMap.size > 0) {
+          finalPerOrder.set(orderNum, finalMap)
+        }
+      }
+
+      const OP_DELETE_CHUNK = 200
+      for (let i = 0; i < incomingOrderNumbers.length; i += OP_DELETE_CHUNK) {
+        const chunk = incomingOrderNumbers.slice(i, i + OP_DELETE_CHUNK)
+        const { error } = await ctx.supabase
+          .from('order_products')
+          .delete()
+          .eq('store_id', storeId)
+          .in('order_number', chunk)
+        if (error) {
+          console.error('Income OPF order_products delete error:', error.message)
+          warnings.push(`Gagal refresh mapping produk income: ${error.message}`)
+        }
+      }
+
+      for (const [orderNum, prodMap] of Array.from(finalPerOrder.entries())) {
         for (const [canonicalId, info] of Array.from(prodMap.entries())) {
           opUpsertRows.push({
             user_id: ctx.userId,
@@ -822,10 +1100,7 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
         const chunk = opUpsertRows.slice(i, i + OP_INSERT_CHUNK)
         const { error } = await ctx.supabase
           .from('order_products')
-          .upsert(chunk, {
-            onConflict: 'store_id,order_number,marketplace_product_id',
-            ignoreDuplicates: false,
-          })
+          .insert(chunk)
         if (error) {
           console.error('Income OPF order_products upsert error:', error.message)
           warnings.push(`Sebagian mapping produk dari OPF gagal disimpan: ${error.message}`)
@@ -838,7 +1113,7 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
       opfUnmatchedTotal = opfUnmatched
       if (opfUnmatched > 0 && opfMatched === 0) {
         warnings.push(
-          `${opfUnmatched} baris OPF tidak match dengan master produk. Pastikan master produk sudah diisi (upload Order.all dulu untuk auto-create master).`
+          `${opfUnmatched} baris Seller Fee tidak bisa dipetakan ke master produk. Cek apakah product ID dan nama produk di sheet Seller Fee terbaca dengan benar.`
         )
       }
     } catch (opfError) {
@@ -873,9 +1148,9 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
 
     const { data: masterRows2 } = await ctx.supabase
       .from('master_products')
-      .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
+      .select(MASTER_PRODUCT_SELECT)
       .eq('store_id', storeId)
-    const resolver2 = new MasterResolver((masterRows2 ?? []) as ResolverMasterRow[])
+    const resolver2 = new MasterResolver((masterRows2 ?? []) as MasterProductRow[])
 
     let ordersWithoutMapping = 0
     for (const order of orders) {
@@ -940,8 +1215,6 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
     console.error('Income HPP recalc error:', hppError)
   }
 
-  const newProducts = 0
-
   await ctx.supabase
     .from('upload_batches')
     .update({ record_count: insertedCount + updatedCount })
@@ -965,7 +1238,7 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
       `OPF: ${opfMatchedTotal}/${opfRowsTotal} baris match master (${pct}% gagal match). Sample produk gagal match: ${opfUnmatchedSamples
         .slice(0, 3)
         .map((sample) => sample.name ?? sample.id ?? '?')
-        .join(' · ')}. Upload Order.all dulu supaya master produk lengkap.`
+        .join(' · ')}. Review nama produk / product ID di Seller Fee dan cek Master Produk untuk item yang belum terhubung.`
     )
   }
 
@@ -1058,29 +1331,53 @@ export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promi
     quantity: number
   }
 
+  const sellerSkuRows: Array<{ sellerSku: string | null; productName: string | null }> = []
+  for (const order of orders) {
+    for (const product of order.products_json ?? []) {
+      sellerSkuRows.push({
+        sellerSku: product.marketplace_product_id,
+        productName: product.product_name,
+      })
+    }
+  }
+
+  const {
+    masterRows: masterRowsFromOrdersAll,
+    createdCount,
+    enrichedCount,
+    skuToCanonicalId,
+  } = await syncMasterProductsFromSellerSkus({
+    supabase: ctx.supabase,
+    userId: ctx.userId,
+    storeId,
+    marketplace: ctx.marketplace,
+    rows: sellerSkuRows,
+  })
+
   const opUpsertRows: OpUpsertRow[] = []
   for (const order of orders) {
     const perOrderAgg = new Map<string, { name: string | null; qty: number }>()
     for (const product of order.products_json ?? []) {
       if (!product.marketplace_product_id) continue
+      const canonicalId = skuToCanonicalId.get(product.marketplace_product_id) ?? product.marketplace_product_id
 
-      const existingRow = perOrderAgg.get(product.marketplace_product_id)
+      const existingRow = perOrderAgg.get(canonicalId)
       if (existingRow) {
         existingRow.qty += product.quantity
       } else {
-        perOrderAgg.set(product.marketplace_product_id, {
+        perOrderAgg.set(canonicalId, {
           name: product.product_name,
           qty: product.quantity,
         })
       }
     }
 
-    for (const [sku, info] of Array.from(perOrderAgg.entries())) {
+    for (const [canonicalId, info] of Array.from(perOrderAgg.entries())) {
       opUpsertRows.push({
         user_id: ctx.userId,
         store_id: storeId,
         order_number: order.order_number,
-        marketplace_product_id: sku,
+        marketplace_product_id: canonicalId,
         product_name: info.name,
         quantity: info.qty,
       })
@@ -1089,16 +1386,28 @@ export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promi
 
   await setProgress(ctx, 40, 'Menyimpan mapping produk')
 
+  const orderNumbers = orders.map((order) => order.order_number)
+  const OP_DELETE_CHUNK = 200
+  for (let i = 0; i < orderNumbers.length; i += OP_DELETE_CHUNK) {
+    const chunk = orderNumbers.slice(i, i + OP_DELETE_CHUNK)
+    const { error } = await ctx.supabase
+      .from('order_products')
+      .delete()
+      .eq('store_id', storeId)
+      .in('order_number', chunk)
+    if (error) {
+      console.error('Order.all order_products delete error:', error.message)
+      warnings.push(`Gagal refresh mapping produk Order.all: ${error.message}`)
+    }
+  }
+
   const OP_CHUNK = 500
   let opInserted = 0
   for (let i = 0; i < opUpsertRows.length; i += OP_CHUNK) {
     const chunk = opUpsertRows.slice(i, i + OP_CHUNK)
     const { error } = await ctx.supabase
       .from('order_products')
-      .upsert(chunk, {
-        onConflict: 'store_id,order_number,marketplace_product_id',
-        ignoreDuplicates: false,
-      })
+      .insert(chunk)
     if (error) {
       console.error('order_products upsert error:', error.message)
       warnings.push(`Sebagian mapping produk gagal disimpan: ${error.message}`)
@@ -1107,96 +1416,7 @@ export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promi
     }
   }
   console.log(`Upserted ${opInserted}/${opUpsertRows.length} order_products rows from Order.all`)
-
-  const skuToName = new Map<string, string>()
-  for (const order of orders) {
-    for (const product of order.products_json ?? []) {
-      if (product.marketplace_product_id && product.product_name && !skuToName.has(product.marketplace_product_id)) {
-        skuToName.set(product.marketplace_product_id, product.product_name)
-      }
-    }
-  }
-
-  let migratedCount = 0
-  let createdCount = 0
-  if (skuToName.size > 0) {
-    const { data: existingMasters } = await ctx.supabase
-      .from('master_products')
-      .select('id,marketplace_product_id,product_name,hpp,packaging_cost,store_id')
-      .eq('store_id', storeId)
-
-    type ExistingMasterRow = {
-      id: string
-      marketplace_product_id: string
-      product_name: string | null
-      hpp: number
-      packaging_cost: number
-      store_id: string | null
-    }
-
-    const existingByName = new Map<string, ExistingMasterRow>()
-    const existingBySku = new Set<string>()
-
-    for (const master of (existingMasters ?? []) as ExistingMasterRow[]) {
-      if (master.product_name) {
-        const normalizedName = normalizeName(master.product_name)
-        const prev = existingByName.get(normalizedName)
-        if (!prev || /^\d+$/.test(prev.marketplace_product_id)) {
-          existingByName.set(normalizedName, master)
-        }
-      }
-      existingBySku.add(master.marketplace_product_id)
-    }
-
-    for (const [sku, name] of Array.from(skuToName.entries())) {
-      if (existingBySku.has(sku)) continue
-
-      const normalizedName = normalizeName(name)
-      const matched = existingByName.get(normalizedName)
-      const isMatchedNumeric = matched && /^\d+$/.test(matched.marketplace_product_id)
-
-      if (matched && isMatchedNumeric) {
-        const { error: renameError } = await ctx.supabase
-          .from('master_products')
-          .update({
-            marketplace_product_id: sku,
-            numeric_id: matched.marketplace_product_id,
-          })
-          .eq('id', matched.id)
-        if (renameError) {
-          console.error(`Failed to migrate master "${name}" (${matched.marketplace_product_id} → ${sku}):`, renameError.message)
-        } else {
-          existingBySku.add(sku)
-          existingByName.delete(normalizedName)
-          migratedCount++
-        }
-      } else if (!matched) {
-        const { error: createError } = await ctx.supabase
-          .from('master_products')
-          .insert({
-            user_id: ctx.userId,
-            store_id: storeId,
-            marketplace_product_id: sku,
-            product_name: name,
-            marketplace: ctx.marketplace,
-            hpp: 0,
-            packaging_cost: 0,
-          })
-        if (createError) {
-          console.error(`Failed to create master "${name}" (${sku}):`, createError.message)
-        } else {
-          existingBySku.add(sku)
-          createdCount++
-        }
-      }
-    }
-  }
-
-  const { data: allMasters } = await ctx.supabase
-    .from('master_products')
-    .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-    .eq('store_id', storeId)
-  const resolver = new MasterResolver((allMasters ?? []) as ResolverMasterRow[])
+  const resolver = new MasterResolver(masterRowsFromOrdersAll)
 
   const rows = orders.map((order) => {
     let estimatedHpp = 0
@@ -1309,7 +1529,7 @@ export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promi
     periodEnd,
     warnings: [
       ...warnings,
-      ...(migratedCount > 0 ? [`${migratedCount} master produk dimigrasi dari ID Shopee → SKU (HPP terpelihara)`] : []),
+      ...(enrichedCount > 0 ? [`${enrichedCount} master produk numeric diperkaya dengan SKU Seller dari Order.all`] : []),
       ...(createdCount > 0 ? [`${createdCount} master produk baru dibuat (HPP=0, perlu diisi)`] : []),
     ],
     storeId,

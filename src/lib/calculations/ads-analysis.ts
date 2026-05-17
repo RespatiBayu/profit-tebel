@@ -1,5 +1,6 @@
 import { ROAS_THRESHOLDS } from '@/lib/constants/marketplace-fees'
 import { PLATFORMS, ROAS_TARGET_MULTIPLIERS } from '@/lib/constants/shopee-fees-2026'
+import { buildMasterProductMap } from '@/lib/master-product-map'
 import type {
   DbAdsRow,
   MasterProduct,
@@ -113,7 +114,7 @@ export function calculateAdsOverview(
   // Deduplicate by product_code: take the row with highest ad_spend per product
   // (handles multiple periods showing same product)
   const dedupedSignalRows = dedupeByProductCode(productRows)
-  const hppMap = new Map(masterProducts.map((p) => [p.marketplace_product_id, p]))
+  const hppMap = buildMasterProductMap(masterProducts)
   const signals = dedupedSignalRows.map((r) => {
     const mp = hppMap.get(r.product_code)
     const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
@@ -174,9 +175,7 @@ export function buildTrafficLightRows(
    *  master_products — lookup via parent_iklan → children → aggregate HPP. */
   adsProductData: DbAdsRow[] = [],
 ): TrafficLightRow[] {
-  const hppMap = new Map(
-    masterProducts.map((p) => [p.marketplace_product_id, p])
-  )
+  const hppMap = buildMasterProductMap(masterProducts)
 
   // Format 2 child rows: ad_name=null, punya parent_iklan, bukan aggregate.
   // Dipakai untuk agregat HPP per campaign ketika Format 1 product_code nggak
@@ -317,7 +316,7 @@ export function buildQuadrantData(
   masterProducts: MasterProduct[] = [],
 ): QuadrantPoint[] {
   const profitMap = new Map(profitRows.map((p) => [p.productId, p]))
-  const hppMap = new Map(masterProducts.map((p) => [p.marketplace_product_id, p]))
+  const hppMap = buildMasterProductMap(masterProducts)
 
   return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .map((r) => {
@@ -354,7 +353,7 @@ export function buildQuadrantData(
 // ---------------------------------------------------------------------------
 
 export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProduct[] = []) {
-  const hppMap = new Map(masterProducts.map((p) => [p.marketplace_product_id, p]))
+  const hppMap = buildMasterProductMap(masterProducts)
   return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .sort((a, b) => b.roas - a.roas)
     .slice(0, 20) // top 20 for readability

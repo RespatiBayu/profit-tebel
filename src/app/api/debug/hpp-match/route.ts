@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
   // --- Master products ---
   const mpQ = supabase
     .from('master_products')
-    .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost,store_id')
+    .select('id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost,store_id')
     .eq('user_id', user.id)
   if (storeId) mpQ.eq('store_id', storeId)
   const { data: masters } = await mpQ

@@ -4,15 +4,12 @@ import { userHasStoreAccess } from '@/lib/store-access'
 
 /**
  * GET /api/upload-status?store=<id>
- * Returns the user's current data state — used by the upload page to enforce
- * "Order.all must be uploaded before Income" workflow:
+ * Returns the user's current data state — used by the upload page to show
+ * whether optional Order.all enrichment already exists for this store:
  *
  *   - hasOrdersAll: Order.all has been uploaded for this user/store
  *   - ordersAllCount: number of orders_all rows (informational)
  *   - hasMasterProducts: any master_products exist (informational)
- *
- * Income upload should be DISABLED in the UI when hasOrdersAll is false.
- * Ads uploads are independent — no dependency.
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient()

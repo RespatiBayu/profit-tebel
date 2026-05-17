@@ -5,13 +5,14 @@ import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
 // ---------------------------------------------------------------------------
 // PATCH /api/master-products/[id]
 // Save HPP + packaging_cost, then recalculate estimated_hpp for ALL of this
-// user's orders (orders + orders_all) using direct SKU lookup.
+// user's orders (orders + orders_all) using canonical product ID + seller SKU resolution.
 //
-// Architecture (post-refactor):
-//   - master_products keyed by seller SKU (e.g. "#BNYWGIEDP-AMERTA30ML")
-//   - order_products has SKU + quantity (populated by Order.all uploads)
-//   - orders_all.products_json has SKU + quantity per row
-//   - HPP per order = SUM(master_products[SKU].hpp + packaging) × qty
+// Architecture:
+//   - master_products keyed by Shopee numeric product ID
+//   - master_products.seller_sku stores the optional Order.all bridge
+//   - order_products may contain canonical IDs or seller SKUs
+//   - orders_all.products_json keeps the raw SKU rows from Order.all
+//   - HPP per order = SUM(master_products[resolved product].hpp + packaging) × qty
 // ---------------------------------------------------------------------------
 export async function PATCH(
   request: NextRequest,
@@ -51,7 +52,7 @@ export async function PATCH(
       // 1. Build MasterResolver from ALL master_products for this user
       const { data: masterRows } = await supabase
         .from('master_products')
-        .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
+        .select('id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost')
         .eq('store_id', storeId)
 
       const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])

@@ -18,7 +18,7 @@ export async function cleanupOrphanMasterProducts(
   // Fetch candidate orphans (belum diisi user)
   const { data: candidates, error: candErr } = await supabase
     .from('master_products')
-    .select('id, marketplace_product_id')
+    .select('id, marketplace_product_id, seller_sku')
     .eq('store_id', storeId)
     .eq('hpp', 0)
     .eq('packaging_cost', 0)
@@ -46,7 +46,7 @@ export async function cleanupOrphanMasterProducts(
   }
 
   const orphanIds = candidates
-    .filter((c) => !referenced.has(c.marketplace_product_id))
+    .filter((c) => !referenced.has(c.marketplace_product_id) && !(c.seller_sku && referenced.has(c.seller_sku)))
     .map((c) => c.id)
 
   if (orphanIds.length === 0) return 0

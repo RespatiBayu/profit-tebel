@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
   const productsQuery = supabase
     .from('master_products')
-    .select('id, marketplace_product_id, product_name, hpp, packaging_cost, marketplace, category, notes')
+    .select('id, marketplace_product_id, seller_sku, product_name, hpp, packaging_cost, marketplace, category, notes')
     .order('product_name', { ascending: true })
 
   if (storeId) {
@@ -38,15 +38,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ products: [] })
   }
 
-  const productIds = typedProducts.map((product) => product.marketplace_product_id)
   const orderProductsQuery = supabase
     .from('order_products')
     .select('marketplace_product_id')
-    .in('marketplace_product_id', productIds)
   const adsProductsQuery = supabase
     .from('ads_data')
     .select('product_code')
-    .in('product_code', productIds)
 
   if (storeId) {
     orderProductsQuery.eq('store_id', storeId)
@@ -67,7 +64,9 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     products: typedProducts.map((product) => ({
       ...product,
-      has_income_data: incomeSet.has(product.marketplace_product_id),
+      has_income_data:
+        incomeSet.has(product.marketplace_product_id) ||
+        (!!product.seller_sku && incomeSet.has(product.seller_sku)),
       has_ads_data: adsSet.has(product.marketplace_product_id),
     })),
   })

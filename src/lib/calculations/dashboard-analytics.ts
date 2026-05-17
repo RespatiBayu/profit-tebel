@@ -1,4 +1,5 @@
 import type { DbOrder, DbOrderProduct, MasterProduct } from '@/types'
+import { buildMasterProductMap } from '@/lib/master-product-map'
 
 // ---------------------------------------------------------------------------
 // Dashboard extras: busy-days, top products, top buyers, daily detail.
@@ -77,8 +78,7 @@ export function calculateTopProducts(
   const orderByNumber = new Map<string, DbOrder>()
   for (const o of orders) orderByNumber.set(o.order_number, o)
 
-  const productMap = new Map<string, MasterProduct>()
-  for (const mp of masterProducts) productMap.set(mp.marketplace_product_id, mp)
+  const productMap = buildMasterProductMap(masterProducts)
 
   // Group order_products by order_number to prorate income per product
   const byOrder = new Map<string, DbOrderProduct[]>()
@@ -99,10 +99,11 @@ export function calculateTopProducts(
 
     for (const op of ops) {
       const mp = productMap.get(op.marketplace_product_id)
+      const productKey = mp?.marketplace_product_id ?? op.marketplace_product_id
       const name = mp?.product_name ?? op.product_name ?? op.marketplace_product_id
       const hppPerUnit = mp ? (mp.hpp + mp.packaging_cost) : 0
-      const existing = productStats.get(op.marketplace_product_id) ?? {
-        productId: op.marketplace_product_id,
+      const existing = productStats.get(productKey) ?? {
+        productId: productKey,
         productName: name,
         orderCount: 0,
         unitsSold: 0,
@@ -118,7 +119,7 @@ export function calculateTopProducts(
       existing.omzet += proratedOmzet
       existing.netIncome += proratedNet
       existing.hppTotal += hppPerUnit
-      productStats.set(op.marketplace_product_id, existing)
+      productStats.set(productKey, existing)
     }
   }
 

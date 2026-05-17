@@ -46,6 +46,7 @@ import type {
 } from '@/lib/calculations/roas-recommendations'
 import type { MasterProduct } from '@/types'
 import { computeRoasTargets } from '@/lib/calculations/roas-recommendations'
+import { buildMasterProductMap } from '@/lib/master-product-map'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers (duplicated to keep this file self-contained)
@@ -235,11 +236,22 @@ export function RoasTargetsSection({
   /** product_id → avg selling price (derived from orders or ads GMV) */
   sellingPriceMap: Map<string, number>
 }) {
+  const productMap = buildMasterProductMap(products)
+  const getSellingPrice = (product: MasterProduct) => {
+    const byCanonical = sellingPriceMap.get(product.marketplace_product_id)
+    if (byCanonical != null) return byCanonical
+    if (product.seller_sku) {
+      const bySku = sellingPriceMap.get(product.seller_sku)
+      if (bySku != null) return bySku
+    }
+    return 0
+  }
   const rows = products
-    .filter((p) => p.hpp > 0 && (sellingPriceMap.get(p.marketplace_product_id) ?? 0) > 0)
+    .filter((p) => p.hpp > 0 && getSellingPrice(p) > 0)
     .map((p) => {
-      const price = sellingPriceMap.get(p.marketplace_product_id) ?? 0
-      const targets = computeRoasTargets(p, price)
+      const canonical = productMap.get(p.marketplace_product_id) ?? p
+      const price = getSellingPrice(canonical)
+      const targets = computeRoasTargets(canonical, price)
       return { product: p, price, targets }
     })
     .filter((r): r is { product: MasterProduct; price: number; targets: RoasTargets } => r.targets !== null && r.targets.grossProfit > 0)

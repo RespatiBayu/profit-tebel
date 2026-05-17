@@ -153,6 +153,7 @@ export interface Store {
 export interface MasterProduct {
   id: string
   marketplace_product_id: string
+  seller_sku: string | null
   product_name: string
   hpp: number
   packaging_cost: number

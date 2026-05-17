@@ -61,6 +61,7 @@ const ORDER_PRODUCT_SELECT = [
 const MASTER_PRODUCT_SELECT = [
   'id',
   'marketplace_product_id',
+  'seller_sku',
   'product_name',
   'hpp',
   'packaging_cost',

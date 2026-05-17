@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
   // --- Fetch ALL master_products for this user ---
   const { data: masterRows } = await supabase
     .from('master_products')
-    .select('id,marketplace_product_id,product_name,hpp,packaging_cost,store_id')
+    .select('id,marketplace_product_id,seller_sku,product_name,hpp,packaging_cost,store_id')
     .eq('user_id', user.id)
 
   // --- Fetch orders_all for cross-reference ---
@@ -104,12 +104,14 @@ export async function GET(request: NextRequest) {
   }
 
   const hppLookup = new Map<string, { hpp: number; packaging: number; name: string }>()
-  for (const mp of (masterRows ?? []) as { marketplace_product_id: string; hpp: number; packaging_cost: number; product_name: string }[]) {
-    hppLookup.set(mp.marketplace_product_id, {
+  for (const mp of (masterRows ?? []) as { marketplace_product_id: string; seller_sku?: string | null; hpp: number; packaging_cost: number; product_name: string }[]) {
+    const value = {
       hpp: mp.hpp ?? 0,
       packaging: mp.packaging_cost ?? 0,
       name: mp.product_name,
-    })
+    }
+    hppLookup.set(mp.marketplace_product_id, value)
+    if (mp.seller_sku) hppLookup.set(mp.seller_sku, value)
   }
 
   const oaByOrder = new Map<string, { estimated_hpp: number | null; product_count: number }>()

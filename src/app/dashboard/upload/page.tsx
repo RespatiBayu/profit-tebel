@@ -104,14 +104,14 @@ function DropZone({
     ? 'Data Iklan (Summary)'
     : type === 'ads_product'
     ? 'Data per Produk (GMV Max Auto)'
-    : 'Semua Pesanan (Order.all)'
+    : 'Semua Pesanan (Order.all, Opsional)'
   const desc = type === 'income'
-    ? 'File .xlsx dari Shopee Income (Sudah Dilepas)'
+    ? 'File .xlsx dari Shopee Income + Seller Fee'
     : type === 'ads'
     ? 'File .csv dari Shopee Ads'
     : type === 'ads_product'
     ? 'File .csv dari Shop GMV Max Detail Produk'
-    : 'File .xlsx dari Seller Center → Pesanan Saya → Export'
+    : 'File .xlsx untuk pending, rekonsiliasi, dan seller SKU'
   const color = type === 'income'
     ? 'text-blue-600'
     : type === 'ads'
@@ -320,7 +320,7 @@ export default function UploadPage() {
   const [ordersAllState, setOrdersAllState] = useState<UploadState>({
     file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null,
   })
-  // Upload prerequisite state — Order.all must exist before Income upload
+  // Upload context state — Order.all is optional enrichment for pending/qty accuracy
   const [hasOrdersAllData, setHasOrdersAllData] = useState<boolean>(false)
   const [statusLoading, setStatusLoading] = useState(true)
   const selectedStore =
@@ -333,7 +333,7 @@ export default function UploadPage() {
       : null) ?? null
   const hasSelectedStore = Boolean(selectedStore)
 
-  // Fetch upload status (whether Order.all has been uploaded for this store)
+  // Fetch upload status (used to show whether optional Order.all enrichment exists)
   const refreshUploadStatus = useCallback(async () => {
     if (!storeId) {
       setHasOrdersAllData(false)
@@ -599,8 +599,7 @@ export default function UploadPage() {
   }
 
   const hasFiles = incomeState.file || adsState.file || adsProductState.file || ordersAllState.file
-  const incomeEnabled = !statusLoading && (hasOrdersAllData || ordersAllState.status === 'success')
-  const canUploadIncome = incomeEnabled && incomeState.file && incomeState.status === 'idle'
+  const canUploadIncome = incomeState.file && incomeState.status === 'idle'
   const canUploadAds = adsState.file && adsState.status === 'idle'
   const canUploadAdsProduct = adsProductState.file && adsProductState.status === 'idle'
   const canUploadOrdersAll = ordersAllState.file && ordersAllState.status === 'idle'
@@ -721,23 +720,29 @@ export default function UploadPage() {
             <CardTitle className="text-base">File Upload</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Workflow banner: Order.all must come first */}
-            {!statusLoading && !hasOrdersAllData && (
-              <Alert className="border-amber-200 bg-amber-50">
-                <AlertCircle className="h-4 w-4 text-amber-600" />
-                <AlertDescription className="text-amber-800 text-xs">
-                  <strong>Upload <span className="text-teal-700">Order.all</span> dulu sebelum Income.</strong>{' '}
-                  File Order.all berisi mapping produk per pesanan (SKU + nama + qty) yang dipakai untuk auto-create
-                  master produk dan menghitung HPP. Income hanya berisi data finansial — tanpa Order.all, HPP tidak
-                  bisa dihitung untuk pesanan income.{' '}
-                  <span className="block mt-1 text-amber-700/80">
-                    Data Iklan (Summary &amp; per Produk) tetap bisa di-upload kapan saja.
-                  </span>
+            {!statusLoading && (
+              <Alert className={hasOrdersAllData ? 'border-emerald-200 bg-emerald-50' : 'border-blue-200 bg-blue-50'}>
+                <AlertCircle className={`h-4 w-4 ${hasOrdersAllData ? 'text-emerald-600' : 'text-blue-600'}`} />
+                <AlertDescription className={`text-xs ${hasOrdersAllData ? 'text-emerald-800' : 'text-blue-800'}`}>
+                  {hasOrdersAllData ? (
+                    <>
+                      <strong>Order.all sudah tersedia untuk toko ini.</strong>{' '}
+                      Pending order, rekonsiliasi, dan quantity-based HPP sudah bisa ikut dihitung.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Income bisa di-upload dulu.</strong>{' '}
+                      Sheet <span className="font-medium">Seller Fee</span> akan dipakai untuk auto-create master produk.
+                      <span className="block mt-1 text-blue-700/80">
+                        <span className="font-medium text-teal-700">Order.all</span> sekarang opsional untuk pending order,
+                        rekonsiliasi, dan quantity yang lebih akurat. Data iklan tetap bisa di-upload kapan saja.
+                      </span>
+                    </>
+                  )}
                 </AlertDescription>
               </Alert>
             )}
 
-            {/* Order Order.all → Income → Ads → Ads-product (enforces workflow) */}
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <DropZone
                 type="orders_all"
@@ -752,8 +757,6 @@ export default function UploadPage() {
                 state={incomeState}
                 onChange={(f) => setFile('income', f)}
                 onRemove={() => removeFile('income')}
-                disabled={statusLoading || (!hasOrdersAllData && ordersAllState.status !== 'success')}
-                disabledReason={statusLoading ? undefined : 'Upload Order.all dulu untuk mengisi master produk'}
               />
               <DropZone
                 type="ads"
@@ -890,12 +893,12 @@ export default function UploadPage() {
             <p className="font-medium text-sm">Urutan upload &amp; cara download dari Shopee:</p>
             <div className="space-y-2 text-sm text-muted-foreground">
               <div>
-                <span className="font-medium text-foreground">1. Order.all / Semua Pesanan (.xlsx)</span> <span className="text-amber-700 text-xs">— WAJIB UPLOAD DULUAN</span>
-                <div className="text-xs ml-4 mt-0.5">Seller Center → Pesanan Saya → Export Pesanan (pilih semua status). Ini sumber master produk &amp; mapping SKU.</div>
+                <span className="font-medium text-foreground">1. Data Penghasilan / Income (.xlsx)</span> <span className="text-emerald-700 text-xs">— REKOMENDASI MULAI DARI SINI</span>
+                <div className="text-xs ml-4 mt-0.5">Seller Center → Keuangan → Penghasilan Saya → Download. Sheet Seller Fee dipakai untuk auto-create master produk dari product ID Shopee.</div>
               </div>
               <div>
-                <span className="font-medium text-foreground">2. Data Penghasilan / Income (.xlsx)</span>
-                <div className="text-xs ml-4 mt-0.5">Seller Center → Keuangan → Penghasilan Saya → Download. Berisi data finansial pesanan yang dananya sudah dilepas.</div>
+                <span className="font-medium text-foreground">2. Order.all / Semua Pesanan (.xlsx)</span> <span className="text-xs text-muted-foreground">— opsional, untuk akurasi lebih tinggi</span>
+                <div className="text-xs ml-4 mt-0.5">Seller Center → Pesanan Saya → Export Pesanan (pilih semua status). Dipakai untuk pending order, rekonsiliasi, seller SKU, dan quantity yang lebih akurat.</div>
               </div>
               <div className="pt-1 border-t">
                 <span className="font-medium text-foreground">Data Iklan (.csv)</span> <span className="text-xs text-muted-foreground">— independent, boleh kapan saja</span>

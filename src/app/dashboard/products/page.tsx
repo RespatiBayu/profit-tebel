@@ -195,7 +195,8 @@ export default function ProductsPage() {
       const q = search.toLowerCase()
       return (
         p.product_name.toLowerCase().includes(q) ||
-        p.marketplace_product_id.toLowerCase().includes(q)
+        p.marketplace_product_id.toLowerCase().includes(q) ||
+        (p.seller_sku?.toLowerCase().includes(q) ?? false)
       )
     })
     .sort((a, b) => {
@@ -338,8 +339,13 @@ export default function ProductsPage() {
                           <div>
                             <p className="font-medium text-sm line-clamp-2">{product.product_name}</p>
                             <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-                              {product.marketplace_product_id}
+                              ID Produk: {product.marketplace_product_id}
                             </p>
+                            {product.seller_sku && (
+                              <p className="text-xs text-muted-foreground font-mono">
+                                SKU Seller: {product.seller_sku}
+                              </p>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>

@@ -36,14 +36,19 @@ function weekKey(dateStr: string): string {
 
 export function buildHppMap(
   masterProducts: MasterProduct[]
-): Map<string, { hpp: number; packaging_cost: number; name: string }> {
-  const map = new Map<string, { hpp: number; packaging_cost: number; name: string }>()
+): Map<string, { canonical_id: string; hpp: number; packaging_cost: number; name: string }> {
+  const map = new Map<string, { canonical_id: string; hpp: number; packaging_cost: number; name: string }>()
   for (const p of masterProducts) {
-    map.set(p.marketplace_product_id, {
+    const value = {
+      canonical_id: p.marketplace_product_id,
       hpp: p.hpp ?? 0,
       packaging_cost: p.packaging_cost ?? 0,
       name: p.product_name,
-    })
+    }
+    map.set(p.marketplace_product_id, value)
+    if (p.seller_sku) {
+      map.set(p.seller_sku, value)
+    }
   }
   return map
 }
@@ -92,7 +97,7 @@ export function buildAdSpendMap(adsData: DbAdsRow[]): Map<string, number> {
 function orderHppCost(
   order: DbOrder,
   orderProductMap: Map<string, string[]>,
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  hppMap: Map<string, { canonical_id: string; hpp: number; packaging_cost: number; name: string }>,
   ordersAllHppMap?: Map<string, number>
 ): number {
   // Priority 1: pre-computed estimated_hpp stored directly in the income order row
@@ -120,7 +125,7 @@ function orderHppCost(
 export function calculateKpis(
   orders: DbOrder[],
   orderProductMap: Map<string, string[]>,
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  hppMap: Map<string, { canonical_id: string; hpp: number; packaging_cost: number; name: string }>,
   adsData: DbAdsRow[] = [],
   /** Pre-computed HPP map from orders_all (order_number → estimated_hpp).
    *  When provided, used as the primary HPP source (overrides order_products path). */
@@ -381,7 +386,7 @@ export function calculateTrend(
   orders: DbOrder[],
   groupBy: 'day' | 'week',
   orderProductMap: Map<string, string[]>,
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  hppMap: Map<string, { canonical_id: string; hpp: number; packaging_cost: number; name: string }>,
   adsData: DbAdsRow[] = [],
   ordersAllHppMap?: Map<string, number>
 ): TrendPoint[] {
@@ -437,7 +442,7 @@ export function calculateTrend(
 export function calculateProductProfit(
   orders: DbOrder[],
   orderProducts: DbOrderProduct[],
-  hppMap: Map<string, { hpp: number; packaging_cost: number; name: string }>,
+  hppMap: Map<string, { canonical_id: string; hpp: number; packaging_cost: number; name: string }>,
   adsData: DbAdsRow[] = []
 ): ProductProfitRow[] {
   const adSpendMap = buildAdSpendMap(adsData)
@@ -465,7 +470,8 @@ export function calculateProductProfit(
 
     for (const pid of productIds) {
       const hppInfo = hppMap.get(pid)
-      const existing = productStats.get(pid) ?? {
+      const canonicalId = hppInfo?.canonical_id ?? pid
+      const existing = productStats.get(canonicalId) ?? {
         name: hppInfo?.name ?? pid,
         orderCount: 0,
         attributedIncome: 0,
@@ -480,20 +486,21 @@ export function calculateProductProfit(
         existing.hppCost += hppInfo.hpp + hppInfo.packaging_cost
         existing.hasHpp = true
       }
-      productStats.set(pid, existing)
+      productStats.set(canonicalId, existing)
     }
   }
 
   // Assign ad_spend once per product (not per-order — avoid double-counting).
   // Also ensure products that only appear in ads (no orders yet) still show up.
   for (const [pid, adSpend] of Array.from(adSpendMap.entries())) {
-    const existing = productStats.get(pid)
+    const hppInfo = hppMap.get(pid)
+    const canonicalId = hppInfo?.canonical_id ?? pid
+    const existing = productStats.get(canonicalId)
     if (existing) {
       existing.adSpend = adSpend
     } else {
       // Product has ads but no orders — include it so user can see ad waste
-      const hppInfo = hppMap.get(pid)
-      productStats.set(pid, {
+      productStats.set(canonicalId, {
         name: hppInfo?.name ?? pid,
         orderCount: 0,
         attributedIncome: 0,

@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
   // ---- Resolve OPF rows against current master_products ----
   const mpQ = supabase
     .from('master_products')
-    .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
+    .select('id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost')
     .eq('user_id', user.id)
   if (storeId) mpQ.eq('store_id', storeId)
   const { data: masters } = await mpQ

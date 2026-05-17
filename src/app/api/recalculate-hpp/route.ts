@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { MasterResolver, normalizeName, type MasterRow } from '@/lib/master-resolver'
+import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
 import { userHasStoreAccess } from '@/lib/store-access'
 
 /**
@@ -11,14 +11,12 @@ import { userHasStoreAccess } from '@/lib/store-access'
  * using the current master_products HPP values. Used as a backup when auto-recalc
  * during upload doesn't work as expected.
  *
- * Architecture (post-SKU-refactor):
- *   - master_products keyed by seller SKU
- *   - order_products has SKU + quantity (from Order.all)
- *   - orders_all.products_json has SKU + quantity per row
- *   - HPP = SUM(master_products[SKU].hpp + packaging) × quantity
- *
- * Also auto-migrates legacy numeric-ID master_products → SKU (matching by
- * product_name) when SKU data is present in orders_all.products_json.
+ * Architecture:
+ *   - master_products keyed by Shopee numeric product ID
+ *   - master_products.seller_sku stores the optional Order.all SKU bridge
+ *   - order_products may contain canonical IDs or seller SKUs, both resolved
+ *   - orders_all.products_json still stores raw SKU rows from Order.all
+ *   - HPP = SUM(master_products[resolved product].hpp + packaging) × quantity
  */
 export async function POST(request: NextRequest) {
   try {
@@ -37,86 +35,11 @@ export async function POST(request: NextRequest) {
     const warnings: string[] = []
 
     // =====================================================================
-    // STEP 1: Try to auto-migrate any remaining numeric-ID master_products
-    // to SKU IDs by matching product_name against orders_all.products_json.
-    // =====================================================================
-    let migratedCount = 0
-    {
-      // Get orders_all to extract SKU → product_name mapping
-      const oaQuery = supabase
-        .from('orders_all')
-        .select('products_json')
-      if (storeId) oaQuery.eq('store_id', storeId)
-      else oaQuery.eq('user_id', user.id)
-      const { data: oaForMap } = await oaQuery
-
-      const skuToName = new Map<string, string>()
-      if (oaForMap) {
-        type ProdJson = { marketplace_product_id: string | null; product_name: string | null }
-        for (const row of oaForMap as { products_json: unknown }[]) {
-          const prods = (row.products_json ?? []) as ProdJson[]
-          for (const p of prods) {
-            if (p.marketplace_product_id && p.product_name && !skuToName.has(p.marketplace_product_id)) {
-              skuToName.set(p.marketplace_product_id, p.product_name)
-            }
-          }
-        }
-      }
-
-      if (skuToName.size > 0) {
-        const existingMastersQuery = supabase
-          .from('master_products')
-          .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
-        if (storeId) existingMastersQuery.eq('store_id', storeId)
-        else existingMastersQuery.eq('user_id', user.id)
-        const { data: existingMasters } = await existingMastersQuery
-
-        const byName = new Map<string, MasterRow>()
-        const bySku = new Set<string>()
-        for (const mp of (existingMasters ?? []) as MasterRow[]) {
-          if (mp.product_name) {
-            const normName = normalizeName(mp.product_name)
-            const prev = byName.get(normName)
-            if (!prev || /^\d+$/.test(prev.marketplace_product_id)) {
-              byName.set(normName, mp)
-            }
-          }
-          bySku.add(mp.marketplace_product_id)
-        }
-
-        for (const [sku, name] of Array.from(skuToName.entries())) {
-          if (bySku.has(sku)) continue
-          const normName = normalizeName(name)
-          const matched = byName.get(normName)
-          if (matched && /^\d+$/.test(matched.marketplace_product_id)) {
-            // Rename numeric ID → SKU, preserve numeric in numeric_id column
-            const { error } = await supabase
-              .from('master_products')
-              .update({
-                marketplace_product_id: sku,
-                numeric_id: matched.numeric_id ?? matched.marketplace_product_id,
-              })
-              .eq('id', matched.id)
-            if (!error) {
-              migratedCount++
-              bySku.add(sku)
-              byName.delete(normName)
-              console.log(`Migrated master "${name}": ${matched.marketplace_product_id} → ${sku}`)
-            } else {
-              console.error(`Migrate failed for ${name}:`, error.message)
-            }
-          }
-        }
-      }
-    }
-    if (migratedCount > 0) warnings.push(`${migratedCount} master produk dimigrasi dari numeric ID → SKU`)
-
-    // =====================================================================
-    // STEP 2: Build MasterResolver from current master_products state
+    // STEP 1: Build MasterResolver from current master_products state
     // =====================================================================
     const masterRowsQuery = supabase
       .from('master_products')
-      .select('id,marketplace_product_id,numeric_id,product_name,hpp,packaging_cost')
+      .select('id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost')
     if (storeId) masterRowsQuery.eq('store_id', storeId)
     else masterRowsQuery.eq('user_id', user.id)
     const { data: masterRows } = await masterRowsQuery
@@ -135,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     // =====================================================================
-    // STEP 3: Recalculate orders_all.estimated_hpp from products_json
+    // STEP 2: Recalculate orders_all.estimated_hpp from products_json
     // =====================================================================
     let oaUpdated = 0
     let oaWithHpp = 0
@@ -174,7 +97,7 @@ export async function POST(request: NextRequest) {
     }
 
     // =====================================================================
-    // STEP 4: Recalculate orders.estimated_hpp (income) using order_products
+    // STEP 3: Recalculate orders.estimated_hpp (income) using order_products
     // =====================================================================
     let ordersUpdated = 0
     let ordersWithHpp = 0
@@ -282,7 +205,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      migratedMasters: migratedCount,
       totalMasters,
       mastersWithHpp,
       ordersAllUpdated: oaUpdated,

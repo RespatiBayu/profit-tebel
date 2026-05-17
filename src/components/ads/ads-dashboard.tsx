@@ -42,6 +42,7 @@ import {
   calculateProductProfit,
 } from '@/lib/calculations/profit'
 import { ROAS_THRESHOLDS } from '@/lib/constants/marketplace-fees'
+import { buildMasterProductMap } from '@/lib/master-product-map'
 import type {
   AvailablePeriods,
   DbAdsRow,
@@ -168,7 +169,7 @@ function TrafficLightTable({
   masterProducts: MasterProduct[]
 }) {
   const hppMap = useMemo(
-    () => new Map(masterProducts.map((p) => [p.marketplace_product_id, p])),
+    () => buildMasterProductMap(masterProducts),
     [masterProducts]
   )
   const [search, setSearch] = useState('')

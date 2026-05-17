@@ -1,4 +1,5 @@
 import { MARKETPLACE_FEES } from '@/lib/constants/marketplace-fees'
+import { buildMasterProductMap } from '@/lib/master-product-map'
 import type { MasterProduct, TrafficLightRow } from '@/types'
 
 // ---------------------------------------------------------------------------
@@ -124,10 +125,7 @@ export function buildScaleRecommendations(
   masterProducts: MasterProduct[],
   fees: FeeProfile = DEFAULT_FEE_PROFILE,
 ): CampaignScaleRec[] {
-  const productByCode = new Map<string, MasterProduct>()
-  for (const mp of masterProducts) {
-    if (mp.marketplace_product_id) productByCode.set(mp.marketplace_product_id, mp)
-  }
+  const productByCode = buildMasterProductMap(masterProducts)
 
   return trafficRows.map((row) => {
     const product = productByCode.get(row.productCode)
