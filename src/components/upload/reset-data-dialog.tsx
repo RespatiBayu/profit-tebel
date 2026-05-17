@@ -26,10 +26,11 @@ const OPTIONS: { id: ResetType; label: string; desc: string }[] = [
 
 interface Props {
   storeId: string | null
+  disabled?: boolean
   onSuccess?: () => void
 }
 
-export function ResetDataDialog({ storeId, onSuccess }: Props) {
+export function ResetDataDialog({ storeId, disabled = false, onSuccess }: Props) {
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<Set<ResetType>>(new Set())
   const [confirmation, setConfirmation] = useState('')
@@ -99,6 +100,7 @@ export function ResetDataDialog({ storeId, onSuccess }: Props) {
         variant="outline"
         size="sm"
         className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+        disabled={disabled}
         onClick={() => {
           trackEvent('reset_data_opened')
           setOpen(true)

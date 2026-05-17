@@ -303,10 +303,10 @@ function DropZone({
 
 export default function UploadPage() {
   const searchParams = useSearchParams()
-  const urlStoreId = searchParams.get('store') ?? ''
+  const urlStoreId = searchParams.get('store')
   const [marketplace, setMarketplace] = useState('shopee')
   const [stores, setStores] = useState<Store[]>([])
-  const [storeId, setStoreId] = useState<string>(urlStoreId)
+  const [storeId, setStoreId] = useState<string | null>(urlStoreId)
   const [storesLoading, setStoresLoading] = useState(true)
   const [incomeState, setIncomeState] = useState<UploadState>({
     file: null, jobId: null, status: 'idle', progress: 0, progressLabel: null, result: null,
@@ -323,6 +323,15 @@ export default function UploadPage() {
   // Upload prerequisite state — Order.all must exist before Income upload
   const [hasOrdersAllData, setHasOrdersAllData] = useState<boolean>(false)
   const [statusLoading, setStatusLoading] = useState(true)
+  const selectedStore =
+    (storeId
+      ? stores.find((store) =>
+          store.id === storeId ||
+          store.name === storeId ||
+          `${store.name} (${store.marketplace})` === storeId
+        )
+      : null) ?? null
+  const hasSelectedStore = Boolean(selectedStore)
 
   // Fetch upload status (whether Order.all has been uploaded for this store)
   const refreshUploadStatus = useCallback(async () => {
@@ -356,13 +365,17 @@ export default function UploadPage() {
       .then((data) => {
         const list: Store[] = data.stores ?? []
         setStores(list)
-        // Default store: URL param > first store
-        if (!urlStoreId && list.length > 0 && !storeId) {
+        const initialStoreId = urlStoreId ?? storeId
+        const initialStore = initialStoreId
+          ? list.find((store) => store.id === initialStoreId)
+          : null
+
+        if (initialStore) {
+          setStoreId(initialStore.id)
+          setMarketplace(initialStore.marketplace)
+        } else if (list.length > 0) {
           setStoreId(list[0].id)
           setMarketplace(list[0].marketplace)
-        } else if (urlStoreId) {
-          const s = list.find((x) => x.id === urlStoreId)
-          if (s) setMarketplace(s.marketplace)
         }
         setStoresLoading(false)
       })
@@ -375,6 +388,32 @@ export default function UploadPage() {
     const s = stores.find((x) => x.id === storeId)
     if (s) setMarketplace(s.marketplace)
   }, [storeId, stores])
+
+  function handleStoreChange(value: string | null) {
+    if (!value) {
+      setStoreId(null)
+      return
+    }
+
+    const nextStore =
+      stores.find((store) =>
+        store.id === value ||
+        store.name === value ||
+        `${store.name} (${store.marketplace})` === value
+      ) ?? null
+
+    trackEvent('upload_store_selected', {
+      marketplace: nextStore?.marketplace ?? marketplace,
+    })
+
+    if (nextStore) {
+      setStoreId(nextStore.id)
+      setMarketplace(nextStore.marketplace)
+      return
+    }
+
+    setStoreId(value)
+  }
 
   function setFile(type: UploadType, file: File) {
     trackEvent('upload_file_selected', {
@@ -579,8 +618,8 @@ export default function UploadPage() {
         </div>
         <div className="flex flex-col sm:items-end gap-2">
           <div className="flex gap-2">
-            <RecalculateHppButton storeId={storeId || null} />
-            <ResetDataDialog storeId={storeId || null} />
+            <RecalculateHppButton storeId={storeId || null} disabled={!hasSelectedStore} />
+            <ResetDataDialog storeId={storeId || null} disabled={!hasSelectedStore} />
           </div>
         </div>
       </div>
@@ -615,14 +654,11 @@ export default function UploadPage() {
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Toko</label>
-                <Select value={storeId} onValueChange={(v) => {
-                  if (!v) return
-                  const selectedStore = stores.find((store) => store.id === v)
-                  trackEvent('upload_store_selected', {
-                    marketplace: selectedStore?.marketplace ?? marketplace,
-                  })
-                  setStoreId(v)
-                }}>
+                <Select
+                  value={storeId}
+                  items={stores.map((store) => ({ value: store.id, label: store.name }))}
+                  onValueChange={handleStoreChange}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Pilih toko" />
                   </SelectTrigger>
@@ -642,24 +678,32 @@ export default function UploadPage() {
                 <label className="text-xs text-muted-foreground mb-1.5 block">
                   Marketplace (ikut toko)
                 </label>
-                <Select value={marketplace} onValueChange={(v) => v && setMarketplace(v)} disabled>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MARKETPLACE_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {selectedStore ? (
+                  <Select value={marketplace} onValueChange={(v) => v && setMarketplace(v)} disabled>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MARKETPLACE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="flex h-8 items-center rounded-lg border border-input bg-muted/40 px-2.5 text-sm text-muted-foreground">
+                    Pilih toko dulu
+                  </div>
+                )}
               </div>
             </div>
           )}
           <div className="flex items-center justify-between pt-1">
             <p className="text-xs text-muted-foreground">
-              Upload akan menambah data ke toko yang dipilih.
+              {hasSelectedStore
+                ? 'Upload akan menambah data ke toko yang dipilih.'
+                : 'Pilih toko dulu untuk mulai upload data.'}
             </p>
             <DashboardLink href="/dashboard/stores?new=1">
               <Button variant="ghost" size="sm" className="gap-2 text-xs">
@@ -671,129 +715,130 @@ export default function UploadPage() {
         </CardContent>
       </Card>
 
-      {/* Upload zones */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">File Upload</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Workflow banner: Order.all must come first */}
-          {!statusLoading && !hasOrdersAllData && (
-            <Alert className="border-amber-200 bg-amber-50">
-              <AlertCircle className="h-4 w-4 text-amber-600" />
-              <AlertDescription className="text-amber-800 text-xs">
-                <strong>Upload <span className="text-teal-700">Order.all</span> dulu sebelum Income.</strong>{' '}
-                File Order.all berisi mapping produk per pesanan (SKU + nama + qty) yang dipakai untuk auto-create
-                master produk dan menghitung HPP. Income hanya berisi data finansial — tanpa Order.all, HPP tidak
-                bisa dihitung untuk pesanan income.{' '}
-                <span className="block mt-1 text-amber-700/80">
-                  Data Iklan (Summary &amp; per Produk) tetap bisa di-upload kapan saja.
-                </span>
-              </AlertDescription>
-            </Alert>
-          )}
+      {hasSelectedStore && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">File Upload</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Workflow banner: Order.all must come first */}
+            {!statusLoading && !hasOrdersAllData && (
+              <Alert className="border-amber-200 bg-amber-50">
+                <AlertCircle className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="text-amber-800 text-xs">
+                  <strong>Upload <span className="text-teal-700">Order.all</span> dulu sebelum Income.</strong>{' '}
+                  File Order.all berisi mapping produk per pesanan (SKU + nama + qty) yang dipakai untuk auto-create
+                  master produk dan menghitung HPP. Income hanya berisi data finansial — tanpa Order.all, HPP tidak
+                  bisa dihitung untuk pesanan income.{' '}
+                  <span className="block mt-1 text-amber-700/80">
+                    Data Iklan (Summary &amp; per Produk) tetap bisa di-upload kapan saja.
+                  </span>
+                </AlertDescription>
+              </Alert>
+            )}
 
-          {/* Order Order.all → Income → Ads → Ads-product (enforces workflow) */}
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <DropZone
-              type="orders_all"
-              accept=".xlsx"
-              state={ordersAllState}
-              onChange={(f) => setFile('orders_all', f)}
-              onRemove={() => removeFile('orders_all')}
-            />
-            <DropZone
-              type="income"
-              accept=".xlsx"
-              state={incomeState}
-              onChange={(f) => setFile('income', f)}
-              onRemove={() => removeFile('income')}
-              disabled={statusLoading || (!hasOrdersAllData && ordersAllState.status !== 'success')}
-              disabledReason={statusLoading ? undefined : 'Upload Order.all dulu untuk mengisi master produk'}
-            />
-            <DropZone
-              type="ads"
-              accept=".csv"
-              state={adsState}
-              onChange={(f) => setFile('ads', f)}
-              onRemove={() => removeFile('ads')}
-            />
-            <DropZone
-              type="ads_product"
-              accept=".csv"
-              state={adsProductState}
-              onChange={(f) => setFile('ads_product', f)}
-              onRemove={() => removeFile('ads_product')}
-            />
-          </div>
-
-          {hasFiles && (
-            <div className="flex flex-col sm:flex-row gap-2 pt-2 flex-wrap">
-              {canUploadIncome && (
-                <Button
-                  className="gap-2"
-                  onClick={() => uploadFile('income')}
-                  disabled={incomeState.status === 'uploading'}
-                >
-                  <Upload className="h-4 w-4" />
-                  Proses Data Penghasilan
-                </Button>
-              )}
-              {canUploadAds && (
-                <Button
-                  variant={canUploadIncome ? 'outline' : 'default'}
-                  className="gap-2"
-                  onClick={() => uploadFile('ads')}
-                  disabled={adsState.status === 'uploading'}
-                >
-                  <Upload className="h-4 w-4" />
-                  Proses Data Iklan
-                </Button>
-              )}
-              {canUploadAdsProduct && (
-                <Button
-                  variant={canUploadIncome || canUploadAds ? 'outline' : 'default'}
-                  className="gap-2"
-                  onClick={() => uploadFile('ads_product')}
-                  disabled={adsProductState.status === 'uploading'}
-                >
-                  <Upload className="h-4 w-4" />
-                  Proses Data per Produk
-                </Button>
-              )}
-              {canUploadOrdersAll && (
-                <Button
-                  variant={canUploadIncome || canUploadAds || canUploadAdsProduct ? 'outline' : 'default'}
-                  className="gap-2"
-                  onClick={() => uploadFile('orders_all')}
-                  disabled={ordersAllState.status === 'uploading'}
-                >
-                  <Upload className="h-4 w-4" />
-                  Proses Semua Pesanan
-                </Button>
-              )}
-              {canUploadAny && [canUploadIncome, canUploadAds, canUploadAdsProduct, canUploadOrdersAll].filter(Boolean).length > 1 && (
-                <Button
-                  variant="secondary"
-                  className="gap-2 sm:ml-auto"
-                  onClick={async () => {
-                    trackEvent('upload_process_all_clicked', {
-                      marketplace,
-                      selected_types_count: [canUploadIncome, canUploadAds, canUploadAdsProduct, canUploadOrdersAll].filter(Boolean).length,
-                    })
-                    if (canUploadIncome) await uploadFile('income')
-                    if (canUploadOrdersAll) await uploadFile('orders_all')
-                    if (canUploadAds) await uploadFile('ads')
-                    if (canUploadAdsProduct) await uploadFile('ads_product')
-                  }}
-                >
-                  Proses Semua
-                </Button>
-              )}
+            {/* Order Order.all → Income → Ads → Ads-product (enforces workflow) */}
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <DropZone
+                type="orders_all"
+                accept=".xlsx"
+                state={ordersAllState}
+                onChange={(f) => setFile('orders_all', f)}
+                onRemove={() => removeFile('orders_all')}
+              />
+              <DropZone
+                type="income"
+                accept=".xlsx"
+                state={incomeState}
+                onChange={(f) => setFile('income', f)}
+                onRemove={() => removeFile('income')}
+                disabled={statusLoading || (!hasOrdersAllData && ordersAllState.status !== 'success')}
+                disabledReason={statusLoading ? undefined : 'Upload Order.all dulu untuk mengisi master produk'}
+              />
+              <DropZone
+                type="ads"
+                accept=".csv"
+                state={adsState}
+                onChange={(f) => setFile('ads', f)}
+                onRemove={() => removeFile('ads')}
+              />
+              <DropZone
+                type="ads_product"
+                accept=".csv"
+                state={adsProductState}
+                onChange={(f) => setFile('ads_product', f)}
+                onRemove={() => removeFile('ads_product')}
+              />
             </div>
-          )}
-        </CardContent>
-      </Card>
+
+            {hasFiles && (
+              <div className="flex flex-col sm:flex-row gap-2 pt-2 flex-wrap">
+                {canUploadIncome && (
+                  <Button
+                    className="gap-2"
+                    onClick={() => uploadFile('income')}
+                    disabled={incomeState.status === 'uploading'}
+                  >
+                    <Upload className="h-4 w-4" />
+                    Proses Data Penghasilan
+                  </Button>
+                )}
+                {canUploadAds && (
+                  <Button
+                    variant={canUploadIncome ? 'outline' : 'default'}
+                    className="gap-2"
+                    onClick={() => uploadFile('ads')}
+                    disabled={adsState.status === 'uploading'}
+                  >
+                    <Upload className="h-4 w-4" />
+                    Proses Data Iklan
+                  </Button>
+                )}
+                {canUploadAdsProduct && (
+                  <Button
+                    variant={canUploadIncome || canUploadAds ? 'outline' : 'default'}
+                    className="gap-2"
+                    onClick={() => uploadFile('ads_product')}
+                    disabled={adsProductState.status === 'uploading'}
+                  >
+                    <Upload className="h-4 w-4" />
+                    Proses Data per Produk
+                  </Button>
+                )}
+                {canUploadOrdersAll && (
+                  <Button
+                    variant={canUploadIncome || canUploadAds || canUploadAdsProduct ? 'outline' : 'default'}
+                    className="gap-2"
+                    onClick={() => uploadFile('orders_all')}
+                    disabled={ordersAllState.status === 'uploading'}
+                  >
+                    <Upload className="h-4 w-4" />
+                    Proses Semua Pesanan
+                  </Button>
+                )}
+                {canUploadAny && [canUploadIncome, canUploadAds, canUploadAdsProduct, canUploadOrdersAll].filter(Boolean).length > 1 && (
+                  <Button
+                    variant="secondary"
+                    className="gap-2 sm:ml-auto"
+                    onClick={async () => {
+                      trackEvent('upload_process_all_clicked', {
+                        marketplace,
+                        selected_types_count: [canUploadIncome, canUploadAds, canUploadAdsProduct, canUploadOrdersAll].filter(Boolean).length,
+                      })
+                      if (canUploadIncome) await uploadFile('income')
+                      if (canUploadOrdersAll) await uploadFile('orders_all')
+                      if (canUploadAds) await uploadFile('ads')
+                      if (canUploadAdsProduct) await uploadFile('ads_product')
+                    }}
+                  >
+                    Proses Semua
+                  </Button>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Next steps after success */}
       {(incomeState.status === 'success' || adsState.status === 'success' || adsProductState.status === 'success' || ordersAllState.status === 'success') && (
@@ -839,30 +884,31 @@ export default function UploadPage() {
         </Card>
       )}
 
-      {/* Guide */}
-      <Card className="bg-muted/30">
-        <CardContent className="p-4 space-y-3">
-          <p className="font-medium text-sm">Urutan upload &amp; cara download dari Shopee:</p>
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <div>
-              <span className="font-medium text-foreground">1. Order.all / Semua Pesanan (.xlsx)</span> <span className="text-amber-700 text-xs">— WAJIB UPLOAD DULUAN</span>
-              <div className="text-xs ml-4 mt-0.5">Seller Center → Pesanan Saya → Export Pesanan (pilih semua status). Ini sumber master produk &amp; mapping SKU.</div>
+      {hasSelectedStore && (
+        <Card className="bg-muted/30">
+          <CardContent className="p-4 space-y-3">
+            <p className="font-medium text-sm">Urutan upload &amp; cara download dari Shopee:</p>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <div>
+                <span className="font-medium text-foreground">1. Order.all / Semua Pesanan (.xlsx)</span> <span className="text-amber-700 text-xs">— WAJIB UPLOAD DULUAN</span>
+                <div className="text-xs ml-4 mt-0.5">Seller Center → Pesanan Saya → Export Pesanan (pilih semua status). Ini sumber master produk &amp; mapping SKU.</div>
+              </div>
+              <div>
+                <span className="font-medium text-foreground">2. Data Penghasilan / Income (.xlsx)</span>
+                <div className="text-xs ml-4 mt-0.5">Seller Center → Keuangan → Penghasilan Saya → Download. Berisi data finansial pesanan yang dananya sudah dilepas.</div>
+              </div>
+              <div className="pt-1 border-t">
+                <span className="font-medium text-foreground">Data Iklan (.csv)</span> <span className="text-xs text-muted-foreground">— independent, boleh kapan saja</span>
+                <div className="text-xs ml-4 mt-0.5">Shopee Ads → Laporan → Download Laporan Produk</div>
+              </div>
+              <div>
+                <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv)</span> <span className="text-xs text-muted-foreground">— independent</span>
+                <div className="text-xs ml-4 mt-0.5">Shopee Ads → Shop GMV Max → Laporan → Download Detail Produk</div>
+              </div>
             </div>
-            <div>
-              <span className="font-medium text-foreground">2. Data Penghasilan / Income (.xlsx)</span>
-              <div className="text-xs ml-4 mt-0.5">Seller Center → Keuangan → Penghasilan Saya → Download. Berisi data finansial pesanan yang dananya sudah dilepas.</div>
-            </div>
-            <div className="pt-1 border-t">
-              <span className="font-medium text-foreground">Data Iklan (.csv)</span> <span className="text-xs text-muted-foreground">— independent, boleh kapan saja</span>
-              <div className="text-xs ml-4 mt-0.5">Shopee Ads → Laporan → Download Laporan Produk</div>
-            </div>
-            <div>
-              <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv)</span> <span className="text-xs text-muted-foreground">— independent</span>
-              <div className="text-xs ml-4 mt-0.5">Shopee Ads → Shop GMV Max → Laporan → Download Detail Produk</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { Store as StoreIcon, ChevronDown, Plus, Check, Layers, Settings } from 'lucide-react'
+import { Store as StoreIcon, ChevronDown, Check, Layers, Settings } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -148,13 +148,6 @@ export function StoreSwitcher() {
         >
           <Settings className="h-4 w-4" />
           Kelola Toko
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => router.push(buildDashboardHref('/dashboard/stores?new=1', searchParams))}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Tambah Toko Baru
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

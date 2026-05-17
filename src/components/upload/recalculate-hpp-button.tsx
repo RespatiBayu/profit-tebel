@@ -9,6 +9,7 @@ import { DashboardLink } from '@/components/layout/dashboard-link'
 
 interface Props {
   storeId: string | null
+  disabled?: boolean
 }
 
 interface Result {
@@ -23,7 +24,7 @@ interface Result {
   warnings: string[]
 }
 
-export function RecalculateHppButton({ storeId }: Props) {
+export function RecalculateHppButton({ storeId, disabled = false }: Props) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -66,7 +67,7 @@ export function RecalculateHppButton({ storeId }: Props) {
         variant="outline"
         size="sm"
         onClick={handleClick}
-        disabled={loading}
+        disabled={loading || disabled}
         className="gap-2"
       >
         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
