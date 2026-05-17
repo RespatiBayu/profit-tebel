@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { normalizeMarketplaceFilter } from '@/lib/dashboard-filters'
+import { recalculateEstimatedHppForStore } from '@/lib/recalculate-estimated-hpp'
 import type { MasterProduct, MasterProductSourceTag } from '@/types'
+
+function parseNonNegativeNumber(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null
+  }
+  return value
+}
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -96,4 +104,98 @@ export async function GET(request: NextRequest) {
       has_ads_data: adsSet.has(product.marketplace_product_id),
     })),
   })
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const body = await request.json().catch(() => null) as {
+      updates?: Array<{ id?: string; hpp?: number; packaging_cost?: number }>
+    } | null
+
+    if (!body?.updates || body.updates.length === 0) {
+      return NextResponse.json({ error: 'Tidak ada perubahan untuk disimpan' }, { status: 400 })
+    }
+
+    const updatesById = new Map<string, { hpp: number; packaging_cost: number }>()
+
+    for (const update of body.updates) {
+      const id = update.id?.trim()
+      const hpp = parseNonNegativeNumber(update.hpp)
+      const packagingCost = parseNonNegativeNumber(update.packaging_cost)
+
+      if (!id || hpp === null || packagingCost === null) {
+        return NextResponse.json(
+          { error: 'Format data HPP/Packaging tidak valid' },
+          { status: 400 }
+        )
+      }
+
+      updatesById.set(id, { hpp, packaging_cost: packagingCost })
+    }
+
+    const productIds = Array.from(updatesById.keys())
+    const { data: products, error: productsError } = await supabase
+      .from('master_products')
+      .select('id,store_id')
+      .in('id', productIds)
+
+    if (productsError) {
+      return NextResponse.json({ error: productsError.message }, { status: 500 })
+    }
+
+    const typedProducts = (products ?? []) as Array<{ id: string; store_id: string | null }>
+    if (typedProducts.length !== productIds.length) {
+      return NextResponse.json(
+        { error: 'Sebagian produk tidak ditemukan atau tidak bisa diakses' },
+        { status: 404 }
+      )
+    }
+
+    for (const product of typedProducts) {
+      const update = updatesById.get(product.id)
+      if (!update) continue
+
+      const { error: updateError } = await supabase
+        .from('master_products')
+        .update({
+          hpp: update.hpp,
+          packaging_cost: update.packaging_cost,
+        })
+        .eq('id', product.id)
+
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 500 })
+      }
+    }
+
+    const storeScopes = typedProducts.some((product) => !product.store_id)
+      ? [null]
+      : Array.from(new Set(typedProducts.map((product) => product.store_id)))
+
+    const warnings = new Set<string>()
+    for (const scope of storeScopes) {
+      const result = await recalculateEstimatedHppForStore(supabase, scope)
+      result.warnings.forEach((warning) => warnings.add(warning))
+    }
+
+    return NextResponse.json({
+      success: true,
+      updatedCount: typedProducts.length,
+      recalculatedStores: storeScopes.length,
+      warnings: Array.from(warnings),
+    })
+  } catch (error) {
+    console.error('Bulk update master-products error:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Server error' },
+      { status: 500 }
+    )
+  }
 }

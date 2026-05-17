@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
+import { recalculateEstimatedHppForStore } from '@/lib/recalculate-estimated-hpp'
+
+function parseNonNegativeNumber(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null
+  }
+  return value
+}
 
 // ---------------------------------------------------------------------------
 // PATCH /api/master-products/[id]
@@ -23,9 +30,13 @@ export async function PATCH(
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const body = await request.json() as { hpp?: number; packaging_cost?: number }
-    const hpp = typeof body.hpp === 'number' ? body.hpp : 0
-    const packaging_cost = typeof body.packaging_cost === 'number' ? body.packaging_cost : 0
+    const body = await request.json().catch(() => null) as { hpp?: number; packaging_cost?: number } | null
+    const hpp = parseNonNegativeNumber(body?.hpp)
+    const packaging_cost = parseNonNegativeNumber(body?.packaging_cost)
+
+    if (hpp === null || packaging_cost === null) {
+      return NextResponse.json({ error: 'Format data HPP/Packaging tidak valid' }, { status: 400 })
+    }
 
     const { data: product, error: fetchErr } = await supabase
       .from('master_products')
@@ -47,96 +58,7 @@ export async function PATCH(
     // Recalculate estimated_hpp for ALL user orders (income + orders_all).
     // -----------------------------------------------------------------------
     try {
-      const storeId = product.store_id as string | null
-
-      // 1. Build MasterResolver from ALL master_products for this user
-      const { data: masterRows } = await supabase
-        .from('master_products')
-        .select('id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost')
-        .eq('store_id', storeId)
-
-      const resolver = new MasterResolver((masterRows ?? []) as MasterRow[])
-
-      const OP_CHUNK = 200
-
-      // 2. Recalculate orders_all.estimated_hpp from products_json (SKU + qty)
-      {
-        const oaQuery = supabase
-          .from('orders_all')
-          .select('id,products_json')
-        if (storeId) oaQuery.eq('store_id', storeId)
-        const { data: oaRows } = await oaQuery
-
-        if (oaRows && oaRows.length > 0) {
-          type ProdJson = { marketplace_product_id: string | null; product_name?: string | null; quantity: number }
-          for (const row of oaRows as { id: string; products_json: unknown }[]) {
-            const prods = (row.products_json ?? []) as ProdJson[]
-            let estimatedHpp = 0
-            for (const prod of prods) {
-              const master = resolver.resolve({
-                anyId: prod.marketplace_product_id,
-                productName: prod.product_name,
-              })
-              if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
-                estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
-              }
-            }
-            await supabase
-              .from('orders_all')
-              .update({ estimated_hpp: estimatedHpp })
-              .eq('id', row.id)
-          }
-          console.log(`Recalculated estimated_hpp for ${oaRows.length} orders_all rows`)
-        }
-      }
-
-      // 3. Recalculate orders.estimated_hpp using order_products (SKU + qty)
-      {
-        const incomeQuery = supabase
-          .from('orders')
-          .select('id,order_number')
-        if (storeId) incomeQuery.eq('store_id', storeId)
-        const { data: incomeOrders } = await incomeQuery
-
-        if (incomeOrders && incomeOrders.length > 0) {
-          const incomeOrderNums = (incomeOrders as { id: string; order_number: string }[]).map((r) => r.order_number)
-
-          // Fetch order_products (any-ID + qty)
-          type OpRow = { order_number: string; marketplace_product_id: string; product_name: string | null; quantity: number | null }
-          const opRows: OpRow[] = []
-          for (let i = 0; i < incomeOrderNums.length; i += OP_CHUNK) {
-            const { data } = await supabase
-              .from('order_products')
-              .select('order_number,marketplace_product_id,product_name,quantity')
-              .eq('store_id', storeId)
-              .in('order_number', incomeOrderNums.slice(i, i + OP_CHUNK))
-            if (data) opRows.push(...(data as OpRow[]))
-          }
-
-          const orderToProducts = new Map<string, Array<{ id: string; name: string | null; qty: number }>>()
-          for (const row of opRows) {
-            const arr = orderToProducts.get(row.order_number) ?? []
-            arr.push({ id: row.marketplace_product_id, name: row.product_name, qty: row.quantity ?? 1 })
-            orderToProducts.set(row.order_number, arr)
-          }
-
-          for (const order of incomeOrders as { id: string; order_number: string }[]) {
-            const items = orderToProducts.get(order.order_number) ?? []
-            let estimatedHpp = 0
-            for (const item of items) {
-              const master = resolver.resolve({ anyId: item.id, productName: item.name })
-              if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
-                estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
-              }
-            }
-            await supabase
-              .from('orders')
-              .update({ estimated_hpp: estimatedHpp })
-              .eq('id', order.id)
-          }
-          console.log(`Recalculated estimated_hpp for ${incomeOrders.length} income orders`)
-        }
-      }
+      await recalculateEstimatedHppForStore(supabase, (product.store_id as string | null) ?? null)
     } catch (backfillErr) {
       console.error('HPP backfill after save error:', backfillErr)
       // Non-fatal — HPP was saved, just backfill failed

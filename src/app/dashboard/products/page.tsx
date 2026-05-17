@@ -28,13 +28,6 @@ import {
 import { DashboardLink } from '@/components/layout/dashboard-link'
 import type { MasterProduct, MasterProductSourceTag } from '@/types'
 
-function formatRp(n: number) {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 })
-    .format(n)
-    .replace('IDR', 'Rp')
-    .replace(/\u00a0/, ' ')
-}
-
 interface EditingProduct {
   hpp: string
   packaging_cost: string
@@ -56,6 +49,38 @@ function isNumericProductId(value: string | null | undefined) {
   return !!value && /^\d+$/.test(value)
 }
 
+function buildDraft(product: MasterProduct): EditingProduct {
+  return {
+    hpp: product.hpp ? String(product.hpp) : '',
+    packaging_cost: product.packaging_cost ? String(product.packaging_cost) : '',
+  }
+}
+
+function parseDraftNumber(value: string) {
+  const normalized = value.trim().replace(',', '.')
+  if (!normalized) return 0
+
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null
+  }
+
+  return parsed
+}
+
+function isDraftDirty(product: MasterProduct, draft?: EditingProduct) {
+  if (!draft) return false
+
+  const hpp = parseDraftNumber(draft.hpp)
+  const packagingCost = parseDraftNumber(draft.packaging_cost)
+
+  if (hpp === null || packagingCost === null) {
+    return true
+  }
+
+  return hpp !== product.hpp || packagingCost !== product.packaging_cost
+}
+
 export default function ProductsPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -66,11 +91,12 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'hpp'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const [editing, setEditing] = useState<Record<string, EditingProduct>>({})
-  const [saving, setSaving] = useState<Record<string, boolean>>({})
+  const [drafts, setDrafts] = useState<Record<string, EditingProduct>>({})
+  const [savingAll, setSavingAll] = useState(false)
   const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -98,15 +124,24 @@ export default function ProductsPage() {
 
         if (!response.ok) {
           setProducts([])
+          setDrafts({})
+          setSaved({})
+          setSuccessMessage(null)
           setError(json?.error ?? 'Gagal mengambil data produk')
           return
         }
 
         setProducts(json?.products ?? [])
+        setDrafts({})
+        setSaved({})
+        setSuccessMessage(null)
       } catch (err) {
         if (!active) return
         const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
         setProducts([])
+        setDrafts({})
+        setSaved({})
+        setSuccessMessage(null)
         setError(`Gagal mengambil data produk: ${message}`)
       } finally {
         if (active) {
@@ -122,52 +157,134 @@ export default function ProductsPage() {
     }
   }, [marketplace, storeId])
 
-  function startEdit(id: string, product: MasterProduct) {
-    setEditing((prev) => ({
-      ...prev,
-      [id]: { hpp: String(product.hpp || ''), packaging_cost: String(product.packaging_cost || '') },
-    }))
-  }
-
-  function cancelEdit(id: string) {
-    setEditing((prev) => {
+  function resetDraft(id: string) {
+    setDrafts((prev) => {
       const next = { ...prev }
       delete next[id]
       return next
     })
   }
 
-  async function saveProduct(product: MasterProduct) {
-    const edit = editing[product.id]
-    if (!edit) return
+  function updateDraft(product: MasterProduct, patch: Partial<EditingProduct>) {
+    setDrafts((prev) => {
+      const nextDraft = {
+        ...(prev[product.id] ?? buildDraft(product)),
+        ...patch,
+      }
+      const next = { ...prev }
 
-    const hpp = parseFloat(edit.hpp.replace(',', '.')) || 0
-    const packaging_cost = parseFloat(edit.packaging_cost.replace(',', '.')) || 0
+      if (isDraftDirty(product, nextDraft)) {
+        next[product.id] = nextDraft
+      } else {
+        delete next[product.id]
+      }
 
-    setSaving((prev) => ({ ...prev, [product.id]: true }))
-
-    // Use API route (not direct Supabase) so the server can also backfill
-    // estimated_hpp in orders_all after HPP is saved.
-    const res = await fetch(`/api/master-products/${product.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hpp, packaging_cost }),
+      return next
     })
-    const json = await res.json()
+    setError(null)
+    setSuccessMessage(null)
+  }
 
-    setSaving((prev) => ({ ...prev, [product.id]: false }))
+  async function saveAllProducts() {
+    const pendingChanges = products.flatMap((product) => {
+      const draft = drafts[product.id]
+      if (!isDraftDirty(product, draft)) {
+        return []
+      }
 
-    if (!res.ok) {
-      setError(`Gagal menyimpan: ${json?.error ?? res.statusText}`)
-    } else {
-      setProducts((prev) =>
-        prev.map((p) => p.id === product.id ? { ...p, hpp, packaging_cost } : p)
+      const hpp = parseDraftNumber(draft?.hpp ?? '')
+      const packaging_cost = parseDraftNumber(draft?.packaging_cost ?? '')
+
+      return [{ product, hpp, packaging_cost }]
+    })
+
+    if (pendingChanges.length === 0) {
+      return
+    }
+
+    if (pendingChanges.some((item) => item.hpp === null || item.packaging_cost === null)) {
+      setError('Masih ada input HPP atau Packaging yang tidak valid')
+      return
+    }
+
+    setSavingAll(true)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      const response = await fetch('/api/master-products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          updates: pendingChanges.map((item) => ({
+            id: item.product.id,
+            hpp: item.hpp,
+            packaging_cost: item.packaging_cost,
+          })),
+        }),
+      })
+
+      const json = await response.json().catch(() => null) as {
+        updatedCount?: number
+        error?: string
+      } | null
+
+      if (!response.ok) {
+        setError(`Gagal menyimpan: ${json?.error ?? response.statusText}`)
+        return
+      }
+
+      const updatedIds = pendingChanges.map((item) => item.product.id)
+      const updateMap = new Map(
+        pendingChanges.map((item) => [
+          item.product.id,
+          {
+            hpp: item.hpp ?? 0,
+            packaging_cost: item.packaging_cost ?? 0,
+          },
+        ])
       )
-      cancelEdit(product.id)
-      setSaved((prev) => ({ ...prev, [product.id]: true }))
-      setTimeout(() => setSaved((prev) => { const n = { ...prev }; delete n[product.id]; return n }), 2000)
-      // Invalidate server caches so dashboard pages re-fetch with new HPP
+
+      setProducts((prev) =>
+        prev.map((product) => {
+          const next = updateMap.get(product.id)
+          return next ? { ...product, ...next } : product
+        })
+      )
+
+      setDrafts((prev) => {
+        const next = { ...prev }
+        updatedIds.forEach((id) => {
+          delete next[id]
+        })
+        return next
+      })
+
+      setSaved((prev) => {
+        const next = { ...prev }
+        updatedIds.forEach((id) => {
+          next[id] = true
+        })
+        return next
+      })
+
+      setTimeout(() => {
+        setSaved((prev) => {
+          const next = { ...prev }
+          updatedIds.forEach((id) => {
+            delete next[id]
+          })
+          return next
+        })
+      }, 2000)
+
+      setSuccessMessage(`${json?.updatedCount ?? pendingChanges.length} produk berhasil disimpan`)
       router.refresh()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      setError(`Gagal menyimpan: ${message}`)
+    } finally {
+      setSavingAll(false)
     }
   }
 
@@ -192,6 +309,7 @@ export default function ProductsPage() {
 
       // Remove from state
       setProducts((prev) => prev.filter((p) => p.id !== productId))
+      resetDraft(productId)
       router.refresh()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
@@ -220,6 +338,14 @@ export default function ProductsPage() {
     })
 
   const noHppCount = products.filter((p) => !p.hpp || p.hpp === 0).length
+  const pendingChanges = products.filter((product) => isDraftDirty(product, drafts[product.id]))
+  const invalidChanges = pendingChanges.filter((product) => {
+    const draft = drafts[product.id]
+    return (
+      parseDraftNumber(draft?.hpp ?? '') === null ||
+      parseDraftNumber(draft?.packaging_cost ?? '') === null
+    )
+  })
 
   function toggleSort(col: 'name' | 'hpp') {
     if (sortBy === col) setSortDir((d) => d === 'asc' ? 'desc' : 'asc')
@@ -275,6 +401,25 @@ export default function ProductsPage() {
         </Alert>
       )}
 
+      {successMessage && (
+        <Alert className="border-green-200 bg-green-50">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      {pendingChanges.length > 0 && (
+        <Alert className="border-amber-200 bg-amber-50">
+          <AlertCircle className="h-4 w-4 text-amber-600" />
+          <AlertDescription className="text-amber-800">
+            <strong>{pendingChanges.length} perubahan</strong> belum disimpan.
+            {invalidChanges.length > 0
+              ? ` Perbaiki ${invalidChanges.length} baris yang masih belum valid dulu.`
+              : ' Kamu bisa isi banyak baris sekaligus lalu klik simpan semua.'}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Empty state */}
       {!loading && products.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
@@ -299,15 +444,41 @@ export default function ProductsPage() {
       {/* Table */}
       {(loading || products.length > 0) && (
         <>
-          {/* Search */}
-          <div className="relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Cari nama produk, ID, atau SKU..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                placeholder="Cari nama produk, ID, atau SKU..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {pendingChanges.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDrafts({})}
+                  disabled={savingAll}
+                >
+                  Reset Perubahan
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="gap-2"
+                onClick={saveAllProducts}
+                disabled={savingAll || pendingChanges.length === 0 || invalidChanges.length > 0}
+              >
+                <Save className="h-4 w-4" />
+                {savingAll
+                  ? 'Menyimpan...'
+                  : pendingChanges.length > 0
+                  ? `Simpan ${pendingChanges.length} Perubahan`
+                  : 'Simpan Perubahan'}
+              </Button>
+            </div>
           </div>
 
           <div className="border rounded-xl overflow-x-auto">
@@ -334,7 +505,7 @@ export default function ProductsPage() {
                     </button>
                   </TableHead>
                   <TableHead className="w-36">Packaging (Rp)</TableHead>
-                  <TableHead className="w-32">Aksi</TableHead>
+                  <TableHead className="w-44">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -350,16 +521,25 @@ export default function ProductsPage() {
                   ))
                 ) : (
                   filtered.map((product) => {
-                    const isEditing = !!editing[product.id]
-                    const isSaving = !!saving[product.id]
                     const isSaved = !!saved[product.id]
                     const hasNoHpp = !product.hpp || product.hpp === 0
                     const productId = getDisplayProductId(product)
                     const sellerSku = getDisplaySellerSku(product)
                     const sourceTags = product.source_tags ?? []
+                    const draft = drafts[product.id] ?? buildDraft(product)
+                    const parsedHpp = parseDraftNumber(draft.hpp)
+                    const parsedPackagingCost = parseDraftNumber(draft.packaging_cost)
+                    const hppInvalid = parsedHpp === null
+                    const packagingInvalid = parsedPackagingCost === null
+                    const isDirty = isDraftDirty(product, drafts[product.id])
+                    const rowTone = isDirty
+                      ? 'bg-amber-50/60'
+                      : hasNoHpp
+                      ? 'bg-orange-50/50'
+                      : undefined
 
                     return (
-                      <TableRow key={product.id} className={hasNoHpp && !isEditing ? 'bg-orange-50/50' : undefined}>
+                      <TableRow key={product.id} className={rowTone}>
                         <TableCell>
                           <div>
                             <p className="font-medium text-sm line-clamp-2">{product.product_name}</p>
@@ -389,101 +569,71 @@ export default function ProductsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {isEditing ? (
-                            <Input
-                              type="number"
-                              min={0}
-                              className="h-8 w-28 text-sm"
-                              value={editing[product.id].hpp}
-                              onChange={(e) =>
-                                setEditing((prev) => ({
-                                  ...prev,
-                                  [product.id]: { ...prev[product.id], hpp: e.target.value },
-                                }))
-                              }
-                              onKeyDown={(e) => e.key === 'Enter' && saveProduct(product)}
-                            />
-                          ) : (
-                            <span
-                              className={`text-sm cursor-pointer hover:underline ${hasNoHpp ? 'text-orange-600 font-medium' : ''}`}
-                              onClick={() => startEdit(product.id, product)}
-                            >
-                              {hasNoHpp ? 'Belum diisi' : formatRp(product.hpp)}
-                            </span>
-                          )}
+                          <Input
+                            type="number"
+                            min={0}
+                            placeholder="0"
+                            className={`h-8 w-28 text-sm ${hppInvalid ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
+                            value={draft.hpp}
+                            onChange={(e) => updateDraft(product, { hpp: e.target.value })}
+                            onKeyDown={(e) => e.key === 'Enter' && saveAllProducts()}
+                            disabled={savingAll}
+                          />
                         </TableCell>
                         <TableCell>
-                          {isEditing ? (
-                            <Input
-                              type="number"
-                              min={0}
-                              className="h-8 w-28 text-sm"
-                              value={editing[product.id].packaging_cost}
-                              onChange={(e) =>
-                                setEditing((prev) => ({
-                                  ...prev,
-                                  [product.id]: { ...prev[product.id], packaging_cost: e.target.value },
-                                }))
-                              }
-                              onKeyDown={(e) => e.key === 'Enter' && saveProduct(product)}
-                            />
-                          ) : (
-                            <span
-                              className="text-sm cursor-pointer hover:underline"
-                              onClick={() => startEdit(product.id, product)}
-                            >
-                              {formatRp(product.packaging_cost ?? 0)}
-                            </span>
-                          )}
+                          <Input
+                            type="number"
+                            min={0}
+                            placeholder="0"
+                            className={`h-8 w-28 text-sm ${packagingInvalid ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
+                            value={draft.packaging_cost}
+                            onChange={(e) => updateDraft(product, { packaging_cost: e.target.value })}
+                            onKeyDown={(e) => e.key === 'Enter' && saveAllProducts()}
+                            disabled={savingAll}
+                          />
                         </TableCell>
                         <TableCell>
-                          {isSaved ? (
-                            <span className="flex items-center gap-1 text-green-600 text-xs">
-                              <CheckCircle className="h-3.5 w-3.5" />
-                              Tersimpan
-                            </span>
-                          ) : isEditing ? (
-                            <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                className="h-7 text-xs gap-1"
-                                onClick={() => saveProduct(product)}
-                                disabled={isSaving}
-                              >
-                                <Save className="h-3 w-3" />
-                                {isSaving ? '...' : 'Simpan'}
-                              </Button>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {isSaved ? (
+                              <span className="flex items-center gap-1 text-green-600 text-xs">
+                                <CheckCircle className="h-3.5 w-3.5" />
+                                Tersimpan
+                              </span>
+                            ) : savingAll && isDirty ? (
+                              <span className="text-xs text-muted-foreground">Menyimpan...</span>
+                            ) : hppInvalid || packagingInvalid ? (
+                              <span className="text-xs text-red-600">Cek angka</span>
+                            ) : isDirty ? (
+                              <span className="text-xs text-amber-700">Belum disimpan</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                {hasNoHpp ? 'Siap diisi' : 'Siap'}
+                              </span>
+                            )}
+
+                            {isDirty && (
                               <Button
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 text-xs"
-                                onClick={() => cancelEdit(product.id)}
+                                onClick={() => resetDraft(product.id)}
+                                disabled={savingAll}
                               >
-                                Batal
+                                Reset
                               </Button>
-                            </div>
-                          ) : (
-                            <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 text-xs"
-                                onClick={() => startEdit(product.id, product)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => deleteProduct(product.id)}
-                                disabled={deleting[product.id]}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                {deleting[product.id] ? 'Hapus...' : 'Hapus'}
-                              </Button>
-                            </div>
-                          )}
+                            )}
+
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => deleteProduct(product.id)}
+                              disabled={deleting[product.id] || savingAll}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              {deleting[product.id] ? 'Hapus...' : 'Hapus'}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )
