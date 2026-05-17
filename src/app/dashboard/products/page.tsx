@@ -26,7 +26,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
-import type { MasterProduct } from '@/types'
+import type { MasterProduct, MasterProductSourceTag } from '@/types'
 
 function formatRp(n: number) {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 })
@@ -43,6 +43,17 @@ interface EditingProduct {
 interface MasterProductsResponse {
   products: MasterProduct[]
   error?: string
+}
+
+const SOURCE_LABELS: Record<MasterProductSourceTag, string> = {
+  income: 'Income',
+  orders_all: 'Order.all',
+  ads: 'Iklan',
+  ads_product: 'Iklan Produk',
+}
+
+function isNumericProductId(value: string | null | undefined) {
+  return !!value && /^\d+$/.test(value)
 }
 
 export default function ProductsPage() {
@@ -215,6 +226,17 @@ export default function ProductsPage() {
     else { setSortBy(col); setSortDir('asc') }
   }
 
+  function getDisplayProductId(product: MasterProduct) {
+    if (isNumericProductId(product.marketplace_product_id)) return product.marketplace_product_id
+    return null
+  }
+
+  function getDisplaySellerSku(product: MasterProduct) {
+    if (product.seller_sku) return product.seller_sku
+    if (!isNumericProductId(product.marketplace_product_id)) return product.marketplace_product_id
+    return null
+  }
+
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
       {/* Header */}
@@ -282,7 +304,7 @@ export default function ProductsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               className="pl-9"
-              placeholder="Cari nama produk atau ID..."
+              placeholder="Cari nama produk, ID, atau SKU..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -332,6 +354,9 @@ export default function ProductsPage() {
                     const isSaving = !!saving[product.id]
                     const isSaved = !!saved[product.id]
                     const hasNoHpp = !product.hpp || product.hpp === 0
+                    const productId = getDisplayProductId(product)
+                    const sellerSku = getDisplaySellerSku(product)
+                    const sourceTags = product.source_tags ?? []
 
                     return (
                       <TableRow key={product.id} className={hasNoHpp && !isEditing ? 'bg-orange-50/50' : undefined}>
@@ -339,22 +364,27 @@ export default function ProductsPage() {
                           <div>
                             <p className="font-medium text-sm line-clamp-2">{product.product_name}</p>
                             <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-                              ID Produk: {product.marketplace_product_id}
+                              ID Produk: {productId ?? 'Belum terdeteksi'}
                             </p>
-                            {product.seller_sku && (
-                              <p className="text-xs text-muted-foreground font-mono">
-                                SKU Seller: {product.seller_sku}
-                              </p>
-                            )}
+                            <p className="text-xs text-muted-foreground font-mono">
+                              SKU Seller: {sellerSku ?? 'Belum terdeteksi'}
+                            </p>
                           </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
-                            {product.has_income_data && (
-                              <Badge variant="secondary" className="text-xs">Income</Badge>
-                            )}
-                            {product.has_ads_data && (
-                              <Badge variant="outline" className="text-xs">Iklan</Badge>
+                            {sourceTags.length > 0 ? (
+                              sourceTags.map((source) => (
+                                <Badge
+                                  key={source}
+                                  variant={source === 'income' ? 'secondary' : 'outline'}
+                                  className="text-xs"
+                                >
+                                  {SOURCE_LABELS[source]}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Belum terlacak</span>
                             )}
                           </div>
                         </TableCell>

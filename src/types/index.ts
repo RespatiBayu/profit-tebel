@@ -102,6 +102,7 @@ export interface UploadSummary {
 export type UploadFileType = 'income' | 'ads' | 'ads_product' | 'orders_all'
 
 export type UploadJobStatus = 'queued' | 'processing' | 'completed' | 'failed'
+export type MasterProductSourceTag = 'income' | 'orders_all' | 'ads' | 'ads_product'
 
 export interface UploadJobResult extends UploadSummary {
   storeId?: string | null
@@ -154,6 +155,7 @@ export interface MasterProduct {
   id: string
   marketplace_product_id: string
   seller_sku: string | null
+  source_tags?: MasterProductSourceTag[]
   product_name: string
   hpp: number
   packaging_cost: number

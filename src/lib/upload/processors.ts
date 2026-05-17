@@ -6,7 +6,7 @@ import { parseShopeeAdsProduct } from '@/lib/parsers/shopee-ads-product'
 import { parseShopeeIncome } from '@/lib/parsers/shopee-income'
 import { parseShopeeOrdersAll } from '@/lib/parsers/shopee-orders-all'
 import { classifyIncomingRows } from '@/lib/upload/dedupe'
-import type { UploadFileType, UploadJobResult } from '@/types'
+import type { MasterProductSourceTag, UploadFileType, UploadJobResult } from '@/types'
 import { ensureProfileRow, resolveUploadStore } from './shared'
 
 const ORDER_COMPARE_FIELDS = [
@@ -58,9 +58,19 @@ function ensureValidDate(value: string | null | undefined) {
 
 type MasterProductRow = ResolverMasterRow & {
   seller_sku: string | null
+  source_tags: string[] | null
 }
 
-const MASTER_PRODUCT_SELECT = 'id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost'
+const MASTER_PRODUCT_SELECT = 'id,marketplace_product_id,seller_sku,numeric_id,product_name,hpp,packaging_cost,source_tags'
+
+function mergeSourceTags(
+  existing: string[] | null | undefined,
+  incoming: MasterProductSourceTag,
+): MasterProductSourceTag[] {
+  const next = new Set<MasterProductSourceTag>((existing ?? []) as MasterProductSourceTag[])
+  next.add(incoming)
+  return Array.from(next)
+}
 
 async function loadMasterRows(
   supabase: SupabaseClient,
@@ -85,6 +95,7 @@ async function syncMasterProductsFromNumericRows(params: {
   userId: string
   storeId: string
   marketplace: string
+  sourceTag: MasterProductSourceTag
   rows: Array<{ productId: string | null; productName: string | null }>
 }): Promise<{ masterRows: MasterProductRow[]; createdCount: number; migratedCount: number }> {
   const uniqueRows = new Map<string, { productId: string; productName: string | null }>()
@@ -108,14 +119,25 @@ async function syncMasterProductsFromNumericRows(params: {
   for (const row of Array.from(uniqueRows.values())) {
     const direct = byCanonicalId.get(row.productId)
     if (direct) {
+      const nextSourceTags = mergeSourceTags(direct.source_tags, params.sourceTag)
+      const nextNumericId =
+        params.sourceTag === 'income'
+          ? row.productId
+          : direct.numeric_id
       if (
-        row.productName &&
-        (!direct.product_name || direct.product_name === `Produk ${row.productId}`) &&
-        direct.product_name !== row.productName
+        (row.productName &&
+          (!direct.product_name || direct.product_name === `Produk ${row.productId}`) &&
+          direct.product_name !== row.productName) ||
+        nextSourceTags.length !== (direct.source_tags ?? []).length ||
+        nextNumericId !== direct.numeric_id
       ) {
         const { data: updated } = await params.supabase
           .from('master_products')
-          .update({ product_name: row.productName })
+          .update({
+            product_name: row.productName ?? direct.product_name,
+            numeric_id: nextNumericId,
+            source_tags: nextSourceTags,
+          })
           .eq('id', direct.id)
           .select(MASTER_PRODUCT_SELECT)
           .single()
@@ -129,9 +151,10 @@ async function syncMasterProductsFromNumericRows(params: {
       continue
     }
 
-    const matchedByName = row.productName
+    const matchedByName = (row.productName
       ? resolver.resolve({ productName: row.productName })
       : undefined
+    ) as MasterProductRow | undefined
 
     if (
       matchedByName &&
@@ -143,8 +166,9 @@ async function syncMasterProductsFromNumericRows(params: {
         .update({
           marketplace_product_id: row.productId,
           seller_sku: matchedByName.seller_sku ?? matchedByName.marketplace_product_id,
-          numeric_id: row.productId,
+          numeric_id: params.sourceTag === 'income' ? row.productId : matchedByName.numeric_id,
           product_name: row.productName ?? matchedByName.product_name,
+          source_tags: mergeSourceTags(matchedByName.source_tags, params.sourceTag),
         })
         .eq('id', matchedByName.id)
         .select(MASTER_PRODUCT_SELECT)
@@ -168,8 +192,9 @@ async function syncMasterProductsFromNumericRows(params: {
         store_id: params.storeId,
         marketplace_product_id: row.productId,
         seller_sku: null,
-        numeric_id: row.productId,
+        numeric_id: params.sourceTag === 'income' ? row.productId : null,
         product_name: row.productName ?? `Produk ${row.productId}`,
+        source_tags: [params.sourceTag],
         marketplace: params.marketplace,
         hpp: 0,
         packaging_cost: 0,
@@ -194,6 +219,7 @@ async function syncMasterProductsFromSellerSkus(params: {
   userId: string
   storeId: string
   marketplace: string
+  sourceTag: MasterProductSourceTag
   rows: Array<{ sellerSku: string | null; productName: string | null }>
 }): Promise<{
   masterRows: MasterProductRow[]
@@ -223,17 +249,23 @@ async function syncMasterProductsFromSellerSkus(params: {
     const matched = resolver.resolve({
       anyId: row.sellerSku,
       productName: row.productName,
-    })
+    }) as MasterProductRow | undefined
 
     if (matched) {
       skuToCanonicalId.set(row.sellerSku, matched.marketplace_product_id)
 
-      if (!matched.seller_sku && matched.marketplace_product_id !== row.sellerSku) {
+      const nextSourceTags = mergeSourceTags(matched.source_tags, params.sourceTag)
+
+      if (
+        ((!matched.seller_sku) ||
+          nextSourceTags.length !== (matched.source_tags ?? []).length)
+      ) {
         const { data: updated } = await params.supabase
           .from('master_products')
           .update({
-            seller_sku: row.sellerSku,
+            seller_sku: matched.seller_sku ?? row.sellerSku,
             product_name: row.productName ?? matched.product_name,
+            source_tags: nextSourceTags,
           })
           .eq('id', matched.id)
           .select(MASTER_PRODUCT_SELECT)
@@ -259,6 +291,7 @@ async function syncMasterProductsFromSellerSkus(params: {
         marketplace_product_id: row.sellerSku,
         seller_sku: row.sellerSku,
         product_name: row.productName ?? row.sellerSku,
+        source_tags: [params.sourceTag],
         marketplace: params.marketplace,
         hpp: 0,
         packaging_cost: 0,
@@ -504,6 +537,7 @@ export async function processAdsUpload(ctx: UploadProcessorContext): Promise<Upl
     userId: ctx.userId,
     storeId,
     marketplace: ctx.marketplace,
+    sourceTag: 'ads',
     rows: rows.map((row) => ({
       productId: row.product_code === '-' ? null : row.product_code,
       productName: row.product_name,
@@ -764,6 +798,7 @@ export async function processAdsProductUpload(ctx: UploadProcessorContext): Prom
     userId: ctx.userId,
     storeId,
     marketplace: ctx.marketplace,
+    sourceTag: 'ads_product',
     rows: rows.map((row) => ({
       productId: row.product_code === '-' ? null : row.product_code,
       productName: row.product_name,
@@ -929,6 +964,7 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
       userId: ctx.userId,
       storeId,
       marketplace: ctx.marketplace,
+      sourceTag: 'income',
       rows: opfRows.map((row) => ({
         productId: row.marketplace_product_id,
         productName: row.product_name,
@@ -1351,6 +1387,7 @@ export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promi
     userId: ctx.userId,
     storeId,
     marketplace: ctx.marketplace,
+    sourceTag: 'orders_all',
     rows: sellerSkuRows,
   })
 
