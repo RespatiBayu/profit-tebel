@@ -148,7 +148,10 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
                   <button
                     key={t.value}
                     type="button"
-                    onClick={() => setType(t.value)}
+                    onClick={() => {
+                      setType(t.value)
+                      if (t.value !== 'raw_material') setCostPerUnit('')
+                    }}
                     className={`flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 transition-all text-center ${
                       selected
                         ? `${t.bg} ${t.color} border-current shadow-sm`
@@ -221,26 +224,41 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
             </div>
           </div>
 
-          {/* Harga manual */}
-          <div className="space-y-1.5">
-            <Label htmlFor="item-cost" className="text-sm font-medium">
-              Harga per {resolvedUnit}
-              <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">(manual/fallback)</span>
-            </Label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground select-none">Rp</span>
-              <Input
-                id="item-cost"
-                className="pl-9 h-10"
-                placeholder="0"
-                value={costPerUnit}
-                onChange={(e) => setCostPerUnit(e.target.value.replace(/[^0-9.,]/g, ''))}
-              />
+          {/* Harga manual — hanya untuk Bahan Mentah */}
+          {type === 'raw_material' ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="item-cost" className="text-sm font-medium">
+                Harga per {resolvedUnit}
+                <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">(manual/fallback)</span>
+              </Label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground select-none">Rp</span>
+                <Input
+                  id="item-cost"
+                  className="pl-9 h-10"
+                  placeholder="0"
+                  value={costPerUnit}
+                  onChange={(e) => setCostPerUnit(e.target.value.replace(/[^0-9.,]/g, ''))}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Dipakai untuk kalkulasi HPP jika belum ada harga dari Purchase Order.
+              </p>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-snug">
-              Dipakai untuk kalkulasi HPP jika belum ada harga dari Purchase Order.
-            </p>
-          </div>
+          ) : (
+            <div className="rounded-xl bg-muted/60 border border-border px-4 py-3 flex items-start gap-2.5">
+              <span className="text-base mt-0.5">⚙️</span>
+              <div>
+                <p className="text-xs font-medium text-foreground">
+                  Harga otomatis dari BOM
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                  HPP {type === 'semi_finished' ? 'barang setengah jadi' : 'barang jadi'} dihitung otomatis
+                  saat proses produksi selesai berdasarkan Bill of Materials (BOM) yang sudah dikonfigurasi.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Stok minimum */}
           <div className="space-y-1.5">
