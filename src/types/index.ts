@@ -268,6 +268,37 @@ export interface ItemStock {
 }
 
 // ============================================================
+// INVENTORY — Stock Opname
+// ============================================================
+export type StockOpnameStatus = 'draft' | 'finalized'
+
+export interface StockOpnameLine {
+  id: string
+  session_id: string
+  item_id: string
+  system_qty: number
+  actual_qty: number | null
+  notes: string | null
+  // Joined
+  item?: Pick<Item, 'id' | 'name' | 'unit' | 'type' | 'sku'>
+}
+
+export interface StockOpnameSession {
+  id: string
+  user_id: string
+  store_id: string | null
+  name: string
+  status: StockOpnameStatus
+  date: string
+  notes: string | null
+  finalized_at: string | null
+  created_at: string
+  updated_at: string
+  // Joined
+  lines?: StockOpnameLine[]
+}
+
+// ============================================================
 // INVENTORY — Production Orders
 // ============================================================
 export type ProductionOrderStatus = 'draft' | 'in_progress' | 'completed' | 'cancelled'

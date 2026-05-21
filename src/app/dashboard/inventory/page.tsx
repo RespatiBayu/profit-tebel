@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Boxes, FlaskConical, ClipboardList, ShoppingCart, ChevronRight, Hammer } from 'lucide-react'
+import { Boxes, FlaskConical, ClipboardList, ShoppingCart, ChevronRight, Hammer, ClipboardCheck } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
 const MENU_ITEMS = [
@@ -42,6 +42,14 @@ const MENU_ITEMS = [
     desc: 'Pantau saldo stok terkini dan mutasi per item.',
     color: 'text-cyan-600',
     bg: 'bg-cyan-50',
+  },
+  {
+    href: '/dashboard/inventory/stock-opname',
+    icon: ClipboardCheck,
+    title: 'Stock Opname',
+    desc: 'Hitung stok fisik dan sesuaikan selisih otomatis.',
+    color: 'text-rose-600',
+    bg: 'bg-rose-50',
   },
 ]
 
