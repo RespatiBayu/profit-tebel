@@ -12,15 +12,17 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { ProductionOrder, ProductionOrderLine, Item } from '@/types'
 
+interface BomSummary {
+  id: string
+  name: string | null
+  output_qty: number
+  output_item?: { id: string; name: string; unit: string; type: string } | null
+}
+
 interface ProductionOrderDetailProps {
-  order: ProductionOrder & {
-    lines: (ProductionOrderLine & { item?: Item | null; avg_cost?: number | null })[]
-    bom?: {
-      id: string
-      name: string | null
-      output_qty: number
-      output_item?: { id: string; name: string; unit: string; type: string } | null
-    } | null
+  order: Omit<ProductionOrder, 'bom' | 'lines'> & {
+    lines: (ProductionOrderLine & { item?: Item | null })[]
+    bom?: BomSummary | null
   }
 }
 

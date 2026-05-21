@@ -77,7 +77,7 @@ export default async function ProductionOrderDetailPage({ params }: Params) {
     created_at: order.created_at as string,
     updated_at: order.updated_at as string,
     completed_at: (order.completed_at as string | null) ?? null,
-    bom: rawBom,
+    bom: rawBom ?? undefined,
     lines,
   }
 

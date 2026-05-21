@@ -281,6 +281,8 @@ export interface ProductionOrderLine {
   unit_cost_snapshot: number | null
   // Joined
   item?: Item
+  // Enriched from item_stock
+  avg_cost?: number | null
 }
 
 export interface ProductionOrder {
