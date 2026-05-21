@@ -20,7 +20,7 @@ const MENU_ITEMS = [
     bg: 'bg-purple-50',
   },
   {
-    href: '/dashboard/inventory/purchases',
+    href: '/dashboard/inventory/purchase-orders',
     icon: ShoppingCart,
     title: 'Pembelian (PO)',
     desc: 'Catat pembelian bahan baku dan update stok.',
