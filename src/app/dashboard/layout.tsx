@@ -17,7 +17,12 @@ export default async function DashboardLayout({
   }
 
   return (
-    <DashboardShell user={access.user} userRole={access.role}>
+    <DashboardShell
+      user={access.user}
+      userRole={access.role}
+      subscription={access.subscription}
+      hasInventoryAccess={access.hasInventoryAccess}
+    >
       {access.isPaid ? children : <UpgradeGate />}
     </DashboardShell>
   )
