@@ -337,6 +337,8 @@ export interface MasterProduct {
   notes: string | null
   has_income_data?: boolean
   has_ads_data?: boolean
+  linked_item_id?: string | null
+  linked_item_name?: string | null   // joined display name
 }
 
 // DB row from `orders` table (what Supabase returns)

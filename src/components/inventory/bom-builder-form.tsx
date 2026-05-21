@@ -118,6 +118,7 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
   const [lines, setLines] = useState<BomLineData[]>(initialData?.lines ?? [])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveInfo, setSaveInfo] = useState<string | null>(null)
 
   // Live HPP preview — kalkulasi client-side sederhana (tanpa rekursi penuh)
   const [hppPreview, setHppPreview] = useState<BomCalcResult | null>(null)
@@ -155,6 +156,7 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
 
     setSaving(true)
     setSaveError(null)
+    setSaveInfo(null)
 
     const payload = {
       output_item_id: outputItem.id,
@@ -177,8 +179,9 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const data = await res.json() as { bom?: { id: string }; success?: boolean; error?: string }
+      const data = await res.json() as { bom?: { id: string }; success?: boolean; error?: string; synced_to_master?: boolean }
       if (!res.ok) { setSaveError(data.error ?? 'Terjadi kesalahan'); return }
+      if (data.synced_to_master) setSaveInfo('HPP juga diperbarui di Master Produk.')
       router.push('/dashboard/inventory/bom')
       router.refresh()
     } catch {
@@ -296,6 +299,13 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {saveInfo && (
+        <p className="text-sm text-primary bg-primary/8 px-4 py-3 rounded-xl flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          {saveInfo}
+        </p>
       )}
 
       {saveError && (

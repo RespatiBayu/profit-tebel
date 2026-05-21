@@ -30,7 +30,35 @@ export async function PATCH(
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const body = await request.json().catch(() => null) as { hpp?: number; packaging_cost?: number } | null
+    const body = await request.json().catch(() => null) as {
+      hpp?: number
+      packaging_cost?: number
+      linked_item_id?: string | null
+    } | null
+
+    // Handle linked_item_id-only update (no HPP change)
+    const isLinkOnlyUpdate = body !== null &&
+      !('hpp' in (body ?? {})) &&
+      !('packaging_cost' in (body ?? {})) &&
+      'linked_item_id' in (body ?? {})
+
+    if (isLinkOnlyUpdate) {
+      const { data: product, error: fetchErr } = await supabase
+        .from('master_products')
+        .select('id')
+        .eq('id', params.id)
+        .maybeSingle()
+      if (fetchErr || !product) return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 })
+
+      const { error: updateErr } = await supabase
+        .from('master_products')
+        .update({ linked_item_id: body?.linked_item_id ?? null })
+        .eq('id', params.id)
+      if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
+
+      return NextResponse.json({ success: true })
+    }
+
     const hpp = parseNonNegativeNumber(body?.hpp)
     const packaging_cost = parseNonNegativeNumber(body?.packaging_cost)
 
@@ -46,10 +74,13 @@ export async function PATCH(
 
     if (fetchErr || !product) return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 })
 
-    // Save HPP
+    // Build update payload
+    const updatePayload: Record<string, unknown> = { hpp, packaging_cost }
+    if (body && 'linked_item_id' in body) updatePayload.linked_item_id = body.linked_item_id ?? null
+
     const { error: updateErr } = await supabase
       .from('master_products')
-      .update({ hpp, packaging_cost })
+      .update(updatePayload)
       .eq('id', params.id)
 
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })

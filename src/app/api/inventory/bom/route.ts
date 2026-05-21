@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
 import { calculateBomHpp } from '@/lib/inventory/bom-calculator'
 import type { BomHeaderInput, ItemCostData } from '@/lib/inventory/bom-calculator'
+import { syncBomHppToItem } from '@/lib/inventory/sync-bom-hpp'
 
 // GET /api/inventory/bom?store_id=&q=
 export async function GET(request: NextRequest) {
@@ -172,5 +173,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: lErr.message }, { status: 500 })
   }
 
-  return NextResponse.json({ bom: header }, { status: 201 })
+  // Hitung HPP dan sync ke items.cost_per_unit + master_products jika ada link
+  let syncedToMasterProduct = false
+  try {
+    const allBomInputs: BomHeaderInput[] = [{
+      id: header.id,
+      output_item_id: body.output_item_id,
+      output_qty: body.output_qty,
+      lines: body.lines.map((l) => ({ input_item_id: l.input_item_id, qty_per_output: l.qty_per_output })),
+    }]
+
+    const inputItemIds = body.lines.map((l) => l.input_item_id)
+    const { data: itemsData } = await supabase
+      .from('items').select('id, cost_per_unit, type').in('id', [body.output_item_id, ...inputItemIds]).eq('user_id', access.user.id)
+    const { data: stockData } = await supabase
+      .from('item_stock').select('item_id, avg_cost').eq('user_id', access.user.id).in('item_id', [body.output_item_id, ...inputItemIds])
+    const stockMap = new Map((stockData ?? []).map((s) => [s.item_id, s.avg_cost as number | null]))
+    const itemCosts: ItemCostData[] = (itemsData ?? []).map((i) => ({
+      id: i.id, cost_per_unit: i.cost_per_unit ?? 0, avg_cost: stockMap.get(i.id) ?? null, type: i.type,
+    }))
+    const bomMap = new Map(allBomInputs.map((b) => [b.id, b]))
+    const itemMap = new Map(itemCosts.map((i) => [i.id, i]))
+    const calc = calculateBomHpp(header.id, bomMap, itemMap)
+    if (!calc.has_cycle && calc.hpp_per_unit > 0) {
+      const result = await syncBomHppToItem(supabase, access.user.id, body.output_item_id, calc.hpp_per_unit)
+      syncedToMasterProduct = result.syncedToMasterProduct
+    }
+  } catch (syncErr) {
+    console.error('BOM POST: sync hpp error (non-fatal):', syncErr)
+  }
+
+  return NextResponse.json({ bom: header, synced_to_master: syncedToMasterProduct }, { status: 201 })
 }

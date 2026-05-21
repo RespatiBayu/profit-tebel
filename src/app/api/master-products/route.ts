@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   const productsQuery = supabase
     .from('master_products')
-    .select('id, marketplace_product_id, seller_sku, numeric_id, source_tags, product_name, hpp, packaging_cost, marketplace, category, notes')
+    .select('id, marketplace_product_id, seller_sku, numeric_id, source_tags, product_name, hpp, packaging_cost, marketplace, category, notes, linked_item_id, linked_item:items!linked_item_id(name)')
     .order('product_name', { ascending: true })
 
   if (storeId) {
@@ -102,6 +102,7 @@ export async function GET(request: NextRequest) {
         incomeSet.has(product.marketplace_product_id) ||
         (!!product.seller_sku && incomeSet.has(product.seller_sku)),
       has_ads_data: adsSet.has(product.marketplace_product_id),
+      linked_item_name: ((product as unknown as { linked_item?: { name: string }[] | null }).linked_item?.[0]?.name) ?? null,
     })),
   })
 }

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
 import { calculateBomHpp } from '@/lib/inventory/bom-calculator'
 import type { BomHeaderInput, ItemCostData } from '@/lib/inventory/bom-calculator'
+import { syncBomHppToItem } from '@/lib/inventory/sync-bom-hpp'
 
 type Params = { params: { id: string } }
 
@@ -137,7 +138,58 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (lErr) return NextResponse.json({ error: lErr.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true })
+  // Sync HPP setelah update
+  let syncedToMasterProduct = false
+  try {
+    // Ambil BOM lengkap setelah update
+    const { data: updatedBom } = await supabase
+      .from('bom_headers')
+      .select('id, output_item_id, output_qty, bom_lines(input_item_id, qty_per_output)')
+      .eq('id', params.id)
+      .eq('user_id', access.user.id)
+      .maybeSingle()
+
+    if (updatedBom) {
+      const lines = (updatedBom.bom_lines as Array<{ input_item_id: string; qty_per_output: number }>) ?? []
+      const allItemIds = [updatedBom.output_item_id, ...lines.map((l) => l.input_item_id)]
+
+      const { data: allBoms } = await supabase
+        .from('bom_headers')
+        .select('id, output_item_id, output_qty, bom_lines(input_item_id, qty_per_output)')
+        .eq('user_id', access.user.id)
+
+      const { data: itemsData } = await supabase
+        .from('items').select('id, cost_per_unit, type').in('id', allItemIds).eq('user_id', access.user.id)
+      const { data: stockData } = await supabase
+        .from('item_stock').select('item_id, avg_cost').eq('user_id', access.user.id).in('item_id', allItemIds)
+
+      const stockMap = new Map((stockData ?? []).map((s) => [s.item_id, s.avg_cost as number | null]))
+      const itemCosts: ItemCostData[] = (itemsData ?? []).map((i) => ({
+        id: i.id, cost_per_unit: i.cost_per_unit ?? 0, avg_cost: stockMap.get(i.id) ?? null, type: i.type,
+      }))
+
+      const bomInputs: BomHeaderInput[] = (allBoms ?? []).map((b) => ({
+        id: b.id,
+        output_item_id: b.output_item_id,
+        output_qty: b.output_qty,
+        lines: (b.bom_lines as Array<{ input_item_id: string; qty_per_output: number }> ?? []).map((l) => ({
+          input_item_id: l.input_item_id, qty_per_output: l.qty_per_output,
+        })),
+      }))
+
+      const bomMap = new Map(bomInputs.map((b) => [b.id, b]))
+      const itemMap = new Map(itemCosts.map((i) => [i.id, i]))
+      const calc = calculateBomHpp(params.id, bomMap, itemMap)
+      if (!calc.has_cycle && calc.hpp_per_unit > 0) {
+        const result = await syncBomHppToItem(supabase, access.user.id, updatedBom.output_item_id, calc.hpp_per_unit)
+        syncedToMasterProduct = result.syncedToMasterProduct
+      }
+    }
+  } catch (syncErr) {
+    console.error('BOM PATCH: sync hpp error (non-fatal):', syncErr)
+  }
+
+  return NextResponse.json({ success: true, synced_to_master: syncedToMasterProduct })
 }
 
 // DELETE /api/inventory/bom/[id]
