@@ -254,7 +254,7 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
                   HPP {type === 'semi_finished' ? 'barang setengah jadi' : 'barang jadi'} dihitung otomatis
-                  saat proses produksi selesai berdasarkan Bill of Materials (BOM) yang sudah dikonfigurasi.
+                  saat proses produksi selesai berdasarkan Formula (Resep Produksi) yang sudah dikonfigurasi.
                 </p>
               </div>
             </div>

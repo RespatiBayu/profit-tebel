@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Hammer, Plus, CheckCircle2, Clock, XCircle, Play, ChevronRight, Trash2 } from 'lucide-react'
+import { Factory, Plus, CheckCircle2, Clock, XCircle, Play, ChevronRight, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -106,7 +106,7 @@ export default function ProductionOrdersPage() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Hammer className="h-6 w-6 text-primary" />
+            <Factory className="h-6 w-6 text-primary" />
             Produksi
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">Proses konversi bahan menjadi barang jadi</p>
@@ -148,7 +148,7 @@ export default function ProductionOrdersPage() {
         </div>
       ) : orders.length === 0 ? (
         <div className="border-2 border-dashed rounded-xl p-10 text-center space-y-3">
-          <Hammer className="h-10 w-10 text-muted-foreground mx-auto" />
+          <Factory className="h-10 w-10 text-muted-foreground mx-auto" />
           <div>
             <p className="font-semibold">Belum ada Production Order</p>
             <p className="text-sm text-muted-foreground mt-1">Buat order produksi untuk mengkonversi bahan baku menjadi barang jadi.</p>

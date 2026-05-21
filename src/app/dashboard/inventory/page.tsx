@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Boxes, FlaskConical, ClipboardList, ShoppingCart, ChevronRight, Hammer, ClipboardCheck } from 'lucide-react'
+import { Boxes, FlaskConical, ClipboardList, ShoppingCart, ChevronRight, Factory, ClipboardCheck } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
 const MENU_ITEMS = [
@@ -14,7 +14,7 @@ const MENU_ITEMS = [
   {
     href: '/dashboard/inventory/bom',
     icon: ClipboardList,
-    title: 'Bill of Materials (BOM)',
+    title: 'Formula (Resep Produksi)',
     desc: 'Definisikan resep produk dan hitung HPP otomatis.',
     color: 'text-purple-600',
     bg: 'bg-purple-50',
@@ -29,7 +29,7 @@ const MENU_ITEMS = [
   },
   {
     href: '/dashboard/inventory/production',
-    icon: Hammer,
+    icon: Factory,
     title: 'Produksi',
     desc: 'Proses konversi bahan ke barang jadi / setengah jadi.',
     color: 'text-orange-600',
@@ -62,7 +62,7 @@ export default function InventoryPage() {
           Inventori & Produksi
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Kelola stok bahan baku, proses produksi, dan hitung HPP otomatis dari BOM.
+          Kelola stok bahan baku, proses produksi, dan hitung HPP otomatis dari Formula.
         </p>
       </div>
 

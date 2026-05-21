@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Hammer } from 'lucide-react'
+import { ArrowLeft, Factory } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
 import { ProductionOrderDetail } from '@/components/inventory/production-order-detail'
@@ -92,7 +92,7 @@ export default async function ProductionOrderDetailPage({ params }: Params) {
         </Link>
         <div>
           <h1 className="text-xl font-bold font-heading flex items-center gap-2">
-            <Hammer className="h-5 w-5 text-primary" />
+            <Factory className="h-5 w-5 text-primary" />
             {orderData.po_number ?? `PROD-${orderData.id.slice(0, 8)}`}
           </h1>
           <p className="text-sm text-muted-foreground">

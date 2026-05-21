@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, Hammer } from 'lucide-react'
+import { ArrowLeft, Factory } from 'lucide-react'
 import { ProductionOrderForm } from '@/components/inventory/production-order-form'
 
 export default function NewProductionOrderPage() {
@@ -14,10 +14,10 @@ export default function NewProductionOrderPage() {
         </Link>
         <div>
           <h1 className="text-xl font-bold font-heading flex items-center gap-2">
-            <Hammer className="h-5 w-5 text-primary" />
+            <Factory className="h-5 w-5 text-primary" />
             Buat Production Order
           </h1>
-          <p className="text-sm text-muted-foreground">Pilih BOM dan tentukan qty yang akan diproduksi.</p>
+          <p className="text-sm text-muted-foreground">Pilih Formula dan tentukan qty yang akan diproduksi.</p>
         </div>
       </div>
 

@@ -206,7 +206,7 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
             <Label>Produk yang dihasilkan <span className="text-destructive">*</span></Label>
             <OutputItemPicker value={outputItem} onChange={setOutputItem} />
             <p className="text-xs text-muted-foreground">
-              Hanya Barang Setengah Jadi dan Barang Jadi yang bisa jadi output BOM.
+              Hanya Barang Setengah Jadi dan Barang Jadi yang bisa jadi output Formula.
             </p>
           </div>
 
@@ -327,7 +327,7 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
         </Button>
         <Button type="submit" className="flex-1" disabled={saving}>
           {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-          {isEdit ? 'Simpan Perubahan' : 'Buat BOM'}
+          {isEdit ? 'Simpan Perubahan' : 'Buat Formula'}
         </Button>
       </div>
     </form>

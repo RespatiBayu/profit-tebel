@@ -15,7 +15,7 @@ export default function NewBomPage() {
         <div>
           <h1 className="text-xl font-bold font-heading flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-primary" />
-            Buat BOM Baru
+            Buat Formula Baru
           </h1>
           <p className="text-sm text-muted-foreground">Definisikan bahan dan kuantitas untuk satu produk.</p>
         </div>

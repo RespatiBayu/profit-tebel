@@ -238,8 +238,8 @@ export function BomLineEditor({ lines, outputItemId, onChange }: BomLineEditorPr
               <div className="relative">
                 <Input
                   type="number"
-                  min="0.0001"
-                  step="0.01"
+                  min="0"
+                  step="any"
                   value={line.qty_per_output}
                   onChange={(e) => updateLine(line._key, { qty_per_output: parseFloat(e.target.value) || 0 })}
                   className="h-8 text-sm pr-8"
@@ -266,7 +266,7 @@ export function BomLineEditor({ lines, outputItemId, onChange }: BomLineEditorPr
           {line.item?.id && (
             <div className="ml-7 flex items-center gap-2 text-xs text-muted-foreground">
               {line.item.type === 'semi_finished' ? (
-                <span className="text-purple-600">⚙ Setengah jadi — HPP dihitung rekursif dari BOM-nya</span>
+                <span className="text-purple-600">⚙ Setengah jadi — HPP dihitung rekursif dari Formula-nya</span>
               ) : (
                 <>
                   <span>Harga: {formatRp(line.item.avg_cost ?? line.item.cost_per_unit ?? 0)}/{line.item.unit}</span>

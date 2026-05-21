@@ -19,13 +19,13 @@ const FEATURES = [
   },
   {
     icon: ClipboardList,
-    title: 'Bill of Materials (BOM)',
+    title: 'Formula (Resep Produksi)',
     desc: 'Definisikan resep produk multi-level — HPP dihitung otomatis dari biaya bahan.',
   },
   {
     icon: Sparkles,
     title: 'HPP Otomatis',
-    desc: 'HPP di Master Produk ter-update otomatis berdasarkan BOM dan harga beli terakhir.',
+    desc: 'HPP di Master Produk ter-update otomatis berdasarkan Formula dan harga beli terakhir.',
   },
 ]
 
@@ -68,7 +68,7 @@ export function InventoryUpgradeGate() {
           <h1 className="text-2xl font-bold font-heading">Fitur Pro</h1>
           <p className="text-muted-foreground text-sm leading-relaxed">
             Inventori, Pembelian, dan Produksi hanya tersedia untuk pengguna berlangganan.
-            Kelola stok bahan baku hingga HPP otomatis dari BOM.
+            Kelola stok bahan baku hingga HPP otomatis dari Formula.
           </p>
         </div>
 

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Loader2, CheckCircle2, AlertTriangle, XCircle, Play, Hammer,
+  Loader2, CheckCircle2, AlertTriangle, XCircle, Play, Factory,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -161,7 +161,7 @@ export function ProductionOrderDetail({ order: initialOrder }: ProductionOrderDe
               )}
               {canComplete && !showCompleteForm && (
                 <Button size="sm" className="gap-1.5" onClick={() => setShowCompleteForm(true)}>
-                  <Hammer className="h-3.5 w-3.5" />
+                  <Factory className="h-3.5 w-3.5" />
                   Selesaikan
                 </Button>
               )}
@@ -192,7 +192,7 @@ export function ProductionOrderDetail({ order: initialOrder }: ProductionOrderDe
         <Card className="border-primary/40">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
-              <Hammer className="h-4 w-4 text-primary" />
+              <Factory className="h-4 w-4 text-primary" />
               Konfirmasi Hasil Produksi
             </CardTitle>
           </CardHeader>
@@ -276,7 +276,7 @@ export function ProductionOrderDetail({ order: initialOrder }: ProductionOrderDe
               <p className="font-medium">{formatDate(order.date)}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">BOM</p>
+              <p className="text-xs text-muted-foreground">Formula</p>
               <p className="font-medium">{order.bom?.name ?? order.bom?.output_item?.name ?? '-'}</p>
             </div>
             <div>

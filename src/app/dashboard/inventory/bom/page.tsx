@@ -80,7 +80,7 @@ export default function BomListPage() {
         <div>
           <h1 className="text-xl font-bold font-heading flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-primary" />
-            Bill of Materials (BOM)
+            Formula (Resep Produksi)
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Definisikan resep produk — HPP dihitung otomatis dari biaya bahan.
@@ -89,7 +89,7 @@ export default function BomListPage() {
         <Link href="/dashboard/inventory/bom/new">
           <Button className="gap-2 shrink-0">
             <Plus className="h-4 w-4" />
-            Buat BOM Baru
+            Buat Formula Baru
           </Button>
         </Link>
       </div>
@@ -99,7 +99,7 @@ export default function BomListPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           className="pl-9"
-          placeholder="Cari nama produk atau BOM..."
+          placeholder="Cari nama produk atau formula..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -109,13 +109,13 @@ export default function BomListPage() {
       {loading ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin mr-2" />
-          Memuat BOM...
+          Memuat Formula...
         </div>
       ) : boms.length === 0 ? (
         <div className="text-center py-16 space-y-3">
           <ClipboardList className="h-10 w-10 mx-auto text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">
-            {search ? 'Tidak ada BOM yang cocok.' : 'Belum ada BOM. Klik "Buat BOM Baru" untuk memulai.'}
+            {search ? 'Tidak ada formula yang cocok.' : 'Belum ada formula. Klik "Buat Formula Baru" untuk memulai.'}
           </p>
         </div>
       ) : (
@@ -133,7 +133,7 @@ export default function BomListPage() {
                   <div className="flex-1 min-w-0 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-sm">
-                        {bom.name ?? bom.output_item?.name ?? 'BOM tanpa nama'}
+                        {bom.name ?? bom.output_item?.name ?? 'Formula tanpa nama'}
                       </p>
                       {!bom.is_active && (
                         <Badge variant="secondary" className="text-[10px]">Nonaktif</Badge>
@@ -154,7 +154,7 @@ export default function BomListPage() {
                     <div className="flex items-center gap-4 pt-1">
                       {bom.has_cycle ? (
                         <span className="text-xs text-destructive flex items-center gap-1">
-                          <AlertTriangle className="h-3 w-3" /> Ada circular reference — perbaiki BOM
+                          <AlertTriangle className="h-3 w-3" /> Ada circular reference — perbaiki formula
                         </span>
                       ) : (
                         <span className="text-sm font-semibold text-primary flex items-center gap-1">
@@ -191,7 +191,7 @@ export default function BomListPage() {
       {/* Stats */}
       {!loading && boms.length > 0 && (
         <p className="text-xs text-muted-foreground text-right">
-          {boms.length} BOM · {boms.filter((b) => b.has_cycle).length > 0
+          {boms.length} Formula · {boms.filter((b) => b.has_cycle).length > 0
             ? `${boms.filter((b) => b.has_cycle).length} dengan cycle error`
             : 'Semua valid ✓'}
         </p>
@@ -201,9 +201,9 @@ export default function BomListPage() {
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(v) => { if (!v) { setDeleteTarget(null); setDeleteError(null) } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Hapus BOM?</AlertDialogTitle>
+            <AlertDialogTitle>Hapus Formula?</AlertDialogTitle>
             <AlertDialogDescription>
-              BOM untuk <span className="font-semibold">{deleteTarget?.output_item?.name ?? deleteTarget?.name}</span> akan dihapus permanen beserta semua baris bahannya.
+              Formula untuk <span className="font-semibold">{deleteTarget?.output_item?.name ?? deleteTarget?.name}</span> akan dihapus permanen beserta semua baris bahannya.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (

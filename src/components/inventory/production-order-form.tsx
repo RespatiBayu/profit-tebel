@@ -69,7 +69,7 @@ function BomPicker({
     <div ref={ref} className="relative">
       <div className="relative">
         <Input
-          placeholder="Cari BOM..."
+          placeholder="Cari formula..."
           value={q}
           onChange={(e) => { setQ(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
@@ -80,7 +80,7 @@ function BomPicker({
       {open && (
         <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-popover border rounded-lg shadow-lg max-h-52 overflow-y-auto">
           {boms.length === 0 ? (
-            <p className="text-xs text-muted-foreground p-3 text-center">Belum ada BOM. Buat BOM dulu di menu Bill of Materials.</p>
+            <p className="text-xs text-muted-foreground p-3 text-center">Belum ada formula. Buat Formula dulu di menu Formula (Resep Produksi).</p>
           ) : (
             boms.map((bom) => (
               <button
@@ -123,7 +123,7 @@ export function ProductionOrderForm() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    if (!selectedBom) { setSaveError('Pilih BOM terlebih dahulu'); return }
+    if (!selectedBom) { setSaveError('Pilih Formula terlebih dahulu'); return }
     if (planned <= 0) { setSaveError('Qty produksi harus > 0'); return }
     if (!date) { setSaveError('Tanggal wajib diisi'); return }
 
@@ -161,7 +161,7 @@ export function ProductionOrderForm() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
-            <Label>BOM (Resep Produksi) <span className="text-destructive">*</span></Label>
+            <Label>Formula (Resep Produksi) <span className="text-destructive">*</span></Label>
             <BomPicker value={selectedBom} onChange={setSelectedBom} />
           </div>
 
@@ -174,8 +174,8 @@ export function ProductionOrderForm() {
                 <Input
                   id="planned-qty"
                   type="number"
-                  min="0.0001"
-                  step="0.01"
+                  min="0"
+                  step="any"
                   value={plannedQty}
                   onChange={(e) => setPlannedQty(e.target.value)}
                   className="pr-12"
@@ -186,7 +186,7 @@ export function ProductionOrderForm() {
               </div>
               {selectedBom && (
                 <p className="text-xs text-muted-foreground">
-                  1 proses BOM = {selectedBom.output_qty} {selectedBom.output_item?.unit}
+                  1 proses Formula = {selectedBom.output_qty} {selectedBom.output_item?.unit}
                 </p>
               )}
             </div>
@@ -237,7 +237,7 @@ export function ProductionOrderForm() {
           </CardHeader>
           <CardContent className="p-4 pt-0">
             <p className="text-xs text-muted-foreground mb-2">
-              Berdasarkan BOM — bahan aktual dikonfirmasi saat selesai produksi.
+              Berdasarkan Formula — bahan aktual dikonfirmasi saat selesai produksi.
             </p>
             <p className="text-xs text-muted-foreground">
               Multiplier: {plannedQty} ÷ {selectedBom.output_qty} = <span className="font-medium text-foreground">{multiplier.toFixed(4)}×</span>

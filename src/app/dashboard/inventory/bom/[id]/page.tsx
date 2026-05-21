@@ -77,7 +77,7 @@ export default async function EditBomPage({ params }: Params) {
         <div>
           <h1 className="text-xl font-bold font-heading flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-primary" />
-            Edit BOM
+            Edit Formula
           </h1>
           <p className="text-sm text-muted-foreground">{bom.name ?? outItem.name}</p>
         </div>
