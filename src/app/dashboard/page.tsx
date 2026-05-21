@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Clock,
 } from 'lucide-react'
+import { InventoryDashboardWidget } from '@/components/inventory/inventory-dashboard-widget'
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('id-ID', {
@@ -139,6 +140,9 @@ export default async function DashboardPage({
           </Card>
         </div>
       )}
+
+      {/* Inventory summary widget — only shows if user has inventory access */}
+      <InventoryDashboardWidget />
 
       {/* Quick actions */}
       <div>

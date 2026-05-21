@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, ClipboardCheck, Trash2 } from 'lucide-react'
+import { ArrowLeft, ClipboardCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
 import { StockOpnameDetail } from '@/components/inventory/stock-opname-detail'

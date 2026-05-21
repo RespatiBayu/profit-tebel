@@ -3,7 +3,6 @@ import { notFound } from 'next/navigation'
 import { ClipboardCheck, Plus, CheckCircle2, Clock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
-import { Button } from '@/components/ui/button'
 
 export default async function StockOpnamePage() {
   const supabase = await createClient()
@@ -52,7 +51,7 @@ export default async function StockOpnamePage() {
         <div className="rounded-xl border border-dashed py-14 text-center">
           <ClipboardCheck className="h-8 w-8 mx-auto mb-2 text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">Belum ada sesi opname.</p>
-          <p className="text-xs text-muted-foreground mt-1">Klik "Buat Opname" untuk mulai.</p>
+          <p className="text-xs text-muted-foreground mt-1">Klik &quot;Buat Opname&quot; untuk mulai.</p>
         </div>
       ) : (
         <div className="space-y-2">

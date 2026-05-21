@@ -40,8 +40,9 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
   const [type, setType]             = useState<ItemType>('raw_material')
   const [unit, setUnit]             = useState('pcs')
   const [customUnit, setCustomUnit] = useState('')
-  const [costPerUnit, setCostPerUnit] = useState('')
-  const [notes, setNotes]           = useState('')
+  const [costPerUnit, setCostPerUnit]   = useState('')
+  const [minStockQty, setMinStockQty]   = useState('')
+  const [notes, setNotes]               = useState('')
 
   useEffect(() => {
     if (open) {
@@ -53,10 +54,12 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
         setUnit(isCommon ? item.unit : 'custom')
         setCustomUnit(isCommon ? '' : item.unit)
         setCostPerUnit(item.cost_per_unit > 0 ? String(item.cost_per_unit) : '')
+        setMinStockQty(item.min_stock_qty > 0 ? String(item.min_stock_qty) : '')
         setNotes(item.notes ?? '')
       } else {
         setName(''); setSku(''); setType('raw_material')
-        setUnit('pcs'); setCustomUnit(''); setCostPerUnit(''); setNotes('')
+        setUnit('pcs'); setCustomUnit(''); setCostPerUnit('')
+        setMinStockQty(''); setNotes('')
       }
       setError(null)
     }
@@ -83,6 +86,7 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
           type,
           unit: resolvedUnit,
           cost_per_unit: parseFloat(costPerUnit.replace(/\./g, '').replace(',', '.')) || 0,
+          min_stock_qty: parseFloat(minStockQty.replace(',', '.')) || 0,
           notes: notes.trim() || null,
         }),
       })
@@ -235,6 +239,29 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
             </div>
             <p className="text-[11px] text-muted-foreground leading-snug">
               Dipakai untuk kalkulasi HPP jika belum ada harga dari Purchase Order.
+            </p>
+          </div>
+
+          {/* Stok minimum */}
+          <div className="space-y-1.5">
+            <Label htmlFor="item-min-stock" className="text-sm font-medium">
+              Stok Minimum
+              <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">(opsional)</span>
+            </Label>
+            <div className="relative">
+              <Input
+                id="item-min-stock"
+                className="h-10 pr-12"
+                placeholder="0"
+                value={minStockQty}
+                onChange={(e) => setMinStockQty(e.target.value.replace(/[^0-9.,]/g, ''))}
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground select-none">
+                {resolvedUnit}
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              Alert muncul jika stok tersedia ≤ angka ini.
             </p>
           </div>
 

@@ -157,6 +157,7 @@ export interface Item {
   type: ItemType
   unit: string               // pcs, kg, gram, liter, ml, lusin, dll
   cost_per_unit: number      // harga manual / fallback
+  min_stock_qty: number      // batas stok minimum, 0 = tidak diset
   notes: string | null
   created_at: string
   updated_at: string

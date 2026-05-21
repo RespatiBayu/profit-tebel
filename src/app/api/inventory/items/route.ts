@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   // Fetch items
   let query = supabase
     .from('items')
-    .select('id,user_id,store_id,name,sku,type,unit,cost_per_unit,notes,created_at,updated_at')
+    .select('id,user_id,store_id,name,sku,type,unit,cost_per_unit,min_stock_qty,notes,created_at,updated_at')
     .eq('user_id', access.user.id)
     .order('type')
     .order('name')

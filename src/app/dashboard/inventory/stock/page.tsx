@@ -4,6 +4,7 @@ import { getCurrentUserAccess } from '@/lib/roles'
 import { notFound } from 'next/navigation'
 import { StockTable } from '@/components/inventory/stock-table'
 import { SyncSaleOutButton } from '@/components/inventory/sync-sale-out-button'
+import { LowStockBanner } from '@/components/inventory/low-stock-banner'
 
 export default async function StockPage() {
   const supabase = await createClient()
@@ -34,6 +35,7 @@ export default async function StockPage() {
         <SyncSaleOutButton storeId={defaultStoreId} />
       </div>
 
+      <LowStockBanner />
       <StockTable />
     </div>
   )

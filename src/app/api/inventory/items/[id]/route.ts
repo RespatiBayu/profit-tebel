@@ -63,6 +63,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     type?: string
     unit?: string
     cost_per_unit?: number
+    min_stock_qty?: number
     store_id?: string | null
     notes?: string | null
   }
@@ -78,6 +79,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (body.type !== undefined) patch.type = body.type
   if (body.unit !== undefined) patch.unit = body.unit.trim() || 'pcs'
   if (body.cost_per_unit !== undefined) patch.cost_per_unit = body.cost_per_unit
+  if (body.min_stock_qty !== undefined) patch.min_stock_qty = Math.max(0, Number(body.min_stock_qty) || 0)
   if (body.store_id !== undefined) patch.store_id = body.store_id
   if (body.notes !== undefined) patch.notes = body.notes?.trim() || null
 
