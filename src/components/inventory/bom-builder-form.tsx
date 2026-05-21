@@ -219,8 +219,8 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
                 <Input
                   id="output-qty"
                   type="number"
-                  min="0.0001"
-                  step="0.01"
+                  min="0"
+                  step="any"
                   value={outputQty}
                   onChange={(e) => setOutputQty(e.target.value)}
                   className="pr-12"

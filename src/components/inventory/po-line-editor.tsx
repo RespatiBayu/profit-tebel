@@ -189,9 +189,9 @@ export function PoLineEditor({ lines, onChange, disabled = false }: PoLineEditor
           <div className="relative">
             <Input
               type="number"
-              min="0.0001"
-              step="0.01"
-              value={line.qty_ordered}
+              min="0"
+              step="any"
+              value={line.qty_ordered || ''}
               onChange={(e) => updateLine(line._key, { qty_ordered: parseFloat(e.target.value) || 0 })}
               className="h-8 text-sm pr-7"
               disabled={disabled}
@@ -207,8 +207,8 @@ export function PoLineEditor({ lines, onChange, disabled = false }: PoLineEditor
             <Input
               type="number"
               min="0"
-              step="100"
-              value={line.unit_cost}
+              step="any"
+              value={line.unit_cost || ''}
               onChange={(e) => updateLine(line._key, { unit_cost: parseFloat(e.target.value) || 0 })}
               className="h-8 text-sm pl-7"
               disabled={disabled}

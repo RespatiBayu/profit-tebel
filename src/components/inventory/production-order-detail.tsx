@@ -204,8 +204,8 @@ export function ProductionOrderDetail({ order: initialOrder }: ProductionOrderDe
               <div className="relative max-w-xs">
                 <Input
                   type="number"
-                  min="0.0001"
-                  step="0.01"
+                  min="0"
+                  step="any"
                   value={actualQty}
                   onChange={(e) => setActualQty(e.target.value)}
                   className="pr-14"
@@ -228,7 +228,7 @@ export function ProductionOrderDetail({ order: initialOrder }: ProductionOrderDe
                       <Input
                         type="number"
                         min="0"
-                        step="0.01"
+                        step="any"
                         value={actualLines[l.id] ?? String(l.planned_qty)}
                         onChange={(e) => setActualLines((prev) => ({ ...prev, [l.id]: e.target.value }))}
                         className="h-8 text-sm pr-8"
