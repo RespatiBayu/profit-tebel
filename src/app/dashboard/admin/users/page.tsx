@@ -207,10 +207,10 @@ export default function AdminUsersPage() {
 
   // ── Labels ──────────────────────────────────────────────────────────────────
 
-  const pageTitle       = actorRole === 'superadmin' ? 'Manajemen Admin' : 'Manajemen Member'
+  const pageTitle       = actorRole === 'superadmin' ? 'Manajemen User' : 'Manajemen Member'
   const pageDesc        = actorRole === 'superadmin'
-    ? 'Superadmin dapat membuat, mengubah, dan menghapus akun admin yang dibuatnya.'
-    : 'Admin dapat membuat dan mengelola akun member, termasuk akses paket Pro Inventori.'
+    ? 'Superadmin dapat melihat semua user terdaftar, mengatur paket Pro, membuat dan menghapus akun.'
+    : 'Admin dapat membuat dan mengelola akun member.'
   const createLabel     = managedRole === 'admin' ? 'Buat Admin' : 'Tambah Member'
   const roleBadgeLabel  = managedRole === 'admin' ? 'Admin' : 'Member'
   const storeOptions    = stores.map((s) => ({ value: s.id, label: `${s.name} (${s.marketplace})` }))
@@ -361,8 +361,8 @@ export default function AdminUsersPage() {
                         )}
 
                         <div className="flex gap-2 flex-wrap">
-                          {/* Pro toggle — only for member managed by admin */}
-                          {managedRole === 'member' && (
+                          {/* Pro toggle — hanya superadmin yang bisa assign Pro */}
+                          {actorRole === 'superadmin' && (
                             <Button
                               variant="outline"
                               size="sm"

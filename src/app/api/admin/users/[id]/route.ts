@@ -42,20 +42,27 @@ async function getManagedUser(
   service: Awaited<ReturnType<typeof createServiceClient>>,
   actorId: string,
   managedRole: AppUserRole,
-  userId: string
+  userId: string,
+  isSuperadmin: boolean
 ) {
-  const { data, error } = await service
-    .from('profiles')
-    .select('id,email,full_name,role,created_by_id')
-    .eq('id', userId)
-    .eq('created_by_id', actorId)
-    .eq('role', managedRole)
-    .maybeSingle()
+  // Superadmin bisa manage user manapun (kecuali sesama superadmin)
+  const query = isSuperadmin
+    ? service
+        .from('profiles')
+        .select('id,email,full_name,role,created_by_id')
+        .eq('id', userId)
+        .neq('role', 'superadmin')
+        .maybeSingle()
+    : service
+        .from('profiles')
+        .select('id,email,full_name,role,created_by_id')
+        .eq('id', userId)
+        .eq('created_by_id', actorId)
+        .eq('role', managedRole)
+        .maybeSingle()
 
-  if (error) {
-    throw error
-  }
-
+  const { data, error } = await query
+  if (error) throw error
   return (data ?? null) as ManagedUserRow | null
 }
 
@@ -89,7 +96,8 @@ export async function PATCH(
     service,
     auth.access.user.id,
     auth.managedRole,
-    id
+    id,
+    auth.access.isSuperadmin
   )
 
   if (!managedUser) {
@@ -104,8 +112,11 @@ export async function PATCH(
     grantPro?: boolean   // true = grant 30 days, false = revoke
   } | null
 
-  // --- shortcut: hanya update subscription ---
+  // --- shortcut: hanya update subscription (HANYA SUPERADMIN) ---
   if (body && 'grantPro' in body && Object.keys(body).length === 1) {
+    if (!auth.access.isSuperadmin) {
+      return NextResponse.json({ error: 'Hanya superadmin yang dapat mengatur paket Pro' }, { status: 403 })
+    }
     const now = new Date()
     const expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
     const patch = body.grantPro
@@ -115,7 +126,6 @@ export async function PATCH(
       .from('profiles')
       .update(patch)
       .eq('id', id)
-      .eq('created_by_id', auth.access.user.id)
     if (subErr) return NextResponse.json({ error: subErr.message }, { status: 500 })
     return NextResponse.json({ success: true })
   }
@@ -268,7 +278,8 @@ export async function DELETE(
     service,
     auth.access.user.id,
     auth.managedRole,
-    id
+    id,
+    auth.access.isSuperadmin
   )
 
   if (!managedUser) {

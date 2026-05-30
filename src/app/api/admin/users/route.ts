@@ -86,12 +86,22 @@ export async function GET() {
     ? await listOwnedStores(service, auth.access.user.id)
     : []
 
-  const { data: users, error: usersError } = await service
-    .from('profiles')
-    .select('id,email,full_name,role,created_at,created_by_id,subscription_plan,subscription_expires_at')
-    .eq('created_by_id', auth.access.user.id)
-    .eq('role', auth.managedRole)
-    .order('created_at', { ascending: false })
+  // Superadmin: lihat SEMUA user (kecuali sesama superadmin)
+  // Admin: hanya lihat member yang dia buat sendiri
+  const usersQuery = auth.access.isSuperadmin
+    ? service
+        .from('profiles')
+        .select('id,email,full_name,role,created_at,created_by_id,subscription_plan,subscription_expires_at')
+        .neq('role', 'superadmin')
+        .order('created_at', { ascending: false })
+    : service
+        .from('profiles')
+        .select('id,email,full_name,role,created_at,created_by_id,subscription_plan,subscription_expires_at')
+        .eq('created_by_id', auth.access.user.id)
+        .eq('role', auth.managedRole)
+        .order('created_at', { ascending: false })
+
+  const { data: users, error: usersError } = await usersQuery
 
   if (usersError) {
     return NextResponse.json({ error: usersError.message }, { status: 500 })
