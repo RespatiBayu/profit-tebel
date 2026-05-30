@@ -151,7 +151,12 @@ export default function DashboardShell({
   hasInventoryAccess: boolean
 }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Halaman yang tidak perlu filter marketplace / toko / periode
+  const hideGlobalFilters = pathname.startsWith('/dashboard/roas-calculator') ||
+    pathname.startsWith('/dashboard/inventory')
 
   const supabase = createClient()
 
@@ -208,9 +213,13 @@ export default function DashboardShell({
 
           {/* Store switcher + marketplace + period filter (global) */}
           <div className="flex-1 flex items-center gap-3 lg:justify-start justify-center flex-wrap">
-            <MarketplaceSwitcher />
-            <StoreSwitcher />
-            <PeriodSwitcher />
+            {!hideGlobalFilters && (
+              <>
+                <MarketplaceSwitcher />
+                <StoreSwitcher />
+                <PeriodSwitcher />
+              </>
+            )}
           </div>
 
           {/* User menu */}
