@@ -422,19 +422,13 @@ export default function AdminUsersPage() {
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Download className="h-4 w-4" />
                 <span>Gunakan template:</span>
-                <button
-                  onClick={() => {
-                    const csv = 'email,nama\nuser1@email.com,Nama User 1\nuser2@email.com,Nama User 2'
-                    const blob = new Blob([csv], { type: 'text/csv' })
-                    const url  = URL.createObjectURL(blob)
-                    const a    = document.createElement('a')
-                    a.href = url; a.download = 'template-import-user.csv'; a.click()
-                    URL.revokeObjectURL(url)
-                  }}
+                <a
+                  href="/api/admin/users/template"
+                  download="template-import-member.xlsx"
                   className="text-primary underline hover:no-underline"
                 >
-                  Download Template CSV
-                </button>
+                  Download Template Excel
+                </a>
               </div>
 
               {/* Drop zone */}
