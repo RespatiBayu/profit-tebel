@@ -607,6 +607,9 @@ export interface TrafficLightRow {
   /** BEP ROAS — titik impas berdasarkan HPP + fee preset marketplace.
    *  Formula: harga jual / (harga jual − HPP − total fee). null kalau HPP/units nggak cukup. */
   bepRoas: number | null
+  /** Real ROAS = (GMV × 0.89 − total HPP cost) / Ad Spend
+   *  Memperhitungkan PPN 11% dari GMV + HPP. null kalau HPP belum diisi. */
+  realRoas: number | null
 }
 
 export interface FunnelRow {

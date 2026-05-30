@@ -150,7 +150,7 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
 // Traffic Light Table (campaign-level, with inline per-product drill-down)
 // ---------------------------------------------------------------------------
 
-type SortCol = 'name' | 'roas' | 'bepRoas' | 'conversions' | 'adSpend' | 'gmv' | 'cpa'
+type SortCol = 'name' | 'roas' | 'realRoas' | 'bepRoas' | 'conversions' | 'adSpend' | 'gmv' | 'cpa'
 
 /** Normalize ad_name for matching against parent_iklan.
  *  Strips trailing ★ / * / whitespace so "Shop GMV Max ★" matches "Shop GMV Max". */
@@ -221,6 +221,7 @@ function TrafficLightTable({
       let cmp = 0
       if (sortCol === 'name') cmp = a.productName.localeCompare(b.productName)
       else if (sortCol === 'roas') cmp = a.roas - b.roas
+      else if (sortCol === 'realRoas') cmp = (a.realRoas ?? -999) - (b.realRoas ?? -999)
       else if (sortCol === 'bepRoas') cmp = (a.bepRoas ?? 999) - (b.bepRoas ?? 999)
       else if (sortCol === 'conversions') cmp = a.conversions - b.conversions
       else if (sortCol === 'adSpend') cmp = a.adSpend - b.adSpend
@@ -273,6 +274,15 @@ function TrafficLightTable({
               <TableHead>
                 <button className="flex items-center gap-1" onClick={() => toggleSort('roas')}>
                   ROAS <SortIcon col="roas" />
+                </button>
+              </TableHead>
+              <TableHead>
+                <button
+                  className="flex items-center gap-1"
+                  onClick={() => toggleSort('realRoas')}
+                  title="Real ROAS = (GMV × 0.89 − HPP) ÷ Ad Spend. Memperhitungkan PPN 11% + HPP. Perlu HPP di Master Produk."
+                >
+                  Real ROAS <SortIcon col="realRoas" />
                 </button>
               </TableHead>
               <TableHead>
@@ -364,6 +374,17 @@ function TrafficLightTable({
                     }`}>
                       {row.roas.toFixed(2)}x
                     </span>
+                  </TableCell>
+                  <TableCell>
+                    {row.realRoas !== null ? (
+                      <span className={`text-sm font-semibold tabular-nums ${
+                        row.realRoas >= 1 ? 'text-blue-600' : 'text-red-500'
+                      }`}>
+                        {row.realRoas.toFixed(2)}x
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground" title="Isi HPP di Master Produk untuk melihat Real ROAS">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-sm">{row.conversions.toLocaleString('id-ID')}</TableCell>
                   <TableCell className="text-sm">{formatRp(row.adSpend)}</TableCell>
