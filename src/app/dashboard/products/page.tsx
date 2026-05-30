@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,9 +24,128 @@ import {
   ArrowUpDown,
   Upload,
   Trash2,
+  Link2,
+  X,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
-import type { MasterProduct, MasterProductSourceTag } from '@/types'
+import type { MasterProduct, MasterProductSourceTag, Item } from '@/types'
+
+// Inline item link picker per row
+function ItemLinkPicker({
+  productId,
+  linkedItemId,
+  linkedItemName,
+  onLinked,
+}: {
+  productId: string
+  linkedItemId?: string | null
+  linkedItemName?: string | null
+  onLinked: (itemId: string | null, itemName: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [items, setItems] = useState<Item[]>([])
+  const [saving, setSaving] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const search = useCallback(async (query: string) => {
+    const params = new URLSearchParams({ q: query || '' })
+    const res = await fetch(`/api/inventory/items?${params}`)
+    const data = await res.json() as { items?: Item[] }
+    setItems((data.items ?? []).filter((i) => i.type !== 'raw_material'))
+  }, [])
+
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => search(q), 200)
+      return () => clearTimeout(t)
+    }
+  }, [q, open, search])
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  async function saveLink(itemId: string | null, itemName: string | null) {
+    setSaving(true)
+    try {
+      await fetch(`/api/master-products/${productId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linked_item_id: itemId }),
+      })
+      onLinked(itemId, itemName)
+    } finally {
+      setSaving(false)
+      setOpen(false)
+      setQ('')
+    }
+  }
+
+  if (linkedItemId && linkedItemName && !open) {
+    return (
+      <div className="flex items-center gap-1 text-xs">
+        <Link2 className="h-3 w-3 text-primary shrink-0" />
+        <span className="text-primary font-medium truncate max-w-[100px]">{linkedItemName}</span>
+        <button
+          type="button"
+          onClick={() => saveLink(null, null)}
+          disabled={saving}
+          className="text-muted-foreground hover:text-destructive ml-0.5"
+          title="Hapus link"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      {open ? (
+        <>
+          <Input
+            autoFocus
+            placeholder="Cari item..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="h-7 text-xs w-32"
+          />
+          <div className="absolute top-full left-0 z-50 mt-1 bg-popover border rounded-lg shadow-lg w-48 max-h-36 overflow-y-auto">
+            {items.length === 0 ? (
+              <p className="text-xs text-muted-foreground p-2 text-center">Tidak ada item</p>
+            ) : (
+              items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="w-full text-left px-2 py-1.5 hover:bg-muted/60 text-xs"
+                  onMouseDown={(e) => { e.preventDefault(); saveLink(item.id, item.name) }}
+                >
+                  <p className="font-medium truncate">{item.name}</p>
+                  <p className="text-muted-foreground">{item.type === 'semi_finished' ? 'Setengah Jadi' : 'Barang Jadi'}</p>
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Link2 className="h-3 w-3" />
+          {saving ? 'Menyimpan...' : 'Link item'}
+        </button>
+      )}
+    </div>
+  )
+}
 
 interface EditingProduct {
   hpp: string
@@ -97,6 +216,12 @@ export default function ProductsPage() {
   const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  // linked_item overrides per product (keyed by product.id)
+  const [linkedOverrides, setLinkedOverrides] = useState<Record<string, { id: string | null; name: string | null }>>({})
+
+  function handleLinked(productId: string, itemId: string | null, itemName: string | null) {
+    setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
+  }
 
   useEffect(() => {
     let active = true
@@ -505,6 +630,7 @@ export default function ProductsPage() {
                     </button>
                   </TableHead>
                   <TableHead className="w-36">Packaging (Rp)</TableHead>
+                  <TableHead className="w-36">Link Inventori</TableHead>
                   <TableHead className="w-44">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -516,6 +642,7 @@ export default function ProductsPage() {
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                     </TableRow>
                   ))
@@ -590,6 +717,14 @@ export default function ProductsPage() {
                             onChange={(e) => updateDraft(product, { packaging_cost: e.target.value })}
                             onKeyDown={(e) => e.key === 'Enter' && saveAllProducts()}
                             disabled={savingAll}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <ItemLinkPicker
+                            productId={product.id}
+                            linkedItemId={linkedOverrides[product.id]?.id ?? product.linked_item_id}
+                            linkedItemName={linkedOverrides[product.id]?.name ?? product.linked_item_name}
+                            onLinked={(itemId, itemName) => handleLinked(product.id, itemId, itemName)}
                           />
                         </TableCell>
                         <TableCell>

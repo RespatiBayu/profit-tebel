@@ -101,7 +101,24 @@ export async function PATCH(
     password?: string
     fullName?: string | null
     storeIds?: string[]
+    grantPro?: boolean   // true = grant 30 days, false = revoke
   } | null
+
+  // --- shortcut: hanya update subscription ---
+  if (body && 'grantPro' in body && Object.keys(body).length === 1) {
+    const now = new Date()
+    const expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+    const patch = body.grantPro
+      ? { subscription_plan: 'monthly', subscription_expires_at: expires.toISOString() }
+      : { subscription_plan: 'free',    subscription_expires_at: null }
+    const { error: subErr } = await service
+      .from('profiles')
+      .update(patch)
+      .eq('id', id)
+      .eq('created_by_id', auth.access.user.id)
+    if (subErr) return NextResponse.json({ error: subErr.message }, { status: 500 })
+    return NextResponse.json({ success: true })
+  }
 
   const email = body?.email?.trim().toLowerCase() ?? ''
   const password = body?.password ?? ''

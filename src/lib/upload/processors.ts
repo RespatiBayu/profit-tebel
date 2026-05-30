@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
+import { syncSaleOutInventory } from '@/lib/inventory/sync-sale-out'
 import { MasterResolver, type MasterRow as ResolverMasterRow } from '@/lib/master-resolver'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import { parseShopeeAdsProduct } from '@/lib/parsers/shopee-ads-product'
@@ -1546,7 +1547,23 @@ export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promi
     .update({ record_count: insertedCount + updatedCount })
     .eq('id', batch.id)
 
-  await setProgress(ctx, 88, 'Membersihkan produk duplikat')
+  await setProgress(ctx, 85, 'Sinkronisasi stok keluar (penjualan)')
+
+  try {
+    const saleOutResult = await syncSaleOutInventory(ctx.supabase, ctx.userId, storeId)
+    if (saleOutResult.transactionsCreated > 0) {
+      warnings.push(
+        `${saleOutResult.transactionsCreated} transaksi sale_out dicatat (${saleOutResult.ordersProcessed} order Selesai)`
+      )
+    }
+    if (saleOutResult.warnings.length > 0) {
+      warnings.push(...saleOutResult.warnings)
+    }
+  } catch (saleOutError) {
+    console.error('Sale-out sync error (non-fatal):', saleOutError)
+  }
+
+  await setProgress(ctx, 90, 'Membersihkan produk duplikat')
 
   const orphanCount = await cleanupOrphanMasterProducts(ctx.supabase, storeId)
   if (orphanCount > 0) {
