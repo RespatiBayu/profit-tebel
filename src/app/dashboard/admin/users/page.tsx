@@ -15,9 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { MultiSelect } from '@/components/ui/multi-select'
 import {
-  Loader2, ShieldCheck, Store as StoreIcon, UserPlus, Users,
+  Loader2, ShieldCheck, UserPlus, Users,
   AlertCircle, Pencil, Trash2, Upload, FileSpreadsheet,
   CheckCircle2, XCircle, Download, Crown, Sparkles,
 } from 'lucide-react'
@@ -35,10 +34,7 @@ type ManagedUser = {
   created_at: string
   subscription_plan: string | null
   subscription_expires_at: string | null
-  stores: Array<{ id: string; name: string; marketplace: string }>
 }
-
-type AssignableStore = { id: string; name: string; marketplace: string }
 
 type BulkResult = {
   email: string
@@ -68,7 +64,6 @@ function proExpiresLabel(user: ManagedUser): string | null {
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<ManagedUser[]>([])
-  const [stores, setStores] = useState<AssignableStore[]>([])
   const [actorRole, setActorRole] = useState<UserRole | null>(null)
   const [managedRole, setManagedRole] = useState<ManagedRole | null>(null)
   const [loading, setLoading] = useState(true)
@@ -81,7 +76,6 @@ export default function AdminUsersPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
-  const [selectedStores, setSelectedStores] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
@@ -102,7 +96,6 @@ export default function AdminUsersPage() {
     const data = await res.json()
     if (!res.ok) { setError(data.error ?? 'Gagal memuat data'); setLoading(false); return }
     setUsers(data.users ?? [])
-    setStores(data.stores ?? [])
     setActorRole(data.actorRole ?? null)
     setManagedRole(data.managedRole ?? null)
     setLoading(false)
@@ -113,7 +106,7 @@ export default function AdminUsersPage() {
   // ── Single user form ────────────────────────────────────────────────────────
 
   function resetForm() {
-    setEmail(''); setPassword(''); setFullName(''); setSelectedStores([]); setEditingUser(null); setError(null)
+    setEmail(''); setPassword(''); setFullName(''); setEditingUser(null); setError(null)
   }
 
   function openCreate() { resetForm(); setDialogMode('create'); setDialogOpen(true) }
@@ -121,7 +114,7 @@ export default function AdminUsersPage() {
   function openEdit(user: ManagedUser) {
     setDialogMode('edit'); setEditingUser(user)
     setFullName(user.full_name ?? ''); setEmail(user.email ?? ''); setPassword('')
-    setSelectedStores(user.stores.map((s) => s.id)); setError(null); setDialogOpen(true)
+    setError(null); setDialogOpen(true)
   }
 
   function closeDialog() { setDialogOpen(false); setDialogMode(null); setEditingUser(null); setError(null) }
@@ -135,7 +128,7 @@ export default function AdminUsersPage() {
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, fullName, storeIds: managedRole === 'member' ? selectedStores : [] }),
+      body: JSON.stringify({ email, password, fullName }),
     })
     const data = await res.json()
     if (!res.ok) { setError(data.error ?? 'Gagal menyimpan akun'); setSubmitting(false); return }
@@ -213,7 +206,6 @@ export default function AdminUsersPage() {
     : 'Admin dapat membuat dan mengelola akun member.'
   const createLabel     = 'Tambah Member'
   const roleBadgeLabel  = 'Member'
-  const storeOptions    = stores.map((s) => ({ value: s.id, label: `${s.name} (${s.marketplace})` }))
 
   const proCount   = users.filter(isPro).length
   const basicCount = users.length - proCount
@@ -349,17 +341,6 @@ export default function AdminUsersPage() {
                       </div>
 
                       <div className="flex flex-col gap-3 lg:items-end shrink-0">
-                        {managedRole === 'member' && user.stores.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            <p className="text-xs text-muted-foreground flex items-center gap-1 w-full">
-                              <StoreIcon className="h-3 w-3" /> Toko:
-                            </p>
-                            {user.stores.map((s) => (
-                              <Badge key={s.id} variant="outline" className="text-xs">{s.name}</Badge>
-                            ))}
-                          </div>
-                        )}
-
                         <div className="flex gap-2 flex-wrap">
                           {/* Pro toggle — hanya superadmin yang bisa assign Pro */}
                           {actorRole === 'superadmin' && (
@@ -585,15 +566,6 @@ export default function AdminUsersPage() {
                 className="mt-1"
               />
             </div>
-            {managedRole === 'member' && (
-              <div>
-                <Label>Toko yang Bisa Diakses</Label>
-                <div className="mt-1">
-                  <MultiSelect options={storeOptions} selected={selectedStores} onChange={setSelectedStores} placeholder="Pilih toko (opsional)" allLabel="Semua toko" className="w-full h-10 text-sm" />
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">Bisa di-assign sekarang atau nanti via Edit.</p>
-              </div>
-            )}
             {error && (
               <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>
             )}
