@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Lock, Boxes, ClipboardList, ShoppingCart, Sparkles, CheckCircle2 } from 'lucide-react'
+import { Lock, Boxes, ClipboardList, ShoppingCart, Sparkles, CheckCircle2, Crown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 
@@ -61,14 +61,14 @@ export function InventoryUpgradeGate() {
         {/* Header */}
         <div className="text-center space-y-3">
           <div className="flex justify-center">
-            <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <Lock className="h-8 w-8 text-primary" />
+            <div className="h-16 w-16 rounded-2xl bg-amber-100 flex items-center justify-center">
+              <Crown className="h-8 w-8 text-amber-600" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold font-heading">Fitur Pro</h1>
+          <h1 className="text-2xl font-bold font-heading">Upgrade ke Paket Pro</h1>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            Inventori, Pembelian, dan Produksi hanya tersedia untuk pengguna berlangganan.
-            Kelola stok bahan baku hingga HPP otomatis dari Formula.
+            Kamu saat ini menggunakan paket <strong>Basic</strong>. Aktifkan paket <strong>Pro</strong> untuk
+            mengakses fitur Inventori, Pembelian, dan Produksi dengan HPP otomatis.
           </p>
         </div>
 
@@ -100,35 +100,27 @@ export function InventoryUpgradeGate() {
         {/* Pricing + CTA */}
         <div className="text-center space-y-3">
           <div>
-            <span className="text-3xl font-bold">Rp 49.000</span>
+            <span className="text-4xl font-bold">Rp 49.000</span>
             <span className="text-muted-foreground text-sm"> / bulan</span>
           </div>
+          <p className="text-xs text-muted-foreground">Aktif 30 hari · Bisa diperpanjang kapan saja</p>
           <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Batalkan kapan saja
-            </span>
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Pembayaran via Midtrans
-            </span>
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Aktif 30 hari
-            </span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Batalkan kapan saja</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Pembayaran via Midtrans</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Akses langsung setelah bayar</span>
           </div>
           <Button
             size="lg"
-            className="w-full gap-2"
+            className="w-full gap-2 bg-amber-500 hover:bg-amber-600 text-white"
             onClick={handleSubscribe}
             disabled={loading}
           >
-            <Sparkles className="h-4 w-4" />
-            {loading ? 'Memproses...' : 'Langganan Sekarang'}
+            <Crown className="h-4 w-4" />
+            {loading ? 'Memproses...' : 'Aktifkan Paket Pro — Rp 49.000'}
           </Button>
           <p className="text-xs text-muted-foreground">
-            Sudah berlangganan tapi fitur tidak aktif?{' '}
-            <button
-              className="underline hover:text-foreground transition-colors"
-              onClick={() => router.refresh()}
-            >
+            Sudah berlangganan tapi belum aktif?{' '}
+            <button className="underline hover:text-foreground transition-colors" onClick={() => router.refresh()}>
               Refresh halaman
             </button>
           </p>

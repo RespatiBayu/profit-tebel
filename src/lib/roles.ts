@@ -135,8 +135,9 @@ export async function getCurrentUserAccess(
     isPrivileged,
     isSuperadmin: role === 'superadmin',
     isManagedAccount,
-    isPaid: isPrivileged || isManagedAccount || (typedProfile?.is_paid ?? false),
+    // Semua user terotentikasi dapat akses Basic (dashboard). Pro = subscription aktif.
+    isPaid: true,
     subscription,
-    hasInventoryAccess: subscription.isActive,
+    hasInventoryAccess: isPrivileged || subscription.isActive,
   }
 }

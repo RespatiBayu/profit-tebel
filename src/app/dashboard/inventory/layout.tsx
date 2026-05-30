@@ -12,9 +12,8 @@ export default async function InventoryLayout({
   const access = await getCurrentUserAccess(supabase)
 
   if (!access) redirect('/login')
-  if (!access.isPaid) redirect('/dashboard')
 
-  // Gate: hanya user dengan subscription aktif yang bisa akses
+  // Gate: hanya user dengan subscription Pro aktif yang bisa akses Inventori
   if (!access.hasInventoryAccess) {
     return <InventoryUpgradeGate />
   }

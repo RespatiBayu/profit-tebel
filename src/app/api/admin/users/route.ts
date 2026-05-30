@@ -10,6 +10,8 @@ type ManagedUserRow = {
   role: AppUserRole
   created_at: string
   created_by_id: string | null
+  subscription_plan: string | null
+  subscription_expires_at: string | null
 }
 
 type MembershipRow = {
@@ -86,7 +88,7 @@ export async function GET() {
 
   const { data: users, error: usersError } = await service
     .from('profiles')
-    .select('id,email,full_name,role,created_at,created_by_id')
+    .select('id,email,full_name,role,created_at,created_by_id,subscription_plan,subscription_expires_at')
     .eq('created_by_id', auth.access.user.id)
     .eq('role', auth.managedRole)
     .order('created_at', { ascending: false })
