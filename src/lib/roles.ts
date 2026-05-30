@@ -67,7 +67,7 @@ export function isSuperadminEmail(email: string | null | undefined) {
 }
 
 export function isAppUserRole(role: string | null | undefined): role is AppUserRole {
-  return role === 'superadmin' || role === 'admin' || role === 'member'
+  return role === 'superadmin' || role === 'member'
 }
 
 export function resolveUserRole(
@@ -78,6 +78,11 @@ export function resolveUserRole(
     return role
   }
 
+  // role lama 'admin' → downgrade ke member (role admin dihapus)
+  if (role === 'admin') {
+    return 'member'
+  }
+
   if (isSuperadminEmail(email)) {
     return 'superadmin'
   }
@@ -86,23 +91,18 @@ export function resolveUserRole(
 }
 
 export function isPrivilegedRole(role: AppUserRole) {
-  return role === 'superadmin' || role === 'admin'
+  return role === 'superadmin'
 }
 
 export function getManagedRole(role: AppUserRole): AppUserRole | null {
   if (role === 'superadmin') {
-    return 'admin'
-  }
-
-  if (role === 'admin') {
     return 'member'
   }
-
   return null
 }
 
 export function canCreateStore(role: AppUserRole) {
-  return role !== 'member'
+  return role === 'superadmin'
 }
 
 export async function getCurrentUserAccess(

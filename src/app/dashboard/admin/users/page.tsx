@@ -22,8 +22,8 @@ import {
   CheckCircle2, XCircle, Download, Crown, Sparkles,
 } from 'lucide-react'
 
-type UserRole = 'superadmin' | 'admin' | 'member'
-type ManagedRole = 'admin' | 'member'
+type UserRole = 'superadmin' | 'member'
+type ManagedRole = 'member'
 type DialogMode = 'create' | 'edit' | null
 type ActiveTab = 'list' | 'import'
 
@@ -211,8 +211,8 @@ export default function AdminUsersPage() {
   const pageDesc        = actorRole === 'superadmin'
     ? 'Superadmin dapat melihat semua user terdaftar, mengatur paket Pro, membuat dan menghapus akun.'
     : 'Admin dapat membuat dan mengelola akun member.'
-  const createLabel     = managedRole === 'admin' ? 'Buat Admin' : 'Tambah Member'
-  const roleBadgeLabel  = managedRole === 'admin' ? 'Admin' : 'Member'
+  const createLabel     = 'Tambah Member'
+  const roleBadgeLabel  = 'Member'
   const storeOptions    = stores.map((s) => ({ value: s.id, label: `${s.name} (${s.marketplace})` }))
 
   const proCount   = users.filter(isPro).length
@@ -559,14 +559,10 @@ export default function AdminUsersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {dialogMode === 'edit'
-                ? managedRole === 'admin' ? 'Edit Akun Admin' : 'Edit Akun Member'
-                : managedRole === 'admin' ? 'Buat Akun Admin' : 'Tambah Member Baru'}
+              {dialogMode === 'edit' ? 'Edit Akun Member' : 'Tambah Member Baru'}
             </DialogTitle>
             <DialogDescription>
-              {managedRole === 'admin'
-                ? 'Admin akan membuat toko dan mengelola member-nya sendiri setelah akun aktif.'
-                : 'Member bisa dibuat tanpa toko dulu. Akses toko bisa di-assign sekarang atau nanti.'}
+              {'Member bisa dibuat tanpa toko dulu. Akses toko bisa di-assign sekarang atau nanti.'}
             </DialogDescription>
           </DialogHeader>
 

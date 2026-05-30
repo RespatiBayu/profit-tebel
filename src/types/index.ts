@@ -127,7 +127,7 @@ export interface UploadJobStatusResponse {
   finishedAt: string | null
 }
 
-export type AppUserRole = 'superadmin' | 'admin' | 'member'
+export type AppUserRole = 'superadmin' | 'member'
 
 // ============================================================
 // SUBSCRIPTION
