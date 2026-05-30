@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Lock, Boxes, ClipboardList, ShoppingCart, Sparkles, CheckCircle2, Crown } from 'lucide-react'
+import { Boxes, ClipboardList, ShoppingCart, Sparkles, CheckCircle2, Crown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 
