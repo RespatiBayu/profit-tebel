@@ -378,7 +378,10 @@ function TrafficLightTable({
                   <TableCell>
                     {row.realRoas !== null ? (
                       <span className={`text-sm font-semibold tabular-nums ${
-                        row.realRoas >= 1 ? 'text-blue-600' : 'text-red-500'
+                        row.signal === 'scale'    ? 'text-green-700' :
+                        row.signal === 'optimize' ? 'text-yellow-700' :
+                        row.signal === 'kill'     ? 'text-red-600' :
+                        row.realRoas >= 1         ? 'text-blue-600' : 'text-red-500'
                       }`}>
                         {row.realRoas.toFixed(2)}x
                       </span>
