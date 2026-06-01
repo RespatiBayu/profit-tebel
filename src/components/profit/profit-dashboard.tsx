@@ -400,6 +400,20 @@ function ProductProfitTable({ rows }: { rows: ProductProfitRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Section group divider — pemisah visual antar-kelompok section di dashboard
+// ---------------------------------------------------------------------------
+
+function SectionDivider({ icon: Icon, title }: { icon: typeof Lightbulb; title: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-4">
+      <Icon className="h-4 w-4 shrink-0 text-primary" />
+      <h2 className="whitespace-nowrap text-sm font-bold tracking-tight">{title}</h2>
+      <div className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Custom tooltip for charts
 // ---------------------------------------------------------------------------
 
@@ -960,6 +974,8 @@ export default function ProfitDashboard({
         </Alert>
       )}
 
+      <SectionDivider icon={Lightbulb} title="Ringkasan & Aksi" />
+
       {/* KPI Cards */}
       {(() => {
         // If pending data exists, show combined (confirmed + pending) values
@@ -1135,6 +1151,10 @@ export default function ProfitDashboard({
 
       {/* === SECTION: Stok Kritis (inventory low-stock) === */}
       <StockCriticalCard />
+
+      {(kpis.totalOmzet > 0 || pendingSummary.hasData || marginInsight.hasHpp || roiModal.hasData || repeatBuyer.hasData) && (
+        <SectionDivider icon={Banknote} title="Kesehatan Profit" />
+      )}
 
       {/* Cakupan Data & Estimasi */}
       {pendingSummary.hasData && (
@@ -1630,6 +1650,8 @@ export default function ProfitDashboard({
         </div>
       )}
 
+      <SectionDivider icon={Package} title="Tren & Produk" />
+
       {/* === SECTION: Trend Chart === */}
       <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
@@ -1733,6 +1755,8 @@ export default function ProfitDashboard({
         </CardContent>
       </Card>
 
+      <SectionDivider icon={Users} title="Penjualan & Pembeli" />
+
       {/* === SECTION: Busy Days + Top Products + Top Buyers === */}
       <div className="grid md:grid-cols-2 gap-4">
         <BusyDaysSection rows={busyDays} />
@@ -1743,6 +1767,10 @@ export default function ProfitDashboard({
       {/* === SECTION: Daily Detail Table === */}
       <DailyDetailSection rows={dailyDetail} />
 
+      {(filteredAdsData.length > 0 || masterProducts.length > 0) && (
+        <SectionDivider icon={Zap} title="Iklan" />
+      )}
+
       {/* === SECTION: Scale Recommendations (iklan yang bisa di-scale) === */}
       {filteredAdsData.length > 0 && (
         <ScaleRecommendationsSection scalable={scalable} allRecs={scaleRecs} />
@@ -1752,6 +1780,8 @@ export default function ProfitDashboard({
       {masterProducts.length > 0 && (
         <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
       )}
+
+      <SectionDivider icon={Receipt} title="Biaya & Pembayaran" />
 
       {/* === SECTION: Fee Breakdown === */}
       <div className="grid sm:grid-cols-2 gap-4">
@@ -1878,6 +1908,8 @@ export default function ProfitDashboard({
               </div>
             </CardContent>
           </Card>
+
+      <SectionDivider icon={Wallet} title="Arus Kas" />
 
       {/* === SECTION: Proyeksi Dana Cair (Escrow Forecast) === */}
       {pendingKpis.hasPendingData && (
