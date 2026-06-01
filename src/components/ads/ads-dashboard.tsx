@@ -43,6 +43,7 @@ import {
 } from '@/lib/calculations/profit'
 import { ROAS_THRESHOLDS } from '@/lib/constants/marketplace-fees'
 import { buildMasterProductMap } from '@/lib/master-product-map'
+import { RoasTargetsSection } from '@/components/profit/dashboard-sections'
 import type {
   AvailablePeriods,
   DbAdsRow,
@@ -810,6 +811,21 @@ export default function AdsDashboard({
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
 
+  // Avg realized selling price per product (GMV / units sold) from ads data — feeds Target ROAS.
+  const sellingPriceMap = useMemo(() => {
+    const m = new Map<string, number>()
+    const agg = new Map<string, { gmv: number; units: number }>()
+    for (const a of filteredAds) {
+      if (!a.product_code || a.product_code === '-') continue
+      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
+      e.gmv += a.gmv; e.units += a.units_sold; agg.set(a.product_code, e)
+    }
+    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
+      if (units > 0) m.set(code, gmv / units)
+    }
+    return m
+  }, [filteredAds])
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -937,6 +953,11 @@ export default function AdsDashboard({
           </div>
         </CardContent>
       </Card>
+
+      {/* === SECTION: ROAS Targets per Product === */}
+      {masterProducts.length > 0 && (
+        <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
+      )}
 
       {/* === SECTION: Funnel === */}
       <Card>

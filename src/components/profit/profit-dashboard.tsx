@@ -77,7 +77,6 @@ import {
 } from '@/lib/calculations/dashboard-analytics'
 import {
   ScaleRecommendationsSection,
-  RoasTargetsSection,
   BusyDaysSection,
   TopProductsSection,
   TopBuyersSection,
@@ -587,24 +586,6 @@ export default function ProfitDashboard({
   )
   const topBuyers = useMemo(() => calculateTopBuyers(filteredOrders), [filteredOrders])
   const dailyDetail = useMemo(() => calculateDailyDetail(filteredOrders), [filteredOrders])
-
-  // Derive avg selling price per product from ads data (most reliable — actual realized price)
-  const sellingPriceMap = useMemo(() => {
-    const m = new Map<string, number>()
-    const agg = new Map<string, { gmv: number; units: number }>()
-    for (const a of filteredAdsData) {
-      if (!a.product_code || a.product_code === '-') continue
-      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
-      e.gmv += a.gmv
-      e.units += a.units_sold
-      agg.set(a.product_code, e)
-    }
-    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
-      if (units > 0) m.set(code, gmv / units)
-    }
-    // Fallback: derive from orders if no ads data for a product
-    return m
-  }, [filteredAdsData])
 
   const negativeProducts = productRows.filter((r) => r.hasHpp && r.profit < 0)
   const totalProducts = masterProducts.length
@@ -1774,11 +1755,6 @@ export default function ProfitDashboard({
       {/* === SECTION: Scale Recommendations (iklan yang bisa di-scale) === */}
       {filteredAdsData.length > 0 && (
         <ScaleRecommendationsSection scalable={scalable} allRecs={scaleRecs} />
-      )}
-
-      {/* === SECTION: ROAS Targets per Product === */}
-      {masterProducts.length > 0 && (
-        <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
       )}
 
       <SectionDivider icon={Receipt} title="Biaya & Pembayaran" />
