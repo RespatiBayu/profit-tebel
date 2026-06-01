@@ -128,6 +128,20 @@ const AD_INSIGHT_TONE = {
 } as const
 
 // ---------------------------------------------------------------------------
+// Section divider (visual group heading)
+// ---------------------------------------------------------------------------
+
+function SectionDivider({ icon: Icon, title }: { icon: typeof Lightbulb; title: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-4">
+      <Icon className="h-4 w-4 shrink-0 text-primary" />
+      <h2 className="whitespace-nowrap text-sm font-bold tracking-tight">{title}</h2>
+      <div className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // KPI Card
 // ---------------------------------------------------------------------------
 
@@ -956,6 +970,8 @@ export default function AdsDashboard({
         </div>
       </div>
 
+      <SectionDivider icon={Lightbulb} title="Ringkasan & Aksi" />
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <KpiCard
@@ -1060,6 +1076,8 @@ export default function AdsDashboard({
         </Card>
       )}
 
+      <SectionDivider icon={Target} title="Performa per Iklan" />
+
       {/* === SECTION: Traffic Light Table === */}
       <Card>
         <CardHeader className="pb-3">
@@ -1161,6 +1179,8 @@ export default function AdsDashboard({
       {masterProducts.length > 0 && (
         <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
       )}
+
+      <SectionDivider icon={Zap} title="Funnel & Efisiensi" />
 
       {/* === SECTION: Diagnosa Funnel === */}
       {funnelDiag.hasData && (
@@ -1274,6 +1294,8 @@ export default function AdsDashboard({
           </CardContent>
         </Card>
       )}
+
+      <SectionDivider icon={TrendingUp} title="Profit & Atribusi" />
 
       {/* === SECTION: Quadrant Matrix === */}
       {hasIncomeData && (
