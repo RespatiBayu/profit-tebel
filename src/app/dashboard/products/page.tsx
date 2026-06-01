@@ -26,6 +26,8 @@ import {
   Trash2,
   Link2,
   X,
+  Download,
+  FileUp,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
 import type { MasterProduct, MasterProductSourceTag, Item } from '@/types'
@@ -219,68 +221,57 @@ export default function ProductsPage() {
   // linked_item overrides per product (keyed by product.id)
   const [linkedOverrides, setLinkedOverrides] = useState<Record<string, { id: string | null; name: string | null }>>({})
 
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const bulkInputRef = useRef<HTMLInputElement>(null)
+
   function handleLinked(productId: string, itemId: string | null, itemName: string | null) {
     setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
   }
 
-  useEffect(() => {
-    let active = true
+  const scopeParams = useCallback(() => {
+    const params = new URLSearchParams()
+    if (storeId) params.set('store', storeId)
+    if (marketplace) params.set('marketplace', marketplace)
+    return params
+  }, [storeId, marketplace])
 
-    async function loadProducts() {
-      setLoading(true)
-      setError(null)
+  const loadProducts = useCallback(async () => {
+    setLoading(true)
+    setError(null)
 
-      try {
-        const params = new URLSearchParams()
-        if (storeId) {
-          params.set('store', storeId)
-        }
-        if (marketplace) {
-          params.set('marketplace', marketplace)
-        }
+    try {
+      const params = scopeParams()
+      const url = params.size > 0
+        ? `/api/master-products?${params.toString()}`
+        : '/api/master-products'
+      const response = await fetch(url, { cache: 'no-store' })
+      const json = await response.json().catch(() => null) as MasterProductsResponse | null
 
-        const url = params.size > 0
-          ? `/api/master-products?${params.toString()}`
-          : '/api/master-products'
-        const response = await fetch(url, { cache: 'no-store' })
-        const json = await response.json().catch(() => null) as MasterProductsResponse | null
-
-        if (!active) return
-
-        if (!response.ok) {
-          setProducts([])
-          setDrafts({})
-          setSaved({})
-          setSuccessMessage(null)
-          setError(json?.error ?? 'Gagal mengambil data produk')
-          return
-        }
-
-        setProducts(json?.products ?? [])
-        setDrafts({})
-        setSaved({})
-        setSuccessMessage(null)
-      } catch (err) {
-        if (!active) return
-        const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      if (!response.ok) {
         setProducts([])
         setDrafts({})
         setSaved({})
-        setSuccessMessage(null)
-        setError(`Gagal mengambil data produk: ${message}`)
-      } finally {
-        if (active) {
-          setLoading(false)
-        }
+        setError(json?.error ?? 'Gagal mengambil data produk')
+        return
       }
-    }
 
+      setProducts(json?.products ?? [])
+      setDrafts({})
+      setSaved({})
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      setProducts([])
+      setDrafts({})
+      setSaved({})
+      setError(`Gagal mengambil data produk: ${message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [scopeParams])
+
+  useEffect(() => {
     loadProducts()
-
-    return () => {
-      active = false
-    }
-  }, [marketplace, storeId])
+  }, [loadProducts])
 
   function resetDraft(id: string) {
     setDrafts((prev) => {
@@ -443,6 +434,64 @@ export default function ProductsPage() {
     }
   }
 
+  function downloadTemplate() {
+    const params = scopeParams()
+    const url = params.size > 0
+      ? `/api/master-products/template?${params.toString()}`
+      : '/api/master-products/template'
+    const a = document.createElement('a')
+    a.href = url
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
+  async function handleBulkFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = '' // reset agar file yang sama bisa diupload lagi
+    if (!file) return
+
+    setBulkUploading(true)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      const params = scopeParams()
+      const url = params.size > 0
+        ? `/api/master-products/bulk?${params.toString()}`
+        : '/api/master-products/bulk'
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(url, { method: 'POST', body: formData })
+      const json = await response.json().catch(() => null) as {
+        updated?: number
+        notFoundCount?: number
+        invalidRows?: number
+        error?: string
+      } | null
+
+      if (!response.ok) {
+        setError(json?.error ?? 'Gagal memproses file Excel')
+        return
+      }
+
+      const parts: string[] = [`${json?.updated ?? 0} produk diperbarui dari Excel`]
+      if (json?.notFoundCount) parts.push(`${json.notFoundCount} ID tidak cocok (dilewati)`)
+      if (json?.invalidRows) parts.push(`${json.invalidRows} baris angka tidak valid`)
+      setSuccessMessage(parts.join(' · '))
+
+      await loadProducts()
+      router.refresh()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      setError(`Gagal upload: ${message}`)
+    } finally {
+      setBulkUploading(false)
+    }
+  }
+
   // Filter + sort
   const filtered = products
     .filter((p) => {
@@ -501,12 +550,42 @@ export default function ProductsPage() {
             )}
           </p>
         </div>
-        <DashboardLink href="/dashboard/upload">
-          <Button variant="outline" size="sm" className="gap-2">
-            <Upload className="h-4 w-4" />
-            Upload Data
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={bulkInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleBulkFile}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={downloadTemplate}
+            disabled={loading || products.length === 0}
+            title={products.length === 0 ? 'Belum ada produk untuk dijadikan template' : 'Unduh template Excel berisi produk & HPP saat ini'}
+          >
+            <Download className="h-4 w-4" />
+            Template Excel
           </Button>
-        </DashboardLink>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => bulkInputRef.current?.click()}
+            disabled={bulkUploading || loading}
+          >
+            <FileUp className="h-4 w-4" />
+            {bulkUploading ? 'Mengunggah...' : 'Upload Excel'}
+          </Button>
+          <DashboardLink href="/dashboard/upload">
+            <Button variant="outline" size="sm" className="gap-2">
+              <Upload className="h-4 w-4" />
+              Upload Data
+            </Button>
+          </DashboardLink>
+        </div>
       </div>
 
       {/* HPP alert */}
