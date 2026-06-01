@@ -45,6 +45,12 @@ import {
   Zap,
   Tag,
   Banknote,
+  Lightbulb,
+  Users,
+  Repeat,
+  Wallet,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react'
 import {
   buildHppMap,
@@ -779,6 +785,123 @@ export default function ProfitDashboard({
     }
   }, [kpis, pendingKpis])
 
+  // ROI Modal: seberapa produktif modal yang diputar. Modal barang = HPP dari
+  // barang yang terjual (confirmed + estimasi). ROI barang = profit kotor / modal
+  // barang (sebelum iklan). ROI usaha = real profit / (modal barang + iklan).
+  const roiModal = useMemo(() => {
+    const p = pendingKpis.hasPendingData
+    const modalBarang = kpis.totalHppCost   + (p ? pendingKpis.totalHpp       : 0)
+    const netIncome   = kpis.totalNetIncome + (p ? pendingKpis.totalNetIncome : 0)
+    const adSpend     = kpis.totalAdSpend
+    const realProfit  = kpis.realProfit     + (p ? pendingKpis.realProfit     : 0)
+    const grossProfit = netIncome - modalBarang
+    const totalModal  = modalBarang + adSpend
+    return {
+      hasData: marginInsight.hasHpp && modalBarang > 0,
+      modalBarang,
+      adSpend,
+      totalModal,
+      realProfit,
+      grossProfit,
+      // ROI atas modal barang saja (sebelum iklan)
+      roiBarangPct: modalBarang > 0 ? (grossProfit / modalBarang) * 100 : null,
+      // ROI atas total modal usaha (barang + iklan)
+      roiUsahaPct: totalModal > 0 ? (realProfit / totalModal) * 100 : null,
+    }
+  }, [kpis, pendingKpis, marginInsight.hasHpp])
+
+  // Repeat Buyer Rate: % pembeli yang order lebih dari sekali. Sumber: file Income
+  // (punya buyer_username). Mengukur loyalitas & kualitas basis pelanggan.
+  const repeatBuyer = useMemo(() => {
+    const byBuyer = new Map<string, { count: number; omzet: number }>()
+    for (const o of filteredOrders) {
+      const key = o.buyer_username?.trim()
+      if (!key) continue
+      const e = byBuyer.get(key) ?? { count: 0, omzet: 0 }
+      e.count += 1
+      e.omzet += o.original_price
+      byBuyer.set(key, e)
+    }
+    const buyers = Array.from(byBuyer.values())
+    const totalBuyers = buyers.length
+    const repeatBuyers = buyers.filter((b) => b.count > 1)
+    const totalOrders = buyers.reduce((s, b) => s + b.count, 0)
+    const totalOmzet = buyers.reduce((s, b) => s + b.omzet, 0)
+    const repeatOmzet = repeatBuyers.reduce((s, b) => s + b.omzet, 0)
+    return {
+      hasData: totalBuyers > 0,
+      totalBuyers,
+      repeatCount: repeatBuyers.length,
+      repeatRatePct: totalBuyers > 0 ? (repeatBuyers.length / totalBuyers) * 100 : 0,
+      avgOrdersPerBuyer: totalBuyers > 0 ? totalOrders / totalBuyers : 0,
+      repeatOmzetSharePct: totalOmzet > 0 ? (repeatOmzet / totalOmzet) * 100 : 0,
+      repeatOmzet,
+    }
+  }, [filteredOrders])
+
+  // Insight & Aksi Otomatis: rangkum semua sinyal jadi daftar rekomendasi
+  // berprioritas. tone: bad (merah) → warn (oranye) → good (hijau) → info (biru).
+  const autoInsights = useMemo(() => {
+    type Tone = 'bad' | 'warn' | 'good' | 'info'
+    const out: { tone: Tone; title: string; desc: string }[] = []
+
+    // Efisiensi iklan vs profit kotor
+    if (marginInsight.adShareOfGrossProfit != null) {
+      const v = marginInsight.adShareOfGrossProfit
+      if (v >= 80) out.push({ tone: 'bad', title: 'Iklan terlalu boros', desc: `Iklan memakan ${v.toFixed(0)}% profit kotor. Pangkas/hentikan kampanye ROAS rendah.` })
+      else if (v >= 50) out.push({ tone: 'warn', title: 'Porsi iklan tinggi', desc: `Iklan ambil ${v.toFixed(0)}% profit kotor. Awasi kampanye di bawah target ROAS.` })
+      else out.push({ tone: 'good', title: 'Iklan masih sehat', desc: `Iklan hanya ${v.toFixed(0)}% dari profit kotor — ada ruang untuk scale.` })
+    }
+
+    // Net margin
+    if (marginInsight.netMarginPct != null) {
+      const m = marginInsight.netMarginPct
+      if (m < 0) out.push({ tone: 'bad', title: 'Margin negatif', desc: `Net margin ${m.toFixed(1)}%. Usaha rugi pada periode ini — evaluasi harga & biaya.` })
+      else if (m < 5) out.push({ tone: 'warn', title: 'Margin tipis', desc: `Net margin cuma ${m.toFixed(1)}%. Rawan rugi kalau biaya/iklan naik sedikit.` })
+    }
+
+    // Produk rugi
+    if (profitContribution.loserCount > 0) {
+      out.push({ tone: 'bad', title: `${profitContribution.loserCount} produk rugi`, desc: `Total rugi ${formatRp(Math.abs(profitContribution.totalLoss))}. Naikkan harga, setop iklan, atau cek ulang HPP.` })
+    }
+
+    // Pareto produk juara
+    if (profitContribution.hasData && profitContribution.paretoCount > 0) {
+      out.push({ tone: 'info', title: 'Fokus produk juara', desc: `${profitContribution.paretoCount} produk menyumbang 80% profit. Jaga stok & prioritaskan iklannya.` })
+    }
+
+    // Kampanye siap scale
+    if (scalable.length > 0) {
+      out.push({ tone: 'good', title: `${scalable.length} kampanye siap scale`, desc: `ROAS tinggi & konversi cukup — naikkan budget bertahap (20-30%).` })
+    }
+
+    // Repeat buyer
+    if (repeatBuyer.hasData) {
+      if (repeatBuyer.repeatRatePct < 10) out.push({ tone: 'warn', title: 'Repeat buyer rendah', desc: `Cuma ${repeatBuyer.repeatRatePct.toFixed(0)}% pembeli balik lagi. Coba follow-up chat / voucher loyalitas.` })
+      else if (repeatBuyer.repeatRatePct >= 25) out.push({ tone: 'good', title: 'Pelanggan loyal', desc: `${repeatBuyer.repeatRatePct.toFixed(0)}% pembeli order ulang — basis pelanggan sehat.` })
+    }
+
+    // ROI modal
+    if (roiModal.hasData && roiModal.roiBarangPct != null) {
+      const r = roiModal.roiBarangPct
+      out.push({ tone: r >= 30 ? 'good' : r < 0 ? 'bad' : 'info', title: `ROI modal ${r.toFixed(0)}%`, desc: `Tiap Rp1 modal barang balik jadi Rp${(r / 100 + 1).toFixed(2)} (sebelum iklan).` })
+    }
+
+    // HPP belum lengkap
+    if (noHppCount > 0) {
+      out.push({ tone: 'warn', title: `${noHppCount} produk belum ada HPP`, desc: `Real Profit belum 100% akurat. Lengkapi HPP untuk hasil presisi.` })
+    }
+
+    // Cakupan data estimasi
+    if (pendingSummary.hasData && pendingSummary.coveragePct < 100) {
+      out.push({ tone: 'info', title: `${pendingSummary.coveragePct}% biaya aktual`, desc: `${pendingSummary.countUnreleased} order masih estimasi (dana belum cair). Upload Income terbaru untuk akurasi.` })
+    }
+
+    // Urutkan: bad → warn → good → info
+    const rank: Record<Tone, number> = { bad: 0, warn: 1, good: 2, info: 3 }
+    return out.sort((a, b) => rank[a.tone] - rank[b.tone])
+  }, [marginInsight, profitContribution, scalable, repeatBuyer, roiModal, noHppCount, pendingSummary])
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -1452,6 +1575,110 @@ export default function ProfitDashboard({
               </CardContent>
             </Card>
           </div>
+
+      {/* === SECTION: Insight & Aksi Otomatis === */}
+      {autoInsights.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lightbulb className="h-4 w-4 text-amber-500" />
+              Insight &amp; Aksi
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Rangkuman otomatis dari data periode ini — diurut dari yang paling perlu ditindak.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid sm:grid-cols-2 gap-2.5">
+              {autoInsights.map((ins, i) => {
+                const theme = ins.tone === 'bad'
+                  ? { box: 'border-red-200 bg-red-50', icon: 'text-red-600', Icon: AlertTriangle }
+                  : ins.tone === 'warn'
+                  ? { box: 'border-orange-200 bg-orange-50', icon: 'text-orange-600', Icon: AlertCircle }
+                  : ins.tone === 'good'
+                  ? { box: 'border-green-200 bg-green-50', icon: 'text-green-600', Icon: CheckCircle2 }
+                  : { box: 'border-blue-200 bg-blue-50', icon: 'text-blue-600', Icon: Info }
+                const Icon = theme.Icon
+                return (
+                  <div key={i} className={`flex items-start gap-2.5 rounded-lg border p-3 ${theme.box}`}>
+                    <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${theme.icon}`} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold leading-tight">{ins.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{ins.desc}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* === SECTION: ROI Modal & Repeat Buyer === */}
+      {(roiModal.hasData || repeatBuyer.hasData) && (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {roiModal.hasData && (
+            <>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Wallet className="h-3.5 w-3.5" /> ROI Modal Barang
+                  </p>
+                  <p className={`text-3xl font-bold ${(roiModal.roiBarangPct ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {roiModal.roiBarangPct != null ? `${roiModal.roiBarangPct.toFixed(0)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Profit kotor {formatRp(roiModal.grossProfit)} ÷ modal {formatRp(roiModal.modalBarang)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Banknote className="h-3.5 w-3.5" /> ROI Usaha (+ iklan)
+                  </p>
+                  <p className={`text-3xl font-bold ${(roiModal.roiUsahaPct ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {roiModal.roiUsahaPct != null ? `${roiModal.roiUsahaPct.toFixed(0)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Real profit {formatRp(roiModal.realProfit)} ÷ modal usaha {formatRp(roiModal.totalModal)}
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          )}
+          {repeatBuyer.hasData && (
+            <>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Repeat className="h-3.5 w-3.5" /> Repeat Buyer Rate
+                  </p>
+                  <p className={`text-3xl font-bold ${repeatBuyer.repeatRatePct >= 25 ? 'text-emerald-600' : repeatBuyer.repeatRatePct >= 10 ? 'text-blue-600' : 'text-orange-500'}`}>
+                    {repeatBuyer.repeatRatePct.toFixed(0)}%
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {repeatBuyer.repeatCount} dari {repeatBuyer.totalBuyers} pembeli order ulang
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5" /> Omzet dari Repeat Buyer
+                  </p>
+                  <p className="text-3xl font-bold text-indigo-600">
+                    {repeatBuyer.repeatOmzetSharePct.toFixed(0)}%
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {formatRp(repeatBuyer.repeatOmzet)} · {repeatBuyer.avgOrdersPerBuyer.toFixed(1)} order/pembeli
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
 
       {/* === SECTION: Margin & Efisiensi Iklan === */}
       {marginInsight.hasHpp && (
