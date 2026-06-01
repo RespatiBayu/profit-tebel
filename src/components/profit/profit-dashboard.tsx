@@ -590,6 +590,41 @@ export default function ProfitDashboard({
   const hppFilled = totalProducts - noHppCount
   const hppProgress = totalProducts > 0 ? Math.round((hppFilled / totalProducts) * 100) : 0
 
+  // Kontribusi profit per produk (Pareto 80/20): produk mana yang benar-benar
+  // bikin untung. Omzet tinggi ≠ profit tinggi, jadi diurut berdasarkan profit.
+  const profitContribution = useMemo(() => {
+    const withHpp = productRows.filter((r) => r.hasHpp)
+    const winners = withHpp.filter((r) => r.profit > 0).sort((a, b) => b.profit - a.profit)
+    const losers  = withHpp.filter((r) => r.profit < 0).sort((a, b) => a.profit - b.profit)
+
+    const totalProfit = winners.reduce((s, r) => s + r.profit, 0)
+    const totalLoss   = losers.reduce((s, r) => s + r.profit, 0) // negatif
+
+    // Berapa produk untuk capai 80% total profit (Pareto)
+    let cum = 0
+    let paretoCount = 0
+    for (const r of winners) {
+      cum += r.profit
+      paretoCount++
+      if (totalProfit > 0 && cum >= totalProfit * 0.8) break
+    }
+
+    // Top 6 untuk ditampilkan
+    const top = winners.slice(0, 6).map((r) => ({
+      ...r,
+      sharePct: totalProfit > 0 ? (r.profit / totalProfit) * 100 : 0,
+    }))
+
+    return {
+      hasData: withHpp.length > 0,
+      winners, losers, top,
+      totalProfit, totalLoss,
+      paretoCount,
+      winnerCount: winners.length,
+      loserCount: losers.length,
+    }
+  }, [productRows])
+
   // Fallback fee rate (% of omzet) bila belum ada data income untuk kalibrasi.
   // ≈ admin (Star, beauty) 8.25% + ongkir xtra 4% + promo xtra 4.5% ≈ 16.75%.
   const DEFAULT_FEE_RATE_ON_OMZET = 0.16
@@ -717,6 +752,32 @@ export default function ProfitDashboard({
       byStatus,
     }
   }, [filteredOrdersAll, incomeOrderNumbers])
+
+  // Insight margin & efisiensi iklan (gabungan confirmed + estimasi).
+  const marginInsight = useMemo(() => {
+    const p = pendingKpis.hasPendingData
+    const omzet     = kpis.totalOmzet     + (p ? pendingKpis.totalOmzet     : 0)
+    const gross     = kpis.grossIncome    + (p ? pendingKpis.grossIncome    : 0)
+    const netIncome = kpis.totalNetIncome + (p ? pendingKpis.totalNetIncome : 0)
+    const hpp       = kpis.totalHppCost   + (p ? pendingKpis.totalHpp       : 0)
+    const adSpend   = kpis.totalAdSpend   // iklan tidak dialokasikan ke estimasi
+    const realProfit = kpis.realProfit    + (p ? pendingKpis.realProfit     : 0)
+
+    // Gross profit = penghasilan bersih − HPP (sebelum iklan)
+    const grossProfit = netIncome - hpp
+    return {
+      hasHpp: kpis.hasHppData || (p && pendingKpis.hasHppData),
+      netMarginPct: omzet > 0 ? (realProfit / omzet) * 100 : null,
+      // % profit kotor yang dimakan iklan
+      adShareOfGrossProfit: grossProfit > 0 ? (adSpend / grossProfit) * 100 : null,
+      // % dari net income yang dimakan iklan
+      adShareOfNet: netIncome > 0 ? (adSpend / netIncome) * 100 : null,
+      grossProfit,
+      realProfit,
+      adSpend,
+      grossMarginPct: gross > 0 ? (grossProfit / gross) * 100 : null,
+    }
+  }, [kpis, pendingKpis])
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
@@ -1391,6 +1452,113 @@ export default function ProfitDashboard({
               </CardContent>
             </Card>
           </div>
+
+      {/* === SECTION: Margin & Efisiensi Iklan === */}
+      {marginInsight.hasHpp && (
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Net Margin</p>
+              <p className={`text-3xl font-bold ${(marginInsight.netMarginPct ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {marginInsight.netMarginPct != null ? `${marginInsight.netMarginPct.toFixed(1)}%` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Real Profit ÷ Total Omzet</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Iklan Memakan Profit Kotor</p>
+              <p className={`text-3xl font-bold ${
+                (marginInsight.adShareOfGrossProfit ?? 0) >= 80 ? 'text-red-600'
+                : (marginInsight.adShareOfGrossProfit ?? 0) >= 50 ? 'text-orange-500'
+                : 'text-blue-600'
+              }`}>
+                {marginInsight.adShareOfGrossProfit != null ? `${marginInsight.adShareOfGrossProfit.toFixed(0)}%` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {formatRp(marginInsight.adSpend)} iklan dari {formatRp(marginInsight.grossProfit)} profit kotor
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Profit Kotor (sebelum iklan)</p>
+              <p className="text-3xl font-bold text-emerald-600">{formatRp(marginInsight.grossProfit)}</p>
+              <p className="text-xs text-muted-foreground mt-1">Net Income − HPP</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      {marginInsight.hasHpp && (marginInsight.adShareOfGrossProfit ?? 0) >= 80 && (
+        <Alert variant="destructive">
+          <TrendingDown className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Iklan memakan {marginInsight.adShareOfGrossProfit!.toFixed(0)}% dari profit kotor.</strong>{' '}
+            Profit bersih lo tipis banget karena biaya iklan. Cek tab Detail Iklan — matikan/optimasi campaign dengan ROAS rendah.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* === SECTION: Kontribusi Profit per Produk (Pareto) === */}
+      {profitContribution.hasData && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <CardTitle className="text-base">Kontribusi Profit per Produk</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Produk mana yang benar-benar bikin untung (diurut Real Profit, bukan omzet)
+                </p>
+              </div>
+              {profitContribution.totalProfit > 0 && profitContribution.winnerCount > 0 && (
+                <div className="text-right">
+                  <p className="text-sm font-bold text-primary">
+                    {profitContribution.paretoCount} produk = 80% profit
+                  </p>
+                  <p className="text-xs text-muted-foreground">dari {profitContribution.winnerCount} produk untung</p>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Top kontributor profit */}
+            <div className="space-y-2">
+              {profitContribution.top.map((r) => (
+                <div key={r.productId} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="truncate flex-1 min-w-0" title={r.productName}>{r.productName}</span>
+                    <span className="font-semibold text-green-700 tabular-nums shrink-0">{formatRp(r.profit)}</span>
+                    <span className="text-xs text-muted-foreground w-12 text-right shrink-0">{r.sharePct.toFixed(0)}%</span>
+                  </div>
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full bg-green-500" style={{ width: `${Math.min(100, r.sharePct)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Produk rugi */}
+            {profitContribution.loserCount > 0 && (
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-xs font-medium text-red-600 uppercase tracking-wide">
+                  ⚠️ {profitContribution.loserCount} Produk Rugi · total {formatRp(profitContribution.totalLoss)}
+                </p>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {profitContribution.losers.slice(0, 6).map((r) => (
+                    <div key={r.productId} className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-2 text-sm">
+                      <span className="truncate flex-1 min-w-0" title={r.productName}>{r.productName}</span>
+                      <span className="font-semibold text-red-700 tabular-nums shrink-0">{formatRp(r.profit)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Produk rugi = harga jual − HPP − biaya − iklan masih minus. Pertimbangkan naikkan harga, kurangi diskon, atau stop iklannya.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* === SECTION: Per Product === */}
       <Card>
