@@ -1095,6 +1095,47 @@ export default function ProfitDashboard({
         )
       })()}
 
+      {/* === SECTION: Insight & Aksi Otomatis === */}
+      {autoInsights.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lightbulb className="h-4 w-4 text-amber-500" />
+              Insight &amp; Aksi
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Rangkuman otomatis dari data periode ini — diurut dari yang paling perlu ditindak.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid sm:grid-cols-2 gap-2.5">
+              {autoInsights.map((ins, i) => {
+                const theme = ins.tone === 'bad'
+                  ? { box: 'border-red-200 bg-red-50', icon: 'text-red-600', Icon: AlertTriangle }
+                  : ins.tone === 'warn'
+                  ? { box: 'border-orange-200 bg-orange-50', icon: 'text-orange-600', Icon: AlertCircle }
+                  : ins.tone === 'good'
+                  ? { box: 'border-green-200 bg-green-50', icon: 'text-green-600', Icon: CheckCircle2 }
+                  : { box: 'border-blue-200 bg-blue-50', icon: 'text-blue-600', Icon: Info }
+                const Icon = theme.Icon
+                return (
+                  <div key={i} className={`flex items-start gap-2.5 rounded-lg border p-3 ${theme.box}`}>
+                    <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${theme.icon}`} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold leading-tight">{ins.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{ins.desc}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* === SECTION: Stok Kritis (inventory low-stock) === */}
+      <StockCriticalCard />
+
       {/* Cakupan Data & Estimasi */}
       {pendingSummary.hasData && (
         <Card className="border-teal-200 bg-teal-50/30">
@@ -1477,146 +1518,51 @@ export default function ProfitDashboard({
         </Card>
       )}
 
-      {/* === SECTION: Scale Recommendations (iklan yang bisa di-scale) === */}
-      {filteredAdsData.length > 0 && (
-        <ScaleRecommendationsSection scalable={scalable} allRecs={scaleRecs} />
-      )}
-
-      {/* === SECTION: ROAS Targets per Product === */}
-      {masterProducts.length > 0 && (
-        <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
-      )}
-
-      {/* === SECTION: Trend Chart === */}
-      <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <CardTitle className="text-base">Trend Omzet & Profit</CardTitle>
-              <div className="flex gap-1">
-                <Button size="sm" variant={trendGroup === 'day' ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setTrendGroup('day')}>Harian</Button>
-                <Button size="sm" variant={trendGroup === 'week' ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setTrendGroup('week')}>Mingguan</Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {trendData.length === 0 ? (
-                <p className="text-center text-muted-foreground py-12 text-sm">Tidak ada data untuk ditampilkan</p>
-              ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={trendData} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 11 }}
-                      tickFormatter={formatDate}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatRp(v)} width={80} />
-                    <Tooltip content={<CurrencyTooltip />} />
-                    <Legend />
-                    <Line type="monotone" dataKey="omzet" name="Omzet" stroke="#3b82f6" dot={false} strokeWidth={2} />
-                    <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#8b5cf6" dot={false} strokeWidth={2} />
-                    <Line type="monotone" dataKey="profit" name="Profit" stroke="#10b981" dot={false} strokeWidth={2} connectNulls={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
+      {/* === SECTION: Margin & Efisiensi Iklan === */}
+      {marginInsight.hasHpp && (
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Net Margin</p>
+              <p className={`text-3xl font-bold ${(marginInsight.netMarginPct ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {marginInsight.netMarginPct != null ? `${marginInsight.netMarginPct.toFixed(1)}%` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Real Profit ÷ Total Omzet</p>
             </CardContent>
           </Card>
-
-      {/* === SECTION: Busy Days + Top Products + Top Buyers === */}
-      <div className="grid md:grid-cols-2 gap-4">
-        <BusyDaysSection rows={busyDays} />
-        <TopProductsSection rows={topProducts} />
-      </div>
-      <TopBuyersSection rows={topBuyers} />
-
-      {/* === SECTION: Daily Detail Table === */}
-      <DailyDetailSection rows={dailyDetail} />
-
-      {/* === SECTION: Fee Breakdown === */}
-      <div className="grid sm:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-base">Breakdown Biaya</CardTitle></CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie
-                      data={feeBreakdown}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      dataKey="value"
-                      nameKey="name"
-                      labelLine={false}
-                    >
-                      {feeBreakdown.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => formatRpFull(Number(v))} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-base">Detail Biaya</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {feeBreakdown.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm">{item.name}</span>
-                    </div>
-                    <span className="text-sm font-medium">{formatRp(item.value)}</span>
-                  </div>
-                ))}
-                <div className="border-t pt-2 mt-2 flex items-center justify-between">
-                  <span className="text-sm font-semibold">Total Biaya</span>
-                  <span className="text-sm font-bold text-red-600">{formatRp(feeBreakdown.reduce((s, i) => s + i.value, 0))}</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-      {/* === SECTION: Insight & Aksi Otomatis === */}
-      {autoInsights.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Lightbulb className="h-4 w-4 text-amber-500" />
-              Insight &amp; Aksi
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Rangkuman otomatis dari data periode ini — diurut dari yang paling perlu ditindak.
-            </p>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid sm:grid-cols-2 gap-2.5">
-              {autoInsights.map((ins, i) => {
-                const theme = ins.tone === 'bad'
-                  ? { box: 'border-red-200 bg-red-50', icon: 'text-red-600', Icon: AlertTriangle }
-                  : ins.tone === 'warn'
-                  ? { box: 'border-orange-200 bg-orange-50', icon: 'text-orange-600', Icon: AlertCircle }
-                  : ins.tone === 'good'
-                  ? { box: 'border-green-200 bg-green-50', icon: 'text-green-600', Icon: CheckCircle2 }
-                  : { box: 'border-blue-200 bg-blue-50', icon: 'text-blue-600', Icon: Info }
-                const Icon = theme.Icon
-                return (
-                  <div key={i} className={`flex items-start gap-2.5 rounded-lg border p-3 ${theme.box}`}>
-                    <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${theme.icon}`} />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold leading-tight">{ins.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{ins.desc}</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Iklan Memakan Profit Kotor</p>
+              <p className={`text-3xl font-bold ${
+                (marginInsight.adShareOfGrossProfit ?? 0) >= 80 ? 'text-red-600'
+                : (marginInsight.adShareOfGrossProfit ?? 0) >= 50 ? 'text-orange-500'
+                : 'text-blue-600'
+              }`}>
+                {marginInsight.adShareOfGrossProfit != null ? `${marginInsight.adShareOfGrossProfit.toFixed(0)}%` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {formatRp(marginInsight.adSpend)} iklan dari {formatRp(marginInsight.grossProfit)} profit kotor
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Profit Kotor (sebelum iklan)</p>
+              <p className="text-3xl font-bold text-emerald-600">{formatRp(marginInsight.grossProfit)}</p>
+              <p className="text-xs text-muted-foreground mt-1">Net Income − HPP</p>
+            </CardContent>
+          </Card>
+        </div>
       )}
-
-      {/* === SECTION: Stok Kritis (inventory low-stock) === */}
-      <StockCriticalCard />
+      {marginInsight.hasHpp && (marginInsight.adShareOfGrossProfit ?? 0) >= 80 && (
+        <Alert variant="destructive">
+          <TrendingDown className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Iklan memakan {marginInsight.adShareOfGrossProfit!.toFixed(0)}% dari profit kotor.</strong>{' '}
+            Profit bersih lo tipis banget karena biaya iklan. Cek tab Detail Iklan — matikan/optimasi campaign dengan ROAS rendah.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* === SECTION: ROI Modal & Repeat Buyer === */}
       {(roiModal.hasData || repeatBuyer.hasData) && (
@@ -1684,51 +1630,39 @@ export default function ProfitDashboard({
         </div>
       )}
 
-      {/* === SECTION: Margin & Efisiensi Iklan === */}
-      {marginInsight.hasHpp && (
-        <div className="grid sm:grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="p-5">
-              <p className="text-sm text-muted-foreground mb-1">Net Margin</p>
-              <p className={`text-3xl font-bold ${(marginInsight.netMarginPct ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {marginInsight.netMarginPct != null ? `${marginInsight.netMarginPct.toFixed(1)}%` : '—'}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Real Profit ÷ Total Omzet</p>
+      {/* === SECTION: Trend Chart === */}
+      <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <CardTitle className="text-base">Trend Omzet & Profit</CardTitle>
+              <div className="flex gap-1">
+                <Button size="sm" variant={trendGroup === 'day' ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setTrendGroup('day')}>Harian</Button>
+                <Button size="sm" variant={trendGroup === 'week' ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setTrendGroup('week')}>Mingguan</Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {trendData.length === 0 ? (
+                <p className="text-center text-muted-foreground py-12 text-sm">Tidak ada data untuk ditampilkan</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={trendData} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={formatDate}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatRp(v)} width={80} />
+                    <Tooltip content={<CurrencyTooltip />} />
+                    <Legend />
+                    <Line type="monotone" dataKey="omzet" name="Omzet" stroke="#3b82f6" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#8b5cf6" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="profit" name="Profit" stroke="#10b981" dot={false} strokeWidth={2} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-5">
-              <p className="text-sm text-muted-foreground mb-1">Iklan Memakan Profit Kotor</p>
-              <p className={`text-3xl font-bold ${
-                (marginInsight.adShareOfGrossProfit ?? 0) >= 80 ? 'text-red-600'
-                : (marginInsight.adShareOfGrossProfit ?? 0) >= 50 ? 'text-orange-500'
-                : 'text-blue-600'
-              }`}>
-                {marginInsight.adShareOfGrossProfit != null ? `${marginInsight.adShareOfGrossProfit.toFixed(0)}%` : '—'}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {formatRp(marginInsight.adSpend)} iklan dari {formatRp(marginInsight.grossProfit)} profit kotor
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5">
-              <p className="text-sm text-muted-foreground mb-1">Profit Kotor (sebelum iklan)</p>
-              <p className="text-3xl font-bold text-emerald-600">{formatRp(marginInsight.grossProfit)}</p>
-              <p className="text-xs text-muted-foreground mt-1">Net Income − HPP</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-      {marginInsight.hasHpp && (marginInsight.adShareOfGrossProfit ?? 0) >= 80 && (
-        <Alert variant="destructive">
-          <TrendingDown className="h-4 w-4" />
-          <AlertDescription>
-            <strong>Iklan memakan {marginInsight.adShareOfGrossProfit!.toFixed(0)}% dari profit kotor.</strong>{' '}
-            Profit bersih lo tipis banget karena biaya iklan. Cek tab Detail Iklan — matikan/optimasi campaign dengan ROAS rendah.
-          </AlertDescription>
-        </Alert>
-      )}
 
       {/* === SECTION: Kontribusi Profit per Produk (Pareto) === */}
       {profitContribution.hasData && (
@@ -1798,6 +1732,72 @@ export default function ProfitDashboard({
           <ProductProfitTable rows={productRows} />
         </CardContent>
       </Card>
+
+      {/* === SECTION: Busy Days + Top Products + Top Buyers === */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <BusyDaysSection rows={busyDays} />
+        <TopProductsSection rows={topProducts} />
+      </div>
+      <TopBuyersSection rows={topBuyers} />
+
+      {/* === SECTION: Daily Detail Table === */}
+      <DailyDetailSection rows={dailyDetail} />
+
+      {/* === SECTION: Scale Recommendations (iklan yang bisa di-scale) === */}
+      {filteredAdsData.length > 0 && (
+        <ScaleRecommendationsSection scalable={scalable} allRecs={scaleRecs} />
+      )}
+
+      {/* === SECTION: ROAS Targets per Product === */}
+      {masterProducts.length > 0 && (
+        <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
+      )}
+
+      {/* === SECTION: Fee Breakdown === */}
+      <div className="grid sm:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Breakdown Biaya</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie
+                      data={feeBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      dataKey="value"
+                      nameKey="name"
+                      labelLine={false}
+                    >
+                      {feeBreakdown.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v) => formatRpFull(Number(v))} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Detail Biaya</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {feeBreakdown.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                      <span className="text-sm">{item.name}</span>
+                    </div>
+                    <span className="text-sm font-medium">{formatRp(item.value)}</span>
+                  </div>
+                ))}
+                <div className="border-t pt-2 mt-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold">Total Biaya</span>
+                  <span className="text-sm font-bold text-red-600">{formatRp(feeBreakdown.reduce((s, i) => s + i.value, 0))}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
       {/* === SECTION: Payment Distribution === */}
       <div className="grid sm:grid-cols-2 gap-4">
