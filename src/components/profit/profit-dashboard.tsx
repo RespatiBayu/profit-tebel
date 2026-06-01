@@ -84,6 +84,7 @@ import {
   DailyDetailSection,
 } from '@/components/profit/dashboard-sections'
 import { DashboardLink } from '@/components/layout/dashboard-link'
+import { StockCriticalCard } from '@/components/profit/stock-critical-card'
 import type {
   AvailablePeriods,
   DbOrder,
@@ -1613,6 +1614,9 @@ export default function ProfitDashboard({
           </CardContent>
         </Card>
       )}
+
+      {/* === SECTION: Stok Kritis (inventory low-stock) === */}
+      <StockCriticalCard />
 
       {/* === SECTION: ROI Modal & Repeat Buyer === */}
       {(roiModal.hasData || repeatBuyer.hasData) && (
