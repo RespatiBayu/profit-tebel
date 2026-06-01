@@ -1480,6 +1480,57 @@ export default function ProfitDashboard({
             </CardContent>
           </Card>
 
+      {/* === SECTION: Proyeksi Dana Cair (Escrow Forecast) === */}
+      {pendingKpis.hasPendingData && (
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <span className="text-base">💸</span>
+              </div>
+              <div>
+                <CardTitle className="text-base">Proyeksi Dana Cair</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Estimasi penerimaan bersih dari order yang dananya belum dilepas Shopee
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid sm:grid-cols-3 gap-3 text-sm">
+              <div className="bg-white rounded-lg border border-emerald-200 p-3">
+                <p className="text-xs text-muted-foreground">Estimasi Dana Belum Cair</p>
+                <p className="font-bold text-2xl text-emerald-700">{formatRp(pendingKpis.totalNetIncome)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">dari {pendingKpis.orderCount} order belum dilepas</p>
+              </div>
+              <div className="bg-white rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Rata-rata Jeda Pencairan</p>
+                <p className="font-bold text-2xl text-blue-600">
+                  {cashFlow.ordersWithBothDates > 0 ? cashFlow.avgDays : '—'}
+                  {cashFlow.ordersWithBothDates > 0 && <span className="text-base font-normal"> hari</span>}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {cashFlow.ordersWithBothDates > 0
+                    ? 'sejak pesanan dibuat → dana cair'
+                    : 'belum cukup data pencairan'}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Perkiraan Cair Maksimal</p>
+                <p className="font-bold text-2xl text-orange-600">
+                  {cashFlow.ordersWithBothDates > 0 ? `~${cashFlow.maxDays}` : '—'}
+                  {cashFlow.ordersWithBothDates > 0 && <span className="text-base font-normal"> hari</span>}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">setelah tanggal pesanan dibuat</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              * Estimasi net memakai rata-rata potongan dari order yang sudah dilepas. Jeda pencairan dihitung dari order yang sudah ada tanggal cairnya{cashFlow.ordersWithBothDates > 0 ? ` (${cashFlow.ordersWithBothDates} order)` : ''}.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* === SECTION: Cash Flow === */}
       <div className="grid sm:grid-cols-3 gap-4">
             <Card>
