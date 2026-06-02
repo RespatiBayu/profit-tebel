@@ -1190,6 +1190,7 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
     const resolver2 = new MasterResolver((masterRows2 ?? []) as MasterProductRow[])
 
     let ordersWithoutMapping = 0
+    const orderHppUpdates: { order_number: string; estimatedHpp: number }[] = []
     for (const order of orders) {
       const items = orderToProducts.get(order.order_number) ?? []
       if (items.length === 0) ordersWithoutMapping++
@@ -1201,13 +1202,21 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
           estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
         }
       }
+      orderHppUpdates.push({ order_number: order.order_number, estimatedHpp })
+    }
 
-      const { error: updateError } = await ctx.supabase
-        .from('orders')
-        .update({ estimated_hpp: estimatedHpp })
-        .eq('store_id', storeId)
-        .eq('order_number', order.order_number)
-      void updateError
+    // Jalankan UPDATE per-batch paralel (bukan satu-satu seri) supaya cepat.
+    const HPP_UPDATE_CONCURRENCY = 25
+    for (let i = 0; i < orderHppUpdates.length; i += HPP_UPDATE_CONCURRENCY) {
+      await Promise.all(
+        orderHppUpdates.slice(i, i + HPP_UPDATE_CONCURRENCY).map((u) =>
+          ctx.supabase
+            .from('orders')
+            .update({ estimated_hpp: u.estimatedHpp })
+            .eq('store_id', storeId)
+            .eq('order_number', u.order_number)
+        )
+      )
     }
 
     if (ordersWithoutMapping > 0) {
@@ -1229,6 +1238,7 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
 
     if (oaRows.length > 0) {
       type ProdJson = { marketplace_product_id: string | null; product_name?: string | null; quantity: number }
+      const oaHppUpdates: { id: string; estimatedHpp: number }[] = []
       for (const row of oaRows) {
         const prods = (row.products_json ?? []) as ProdJson[]
         let estimatedHpp = 0
@@ -1241,11 +1251,18 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
             estimatedHpp += (master.hpp + master.packaging_cost) * prod.quantity
           }
         }
+        oaHppUpdates.push({ id: row.id, estimatedHpp })
+      }
 
-        await ctx.supabase
-          .from('orders_all')
-          .update({ estimated_hpp: estimatedHpp })
-          .eq('id', row.id)
+      for (let i = 0; i < oaHppUpdates.length; i += HPP_UPDATE_CONCURRENCY) {
+        await Promise.all(
+          oaHppUpdates.slice(i, i + HPP_UPDATE_CONCURRENCY).map((u) =>
+            ctx.supabase
+              .from('orders_all')
+              .update({ estimated_hpp: u.estimatedHpp })
+              .eq('id', u.id)
+          )
+        )
       }
     }
   } catch (hppError) {
@@ -1517,25 +1534,27 @@ export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promi
     }
 
     let backfilledCount = 0
-    const UPDATE_CHUNK = 100
+    const UPDATE_CHUNK = 25
     for (let i = 0; i < incomeOrderNums.length; i += UPDATE_CHUNK) {
       const chunk = incomeOrderNums.slice(i, i + UPDATE_CHUNK)
-      for (const orderNum of chunk) {
-        const items = orderToProducts.get(orderNum) ?? []
-        let estimatedHpp = 0
-        for (const item of items) {
-          const master = resolver.resolve({ anyId: item.id, productName: item.name })
-          if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
-            estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
+      const results = await Promise.all(
+        chunk.map((orderNum) => {
+          const items = orderToProducts.get(orderNum) ?? []
+          let estimatedHpp = 0
+          for (const item of items) {
+            const master = resolver.resolve({ anyId: item.id, productName: item.name })
+            if (master && (master.hpp > 0 || master.packaging_cost > 0)) {
+              estimatedHpp += (master.hpp + master.packaging_cost) * item.qty
+            }
           }
-        }
-        const { error: updateError } = await ctx.supabase
-          .from('orders')
-          .update({ estimated_hpp: estimatedHpp })
-          .eq('store_id', storeId)
-          .eq('order_number', orderNum)
-        if (!updateError) backfilledCount++
-      }
+          return ctx.supabase
+            .from('orders')
+            .update({ estimated_hpp: estimatedHpp })
+            .eq('store_id', storeId)
+            .eq('order_number', orderNum)
+        })
+      )
+      backfilledCount += results.filter((r) => !r.error).length
     }
     console.log(`Backfilled estimated_hpp for ${backfilledCount} income orders`)
   } catch (backfillError) {
