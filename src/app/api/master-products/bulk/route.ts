@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/server'
 import { normalizeMarketplaceFilter } from '@/lib/dashboard-filters'
 import { recalculateEstimatedHppForStore } from '@/lib/recalculate-estimated-hpp'
+import { listAccessibleStores } from '@/lib/store-access'
 
 /** Buang "Rp", spasi, dan titik ribuan; koma → titik desimal. */
 function parseMoney(value: unknown): number | null {
@@ -92,6 +93,8 @@ export async function POST(request: NextRequest) {
     const idCol = findCol(header, 'id produk', 'id')
     const hppCol = findCol(header, 'hpp')
     const packCol = findCol(header, 'packaging', 'packing', 'kemasan')
+    const nameCol = findCol(header, 'nama')
+    const skuCol = findCol(header, 'sku')
 
     if (idCol === -1 || hppCol === -1) {
       return NextResponse.json(
@@ -100,8 +103,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Kumpulkan baris valid: butuh ID, dan minimal salah satu HPP/Packaging terisi.
-    type Parsed = { id: string; hpp: number | null; packaging: number | null }
+    // Kumpulkan baris: butuh ID. Catat apakah HPP/Packaging diisi (untuk update),
+    // serta nama & SKU (untuk produk baru).
+    type Parsed = {
+      id: string
+      name: string
+      sku: string
+      hpp: number | null
+      packaging: number | null
+      hppProvided: boolean
+      packProvided: boolean
+    }
     const parsed: Parsed[] = []
     let invalidRows = 0
 
@@ -110,28 +122,27 @@ export async function POST(request: NextRequest) {
       const id = String(row[idCol] ?? '').trim()
       if (!id) continue
 
+      const name = nameCol !== -1 ? String(row[nameCol] ?? '').trim() : ''
+      const sku = skuCol !== -1 ? String(row[skuCol] ?? '').trim() : ''
       const hppRaw = row[hppCol]
       const packRaw = packCol !== -1 ? row[packCol] : undefined
-      const hppEmpty = hppRaw === null || hppRaw === undefined || String(hppRaw).trim() === ''
-      const packEmpty = packRaw === null || packRaw === undefined || String(packRaw).trim() === ''
+      const hppProvided = !(hppRaw === null || hppRaw === undefined || String(hppRaw).trim() === '')
+      const packProvided = !(packRaw === null || packRaw === undefined || String(packRaw).trim() === '')
 
-      // Tidak ada angka yang diisi → lewati baris ini (tidak diubah).
-      if (hppEmpty && packEmpty) continue
+      const hpp = hppProvided ? parseMoney(hppRaw) : null
+      const packaging = packProvided ? parseMoney(packRaw) : null
 
-      const hpp = hppEmpty ? null : parseMoney(hppRaw)
-      const packaging = packEmpty ? null : parseMoney(packRaw)
-
-      if ((!hppEmpty && hpp === null) || (!packEmpty && packaging === null)) {
+      if ((hppProvided && hpp === null) || (packProvided && packaging === null)) {
         invalidRows++
         continue
       }
 
-      parsed.push({ id, hpp, packaging })
+      parsed.push({ id, name, sku, hpp, packaging, hppProvided, packProvided })
     }
 
     if (parsed.length === 0) {
       return NextResponse.json(
-        { error: 'Tidak ada baris dengan HPP/Packaging yang valid untuk diproses.', invalidRows },
+        { error: 'Tidak ada baris data yang bisa diproses.', invalidRows },
         { status: 400 }
       )
     }
@@ -158,23 +169,72 @@ export async function POST(request: NextRequest) {
       if (p.seller_sku) byId.set(p.seller_sku.toLowerCase(), p)
     }
 
-    // De-dupe per produk (baris terakhir menang), lalu siapkan update.
+    // Pisahkan: baris yang cocok → update; baris tak cocok → kandidat produk baru.
     const updateByProductId = new Map<string, { hpp: number; packaging_cost: number }>()
-    const notFound: string[] = []
     const affectedStores = new Set<string | null>()
+    type NewProduct = { id: string; name: string; sku: string; hpp: number; packaging: number }
+    const toCreate: NewProduct[] = []
+    const createDedupe = new Set<string>()
+    const skippedNoName: string[] = []
+    let unchanged = 0
 
     for (const row of parsed) {
-      const prod = byId.get(row.id.toLowerCase())
-      if (!prod) {
-        if (!notFound.includes(row.id)) notFound.push(row.id)
-        continue
+      const prod =
+        byId.get(row.id.toLowerCase()) ??
+        (row.sku ? byId.get(row.sku.toLowerCase()) : undefined)
+
+      if (prod) {
+        // Produk sudah ada → update. Field yang kosong tidak menimpa nilai lama.
+        if (!row.hppProvided && !row.packProvided) {
+          unchanged++
+          continue
+        }
+        const current = updateByProductId.get(prod.id)
+        updateByProductId.set(prod.id, {
+          hpp: row.hppProvided ? (row.hpp as number) : current?.hpp ?? Number(prod.hpp ?? 0),
+          packaging_cost: row.packProvided ? (row.packaging as number) : current?.packaging_cost ?? Number(prod.packaging_cost ?? 0),
+        })
+        affectedStores.add(prod.store_id)
+      } else {
+        // Produk baru → wajib ada nama. Tanpa nama tidak bisa dibuat.
+        if (!row.name) {
+          if (!skippedNoName.includes(row.id)) skippedNoName.push(row.id)
+          continue
+        }
+        const key = row.id.toLowerCase()
+        if (createDedupe.has(key)) continue
+        createDedupe.add(key)
+        toCreate.push({ id: row.id, name: row.name, sku: row.sku, hpp: row.hpp ?? 0, packaging: row.packaging ?? 0 })
       }
-      const current = updateByProductId.get(prod.id)
-      updateByProductId.set(prod.id, {
-        hpp: row.hpp ?? current?.hpp ?? Number(prod.hpp ?? 0),
-        packaging_cost: row.packaging ?? current?.packaging_cost ?? Number(prod.packaging_cost ?? 0),
-      })
-      affectedStores.add(prod.store_id)
+    }
+
+    // --- Resolusi toko tujuan untuk produk baru ------------------------------
+    let targetStoreId: string | null = null
+    let targetMarketplace: string = marketplace ?? 'shopee'
+    let createBlocked: string | null = null
+
+    if (toCreate.length > 0) {
+      if (storeId) {
+        const { data: store } = await supabase
+          .from('stores')
+          .select('id, marketplace')
+          .eq('id', storeId)
+          .maybeSingle()
+        if (store) {
+          targetStoreId = store.id as string
+          targetMarketplace = (store.marketplace as string) ?? targetMarketplace
+        }
+      } else {
+        const stores = await listAccessibleStores(supabase, user.id)
+        const candidates = marketplace ? stores.filter((s) => s.marketplace === marketplace) : stores
+        if (candidates.length === 1) {
+          targetStoreId = candidates[0].id
+          targetMarketplace = candidates[0].marketplace ?? targetMarketplace
+        } else if (candidates.length > 1) {
+          createBlocked = 'Kamu punya beberapa toko. Pilih satu toko di filter atas dulu supaya produk baru masuk ke toko yang benar.'
+        }
+        // 0 toko → biarkan store_id null, marketplace dari filter/default.
+      }
     }
 
     // --- Terapkan update -----------------------------------------------------
@@ -190,6 +250,35 @@ export async function POST(request: NextRequest) {
       updated++
     }
 
+    // --- Buat produk baru ----------------------------------------------------
+    let created = 0
+    const createFailed: string[] = []
+    if (toCreate.length > 0 && !createBlocked) {
+      for (const np of toCreate) {
+        const numericId = /^\d+$/.test(np.id) ? np.id : null
+        const { error: insErr } = await supabase
+          .from('master_products')
+          .insert({
+            user_id: user.id,
+            store_id: targetStoreId,
+            marketplace_product_id: np.id,
+            seller_sku: np.sku || null,
+            numeric_id: numericId,
+            product_name: np.name,
+            source_tags: [],
+            marketplace: targetMarketplace,
+            hpp: np.hpp,
+            packaging_cost: np.packaging,
+          })
+        if (insErr) {
+          if (!createFailed.includes(np.id)) createFailed.push(np.id)
+          continue
+        }
+        created++
+        affectedStores.add(targetStoreId)
+      }
+    }
+
     // --- Recalc estimated HPP per store yang terdampak -----------------------
     const warnings = new Set<string>()
     const scopes = affectedStores.has(null) ? [null] : Array.from(affectedStores)
@@ -201,8 +290,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       updated,
-      notFoundCount: notFound.length,
-      notFound: notFound.slice(0, 20),
+      created,
+      unchanged,
+      createBlockedCount: createBlocked ? toCreate.length : 0,
+      createBlocked,
+      createFailedCount: createFailed.length,
+      createFailed: createFailed.slice(0, 20),
+      skippedNoNameCount: skippedNoName.length,
       invalidRows,
       warnings: Array.from(warnings),
     })

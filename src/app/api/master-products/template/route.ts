@@ -83,18 +83,24 @@ export async function GET(request: NextRequest) {
 
   // --- Sheet 2: Petunjuk ------------------------------------------------------
   const guide = XLSX.utils.aoa_to_sheet([
-    ['Cara pakai template bulk HPP & Packaging'],
+    ['Cara pakai template Master Produk (update + tambah produk baru)'],
     [''],
+    ['== MENGUBAH PRODUK YANG SUDAH ADA =='],
     ['1. Isi/edit kolom "HPP (Rp)" dan "Packaging (Rp)" di sheet "Master Produk".'],
     ['2. Gunakan angka saja (tanpa "Rp" atau titik ribuan). Contoh: 22000'],
     ['3. JANGAN mengubah kolom "ID Produk" — itu kunci pencocokan saat upload.'],
     ['4. Baris yang HPP & Packaging-nya kosong akan dilewati (tidak diubah).'],
-    ['5. Simpan file sebagai .xlsx, lalu upload lewat tombol "Upload Excel" di halaman Master Produk.'],
     [''],
-    ['Catatan: upload ini hanya MEMPERBARUI produk yang sudah ada (dicocokkan via ID Produk).'],
-    ['Produk baru tetap muncul otomatis setelah kamu upload data penghasilan/iklan.'],
+    ['== MENAMBAH PRODUK BARU =='],
+    ['1. Tambahkan baris baru di bawah daftar yang ada.'],
+    ['2. Isi "ID Produk" (kode unik produk, mis. Product ID Shopee atau kode SKU) dan "Nama Produk". Keduanya WAJIB.'],
+    ['3. Isi "SKU Seller" bila ada (opsional) supaya gampang dicocokkan dengan data penjualan nanti.'],
+    ['4. Isi "HPP (Rp)" & "Packaging (Rp)" bila sudah tahu (boleh dikosongkan, default 0).'],
+    ['5. Produk baru akan masuk ke toko yang sedang dipilih di filter atas. Kalau punya banyak toko, pilih satu toko dulu sebelum upload.'],
+    [''],
+    ['Terakhir: simpan sebagai .xlsx, lalu upload lewat tombol "Upload Excel" di halaman Master Produk.'],
   ])
-  guide['!cols'] = [{ wch: 90 }]
+  guide['!cols'] = [{ wch: 100 }]
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Master Produk')

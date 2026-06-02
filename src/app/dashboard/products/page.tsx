@@ -467,7 +467,11 @@ export default function ProductsPage() {
       const response = await fetch(url, { method: 'POST', body: formData })
       const json = await response.json().catch(() => null) as {
         updated?: number
-        notFoundCount?: number
+        created?: number
+        createBlocked?: string | null
+        createBlockedCount?: number
+        createFailedCount?: number
+        skippedNoNameCount?: number
         invalidRows?: number
         error?: string
       } | null
@@ -477,10 +481,18 @@ export default function ProductsPage() {
         return
       }
 
-      const parts: string[] = [`${json?.updated ?? 0} produk diperbarui dari Excel`]
-      if (json?.notFoundCount) parts.push(`${json.notFoundCount} ID tidak cocok (dilewati)`)
+      const parts: string[] = []
+      parts.push(`${json?.updated ?? 0} produk diperbarui`)
+      if (json?.created) parts.push(`${json.created} produk baru ditambahkan`)
+      if (json?.createFailedCount) parts.push(`${json.createFailedCount} produk baru gagal dibuat`)
+      if (json?.skippedNoNameCount) parts.push(`${json.skippedNoNameCount} baris dilewati (tanpa nama)`)
       if (json?.invalidRows) parts.push(`${json.invalidRows} baris angka tidak valid`)
       setSuccessMessage(parts.join(' · '))
+
+      // Kalau pembuatan produk baru diblokir (banyak toko), tampilkan sebagai peringatan.
+      if (json?.createBlocked) {
+        setError(`${json.createBlockedCount ?? ''} produk baru belum dibuat: ${json.createBlocked}`.trim())
+      }
 
       await loadProducts()
       router.refresh()
