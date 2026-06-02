@@ -719,7 +719,25 @@ export default function ProfitDashboard({
 
   // Ringkasan cakupan data: berapa order biayanya AKTUAL (sudah dilepas / ada di
   // Income) vs ESTIMASI (belum dilepas). Ini dasar badge confidence di dashboard.
+  // Selalu ditampilkan selama ada Income data — kalau Order All tidak ada /
+  // semua sudah dilepas, tampilkan 100% aktual dengan estimasi = 0.
   const pendingSummary = useMemo(() => {
+    // Tidak ada Order All untuk periode ini → semua order yang ada di Income
+    // dianggap 100% sudah dilepas (tidak ada estimasi yang perlu ditampilkan).
+    if (filteredOrdersAll.length === 0) {
+      const n = filteredOrders.length
+      return {
+        hasData: n > 0,
+        countNonBatal: n,
+        countBatal: 0,
+        countReleased: n,
+        countUnreleased: 0,
+        coveragePct: n > 0 ? 100 : 0,
+        totalUnreleasedGmv: 0,
+        byStatus: [] as { status: string; count: number; total: number }[],
+      }
+    }
+
     const nonBatal   = filteredOrdersAll.filter((o) => o.status_pesanan !== 'Batal')
     const batal      = filteredOrdersAll.filter((o) => o.status_pesanan === 'Batal')
     const released   = nonBatal.filter((o) => incomeOrderNumbers.has(o.order_number))
@@ -741,10 +759,10 @@ export default function ProfitDashboard({
     const totalNonBatal = nonBatal.length
     const coveragePct = totalNonBatal > 0
       ? Math.round((released.length / totalNonBatal) * 100)
-      : 0
+      : 100  // Semua order di Order All ter-match ke Income → 100%
 
     return {
-      hasData: filteredOrdersAll.length > 0,
+      hasData: true,
       countNonBatal: totalNonBatal,
       countBatal: batal.length,
       countReleased: released.length,
@@ -753,7 +771,7 @@ export default function ProfitDashboard({
       totalUnreleasedGmv: unreleased.reduce((s, o) => s + o.total_pembayaran, 0),
       byStatus,
     }
-  }, [filteredOrdersAll, incomeOrderNumbers])
+  }, [filteredOrdersAll, filteredOrders, incomeOrderNumbers])
 
   // Insight margin & efisiensi iklan (gabungan confirmed + estimasi).
   const marginInsight = useMemo(() => {
@@ -1149,7 +1167,9 @@ export default function ProfitDashboard({
                 <div>
                   <CardTitle className="text-base">Cakupan Data & Estimasi</CardTitle>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Real Profit di atas = biaya aktual (order yang dananya sudah dilepas) + estimasi (order belum dilepas)
+                    {pendingSummary.countUnreleased === 0
+                      ? 'Semua order di periode ini sudah dilepas — biaya 100% aktual, tidak ada estimasi.'
+                      : 'Real Profit di atas = biaya aktual (order yang dananya sudah dilepas) + estimasi (order belum dilepas)'}
                   </p>
                 </div>
               </div>
