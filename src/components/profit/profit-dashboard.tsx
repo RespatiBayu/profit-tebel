@@ -76,7 +76,6 @@ import {
   calculateDailyDetail,
 } from '@/lib/calculations/dashboard-analytics'
 import {
-  ScaleRecommendationsSection,
   BusyDaysSection,
   TopProductsSection,
   TopBuyersSection,
@@ -1767,15 +1766,6 @@ export default function ProfitDashboard({
 
       {/* === SECTION: Daily Detail Table === */}
       <DailyDetailSection rows={dailyDetail} />
-
-      {(filteredAdsData.length > 0 || masterProducts.length > 0) && (
-        <SectionDivider icon={Zap} title="Iklan" />
-      )}
-
-      {/* === SECTION: Scale Recommendations (iklan yang bisa di-scale) === */}
-      {filteredAdsData.length > 0 && (
-        <ScaleRecommendationsSection scalable={scalable} allRecs={scaleRecs} />
-      )}
 
       <SectionDivider icon={Receipt} title="Biaya & Pembayaran" />
 
