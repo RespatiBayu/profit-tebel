@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-
-const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY ?? ''
-const IS_PRODUCTION = process.env.MIDTRANS_IS_PRODUCTION === 'true'
-const SNAP_URL = IS_PRODUCTION
-  ? 'https://app.midtrans.com/snap/v1/transactions'
-  : 'https://app.sandbox.midtrans.com/snap/v1/transactions'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createTripayTransaction, isTripayConfigured } from '@/lib/tripay'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+const PRICE = 49000
 
 export async function POST() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  if (!isTripayConfigured()) {
+    return NextResponse.json({ error: 'Pembayaran belum dikonfigurasi.' }, { status: 503 })
+  }
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -34,53 +34,39 @@ export async function POST() {
     return NextResponse.json({ isLifetime: true })
   }
 
-  // Order ID: PTS = Profit Tebel Subscribe, beda dari PT = one-time purchase
-  const orderId = `PTS-${user.id.slice(0, 8)}-${Date.now()}`
+  // merchant_ref: PTS = Profit Tebel Subscribe (beda dari PT = one-time)
+  const merchantRef = `PTS-${user.id.slice(0, 8)}-${Date.now()}`
 
-  const body = {
-    transaction_details: {
-      order_id: orderId,
-      gross_amount: 49000,
-    },
-    customer_details: {
-      email: user.email,
-    },
-    item_details: [
-      {
-        id: 'profit-tebel-monthly',
-        price: 49000,
-        quantity: 1,
-        name: 'Profit Tebel Pro — Langganan Bulanan (30 hari)',
-      },
-    ],
-    callbacks: {
-      finish: `${APP_URL}/dashboard?subscribe=success`,
-      error: `${APP_URL}/dashboard/inventory?subscribe=error`,
-      pending: `${APP_URL}/dashboard/inventory?subscribe=pending`,
-    },
-    // Simpan user id di custom_field agar webhook bisa resolve tanpa ambiguity
-    custom_field1: user.id,
-    custom_field2: 'monthly_subscription',
-  }
-
-  const authHeader = `Basic ${Buffer.from(`${MIDTRANS_SERVER_KEY}:`).toString('base64')}`
-
-  const res = await fetch(SNAP_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: authHeader,
-    },
-    body: JSON.stringify(body),
+  const result = await createTripayTransaction({
+    merchantRef,
+    amount: PRICE,
+    customerName: user.email?.split('@')[0] ?? 'Pelanggan',
+    customerEmail: user.email ?? 'noreply@profittebel.com',
+    itemSku: 'profit-tebel-monthly',
+    itemName: 'Profit Tebel Pro — Langganan Bulanan (30 hari)',
+    returnUrl: `${APP_URL}/dashboard?subscribe=success`,
   })
 
-  if (!res.ok) {
-    const err = await res.text()
-    console.error('Midtrans Snap subscribe error:', err)
-    return NextResponse.json({ error: 'Gagal membuat transaksi. Coba lagi.' }, { status: 502 })
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: 502 })
   }
 
-  const data = await res.json() as { token: string; redirect_url: string }
-  return NextResponse.json({ redirectUrl: data.redirect_url, orderId })
+  // Simpan mapping merchant_ref -> user agar webhook bisa resolve (service role bypass RLS)
+  const service = await createServiceClient()
+  const { error: insErr } = await service.from('payment_transactions').insert({
+    merchant_ref: merchantRef,
+    user_id: user.id,
+    type: 'monthly',
+    amount: PRICE,
+    provider: 'tripay',
+    provider_ref: result.reference,
+    checkout_url: result.checkoutUrl,
+    status: 'pending',
+  })
+  if (insErr) {
+    console.error('payment_transactions insert error (monthly):', insErr)
+    return NextResponse.json({ error: 'Gagal mencatat transaksi. Coba lagi.' }, { status: 500 })
+  }
+
+  return NextResponse.json({ redirectUrl: result.checkoutUrl, orderId: merchantRef })
 }

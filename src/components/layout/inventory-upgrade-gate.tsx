@@ -106,7 +106,7 @@ export function InventoryUpgradeGate() {
           <p className="text-xs text-muted-foreground">Aktif 30 hari · Bisa diperpanjang kapan saja</p>
           <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Batalkan kapan saja</span>
-            <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Pembayaran via Midtrans</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> QRIS, VA & e-wallet via Tripay</span>
             <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Akses langsung setelah bayar</span>
           </div>
           <Button

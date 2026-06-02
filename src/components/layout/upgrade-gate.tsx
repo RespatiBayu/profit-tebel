@@ -41,7 +41,7 @@ export default function UpgradeGate() {
         return
       }
       if (data.redirectUrl) {
-        trackEvent('checkout_redirected', { provider: 'midtrans' })
+        trackEvent('checkout_redirected', { provider: 'tripay' })
         window.location.href = data.redirectUrl
         return
       }
