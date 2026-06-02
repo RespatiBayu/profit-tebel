@@ -1148,12 +1148,12 @@ export default function ProfitDashboard({
         </Card>
       )}
 
-      {/* === SECTION: Stok Kritis (inventory low-stock) === */}
-      <StockCriticalCard />
-
       {(kpis.totalOmzet > 0 || pendingSummary.hasData || marginInsight.hasHpp || roiModal.hasData || repeatBuyer.hasData) && (
         <SectionDivider icon={Banknote} title="Kesehatan Profit" />
       )}
+
+      {/* === SECTION: Stok Kritis (inventory low-stock) === */}
+      <StockCriticalCard />
 
       {/* Cakupan Data & Estimasi */}
       {pendingSummary.hasData && (
