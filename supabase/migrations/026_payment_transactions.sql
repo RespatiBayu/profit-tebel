@@ -1,8 +1,8 @@
--- Migration 026: Payment Transactions (Tripay)
--- Tripay tidak punya custom_field seperti Midtrans, jadi kita simpan mapping
--- merchant_ref -> user_id + type di tabel ini. Webhook callback resolve user
--- via tabel ini (reliable, bukan nebak prefix UUID). Sekaligus jadi riwayat
--- pembayaran.
+-- Migration 026: Payment Transactions (iPaymu)
+-- iPaymu tidak punya custom_field seperti Midtrans, jadi kita simpan mapping
+-- merchant_ref (referenceId) -> user_id + type di tabel ini. Webhook/notifikasi
+-- resolve user via tabel ini (reliable, bukan nebak prefix UUID). Sekaligus jadi
+-- riwayat pembayaran.
 
 CREATE TABLE IF NOT EXISTS payment_transactions (
   merchant_ref   text PRIMARY KEY,                 -- PT-xxxx / PTS-xxxx (kunci dari kita)
@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
   amount         integer NOT NULL,
   status         text NOT NULL DEFAULT 'pending'
                    CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'refund')),
-  provider       text NOT NULL DEFAULT 'tripay',
-  provider_ref   text,                             -- reference dari Tripay
+  provider       text NOT NULL DEFAULT 'ipaymu',
+  provider_ref   text,                             -- SessionID / trx_id dari iPaymu
   checkout_url   text,
   created_at     timestamptz NOT NULL DEFAULT now(),
   paid_at        timestamptz

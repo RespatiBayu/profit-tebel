@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { createTripayTransaction, isTripayConfigured } from '@/lib/tripay'
+import { createIpaymuPayment, isIpaymuConfigured } from '@/lib/ipaymu'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 const PRICE = 99000
@@ -13,7 +13,7 @@ export async function POST() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  if (!isTripayConfigured()) {
+  if (!isIpaymuConfigured()) {
     return NextResponse.json({ error: 'Pembayaran belum dikonfigurasi.' }, { status: 503 })
   }
 
@@ -31,14 +31,15 @@ export async function POST() {
   // merchant_ref unik: PT- = one-time lifetime purchase
   const merchantRef = `PT-${user.id.slice(0, 8)}-${Date.now()}`
 
-  const result = await createTripayTransaction({
+  const result = await createIpaymuPayment({
     merchantRef,
     amount: PRICE,
     customerName: user.email?.split('@')[0] ?? 'Pelanggan',
     customerEmail: user.email ?? 'noreply@profittebel.com',
-    itemSku: 'profit-tebel-lifetime',
     itemName: 'Profit Tebel — Lifetime Access',
     returnUrl: `${APP_URL}/dashboard`,
+    cancelUrl: `${APP_URL}/dashboard?payment=cancel`,
+    notifyUrl: `${APP_URL}/api/webhooks/ipaymu`,
   })
 
   if (!result.ok) {
@@ -52,9 +53,9 @@ export async function POST() {
     user_id: user.id,
     type: 'lifetime',
     amount: PRICE,
-    provider: 'tripay',
-    provider_ref: result.reference,
-    checkout_url: result.checkoutUrl,
+    provider: 'ipaymu',
+    provider_ref: result.sessionId,
+    checkout_url: result.url,
     status: 'pending',
   })
   if (insErr) {
@@ -62,5 +63,5 @@ export async function POST() {
     return NextResponse.json({ error: 'Gagal mencatat transaksi. Coba lagi.' }, { status: 500 })
   }
 
-  return NextResponse.json({ redirectUrl: result.checkoutUrl })
+  return NextResponse.json({ redirectUrl: result.url })
 }

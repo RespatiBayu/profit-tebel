@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { createTripayTransaction, isTripayConfigured } from '@/lib/tripay'
+import { createIpaymuPayment, isIpaymuConfigured } from '@/lib/ipaymu'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 const PRICE = 49000
@@ -10,7 +10,7 @@ export async function POST() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  if (!isTripayConfigured()) {
+  if (!isIpaymuConfigured()) {
     return NextResponse.json({ error: 'Pembayaran belum dikonfigurasi.' }, { status: 503 })
   }
 
@@ -37,14 +37,15 @@ export async function POST() {
   // merchant_ref: PTS = Profit Tebel Subscribe (beda dari PT = one-time)
   const merchantRef = `PTS-${user.id.slice(0, 8)}-${Date.now()}`
 
-  const result = await createTripayTransaction({
+  const result = await createIpaymuPayment({
     merchantRef,
     amount: PRICE,
     customerName: user.email?.split('@')[0] ?? 'Pelanggan',
     customerEmail: user.email ?? 'noreply@profittebel.com',
-    itemSku: 'profit-tebel-monthly',
     itemName: 'Profit Tebel Pro — Langganan Bulanan (30 hari)',
     returnUrl: `${APP_URL}/dashboard?subscribe=success`,
+    cancelUrl: `${APP_URL}/dashboard?subscribe=cancel`,
+    notifyUrl: `${APP_URL}/api/webhooks/ipaymu`,
   })
 
   if (!result.ok) {
@@ -58,9 +59,9 @@ export async function POST() {
     user_id: user.id,
     type: 'monthly',
     amount: PRICE,
-    provider: 'tripay',
-    provider_ref: result.reference,
-    checkout_url: result.checkoutUrl,
+    provider: 'ipaymu',
+    provider_ref: result.sessionId,
+    checkout_url: result.url,
     status: 'pending',
   })
   if (insErr) {
@@ -68,5 +69,5 @@ export async function POST() {
     return NextResponse.json({ error: 'Gagal mencatat transaksi. Coba lagi.' }, { status: 500 })
   }
 
-  return NextResponse.json({ redirectUrl: result.checkoutUrl, orderId: merchantRef })
+  return NextResponse.json({ redirectUrl: result.url, orderId: merchantRef })
 }

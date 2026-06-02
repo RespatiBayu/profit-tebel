@@ -6,7 +6,7 @@ import { getCurrentUserAccess } from '@/lib/roles'
  * POST /api/admin/activate
  *
  * Safety net aktivasi manual (superadmin only). Untuk kasus early buyer atau
- * pembayaran Tripay yang nyangkut (webhook gagal) — superadmin bisa langsung
+ * pembayaran iPaymu yang nyangkut (webhook gagal) — superadmin bisa langsung
  * menandai user sebagai lifetime / monthly / cabut, dicari via EMAIL.
  *
  * Beda dari tombol "Grant Pro" per-user: endpoint ini cari user by email
