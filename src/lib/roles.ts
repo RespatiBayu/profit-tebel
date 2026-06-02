@@ -102,7 +102,9 @@ export function getManagedRole(role: AppUserRole): AppUserRole | null {
 }
 
 export function canCreateStore(role: AppUserRole) {
-  return role === 'superadmin'
+  // Member boleh membuat toko sendiri (jadi pemilik/owner toko itu).
+  // Superadmin juga bisa. Store di-scope per user_id lewat RLS.
+  return role === 'superadmin' || role === 'member'
 }
 
 export async function getCurrentUserAccess(
