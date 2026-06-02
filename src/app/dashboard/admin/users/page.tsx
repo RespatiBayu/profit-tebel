@@ -16,9 +16,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Loader2, ShieldCheck, UserPlus, Users,
   AlertCircle, Pencil, Trash2, Upload, FileSpreadsheet,
-  CheckCircle2, XCircle, Download, Crown, Sparkles,
+  CheckCircle2, XCircle, Download, Crown, Sparkles, Zap,
 } from 'lucide-react'
 
 type UserRole = 'superadmin' | 'member'
@@ -80,6 +87,14 @@ export default function AdminUsersPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Manual activation (safety net) state — superadmin only
+  const [actEmail, setActEmail] = useState('')
+  const [actPlan, setActPlan] = useState<'lifetime' | 'monthly' | 'free'>('lifetime')
+  const [actMonths, setActMonths] = useState(1)
+  const [activating, setActivating] = useState(false)
+  const [actError, setActError] = useState<string | null>(null)
+  const [actResult, setActResult] = useState<{ email: string | null; plan: string | null; expiresAt: string | null } | null>(null)
 
   // Bulk import state
   const fileRef = useRef<HTMLInputElement>(null)
@@ -157,6 +172,38 @@ export default function AdminUsersPage() {
     const data = await res.json()
     if (!res.ok) { setError(data.error ?? 'Gagal update subscription'); setTogglingId(null); return }
     setTogglingId(null); await loadData()
+  }
+
+  // ── Manual activation ─────────────────────────────────────────────────────────
+
+  async function handleActivate(e: React.FormEvent) {
+    e.preventDefault()
+    if (!actEmail.trim()) { setActError('Email wajib diisi'); return }
+    setActivating(true); setActError(null); setActResult(null)
+    try {
+      const res = await fetch('/api/admin/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: actEmail.trim(),
+          plan: actPlan,
+          months: actMonths,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setActError(data.error ?? 'Gagal aktivasi'); return }
+      setActResult({
+        email: data.user?.email ?? actEmail.trim(),
+        plan: data.user?.subscription_plan ?? actPlan,
+        expiresAt: data.user?.subscription_expires_at ?? null,
+      })
+      setActEmail('')
+      await loadData()
+    } catch {
+      setActError('Gagal terhubung ke server.')
+    } finally {
+      setActivating(false)
+    }
   }
 
   // ── Bulk import ─────────────────────────────────────────────────────────────
@@ -243,6 +290,86 @@ export default function AdminUsersPage() {
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      )}
+
+      {/* Aktivasi Manual (safety net) — superadmin only */}
+      {actorRole === 'superadmin' && (
+        <Card className="border-amber-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Zap className="h-4 w-4 text-amber-500" />
+              Aktivasi Manual
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Tandai akses Pro/Lifetime untuk user mana pun via email — berguna untuk early buyer
+              atau pembayaran yang nyangkut (webhook gagal). Cari berdasarkan email user.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleActivate} className="flex flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap">
+              <div className="flex-1 min-w-[220px]">
+                <Label htmlFor="actEmail">Email user</Label>
+                <Input
+                  id="actEmail"
+                  type="email"
+                  value={actEmail}
+                  onChange={(e) => setActEmail(e.target.value)}
+                  placeholder="user@domain.com"
+                  className="mt-1"
+                />
+              </div>
+              <div className="w-full sm:w-44">
+                <Label>Paket</Label>
+                <Select value={actPlan} onValueChange={(v) => v && setActPlan(v as 'lifetime' | 'monthly' | 'free')}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="lifetime">Lifetime (selamanya)</SelectItem>
+                    <SelectItem value="monthly">Monthly (30 hari)</SelectItem>
+                    <SelectItem value="free">Cabut akses Pro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {actPlan === 'monthly' && (
+                <div className="w-full sm:w-28">
+                  <Label htmlFor="actMonths">Jumlah bulan</Label>
+                  <Input
+                    id="actMonths"
+                    type="number"
+                    min={1}
+                    max={36}
+                    value={actMonths}
+                    onChange={(e) => setActMonths(Math.max(1, Math.min(36, Number(e.target.value) || 1)))}
+                    className="mt-1"
+                  />
+                </div>
+              )}
+              <Button type="submit" disabled={activating} className="gap-2">
+                {activating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                Aktifkan
+              </Button>
+            </form>
+
+            {actError && (
+              <Alert variant="destructive" className="mt-3">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{actError}</AlertDescription>
+              </Alert>
+            )}
+            {actResult && (
+              <Alert className="mt-3 border-green-300 bg-green-50">
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                <AlertDescription className="text-green-800">
+                  <strong>{actResult.email}</strong> sekarang paket{' '}
+                  <strong className="capitalize">{actResult.plan}</strong>
+                  {actResult.plan === 'monthly' && actResult.expiresAt && (
+                    <> — aktif s/d {new Date(actResult.expiresAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</>
+                  )}
+                  {actResult.plan === 'free' && <> — akses Pro dicabut.</>}
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Stats */}
