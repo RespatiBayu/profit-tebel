@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { LocalSupabaseClient } from '@/lib/postgres/local-client'
 import type { Store, StoreAccessRole } from '@/types'
 
 type MembershipRow = {
@@ -7,7 +7,7 @@ type MembershipRow = {
 }
 
 export async function userHasStoreAccess(
-  supabase: SupabaseClient,
+  supabase: LocalSupabaseClient,
   userId: string,
   storeId: string
 ) {
@@ -26,7 +26,7 @@ export async function userHasStoreAccess(
 }
 
 export async function listAccessibleStores(
-  supabase: SupabaseClient,
+  supabase: LocalSupabaseClient,
   userId: string
 ): Promise<Store[]> {
   const { data: memberships, error: membershipError } = await supabase

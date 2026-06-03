@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { LocalSupabaseClient } from '@/lib/postgres/local-client'
 
 /**
  * Hapus master_products yang "orphan": tidak direferensikan oleh order_products
@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  * mungkin mereka baru mau upload data periode berikutnya.
  */
 export async function cleanupOrphanMasterProducts(
-  supabase: SupabaseClient,
+  supabase: LocalSupabaseClient,
   storeId: string,
 ): Promise<number> {
   // Fetch candidate orphans (belum diisi user)

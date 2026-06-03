@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { LocalSupabaseClient } from '@/lib/postgres/local-client'
 import { MasterResolver, type MasterRow } from '@/lib/master-resolver'
 
 type OrdersAllProductRow = {
@@ -26,7 +26,7 @@ export interface RecalculateEstimatedHppResult {
 }
 
 export async function recalculateEstimatedHppForStore(
-  supabase: SupabaseClient,
+  supabase: LocalSupabaseClient,
   storeId: string | null
 ): Promise<RecalculateEstimatedHppResult> {
   const warnings: string[] = []

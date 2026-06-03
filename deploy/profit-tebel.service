@@ -9,6 +9,7 @@ Group=ubuntu
 WorkingDirectory=/var/www/profit-tebel
 Environment=NODE_ENV=production
 Environment=PORT=3000
+EnvironmentFile=/var/www/profit-tebel/.env.local
 ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=10

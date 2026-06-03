@@ -191,7 +191,7 @@ export async function PATCH(
         throw actorStoresError
       }
 
-      const actorStoreIds = (actorStores ?? []).map((store) => store.id)
+      const actorStoreIds = ((actorStores ?? []) as Array<{ id: string }>).map((store) => store.id)
 
       if (actorStoreIds.length > 0) {
         const { error: deleteMembershipError } = await service

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import type { User } from '@supabase/supabase-js'
+import type { LocalUser } from '@/lib/postgres/auth'
 import { createClient } from '@/lib/supabase/client'
 import { setAnalyticsTags, trackEvent } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
@@ -127,7 +127,7 @@ export default function DashboardShell({
   userRole,
 }: {
   children: React.ReactNode
-  user: User
+  user: LocalUser
   userRole: AppUserRole
 }) {
   const router = useRouter()

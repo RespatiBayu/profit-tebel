@@ -1,8 +1,8 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { LocalSupabaseClient } from '@/lib/postgres/local-client'
 import { userHasStoreAccess } from '@/lib/store-access'
 
 export async function ensureProfileRow(
-  supabase: SupabaseClient,
+  supabase: LocalSupabaseClient,
   userId: string,
   userEmail: string | null | undefined
 ) {
@@ -17,7 +17,7 @@ export async function ensureProfileRow(
 }
 
 export async function resolveUploadStore(
-  supabase: SupabaseClient,
+  supabase: LocalSupabaseClient,
   userId: string,
   requestedStoreId: string | null,
   marketplace: string

@@ -1,4 +1,4 @@
-import type { SupabaseClient, User } from '@supabase/supabase-js'
+import type { LocalUser } from '@/lib/postgres/auth'
 import type { AppUserRole } from '@/types'
 
 const SUPERADMIN_EMAIL = (
@@ -15,7 +15,7 @@ type ProfileRoleRow = {
 }
 
 export type CurrentUserAccess = {
-  user: User
+  user: LocalUser
   profile: ProfileRoleRow | null
   role: AppUserRole
   isPrivileged: boolean
@@ -72,7 +72,16 @@ export function canCreateStore(role: AppUserRole) {
 }
 
 export async function getCurrentUserAccess(
-  supabase: SupabaseClient
+  supabase: {
+    auth: { getUser: () => Promise<{ data: { user: LocalUser | null } }> }
+    from: (table: string) => {
+      select: (columns: string) => {
+        eq: (column: string, value: unknown) => {
+          maybeSingle: () => PromiseLike<{ data: unknown | null }>
+        }
+      }
+    }
+  }
 ): Promise<CurrentUserAccess | null> {
   const {
     data: { user },

@@ -15,9 +15,10 @@ Create `/var/www/profit-tebel/.env.local` on the server.
 
 Required variables:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
+- `SESSION_COOKIE_NAME`
+- `SESSION_TTL_DAYS`
+- `SUPERADMIN_EMAIL`
 - `NEXT_PUBLIC_APP_URL`
 - `MIDTRANS_SERVER_KEY`
 - `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY`
@@ -28,6 +29,24 @@ For a domain-based deploy, set:
 
 ```env
 NEXT_PUBLIC_APP_URL=https://profitebel.id
+DATABASE_URL=postgres://profit_tebel:strong-password@127.0.0.1:5432/profit_tebel
+```
+
+## Database
+
+This deploy uses the VPS Postgres database directly. Initialize a fresh database with:
+
+```bash
+sudo -u postgres createuser profit_tebel
+sudo -u postgres createdb profit_tebel -O profit_tebel
+sudo -u postgres psql -c "alter user profit_tebel with password 'strong-password';"
+psql "$DATABASE_URL" -f server/migrations/001_init.sql
+```
+
+Create the first superadmin account from the app/admin tooling, or run the demo script after setting `DATABASE_URL`:
+
+```bash
+npx tsx scripts/create-demo-account.ts
 ```
 
 Cloudflare DNS records:
@@ -41,7 +60,7 @@ You can keep Cloudflare proxy enabled after HTTPS is working.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg nginx
+sudo apt-get install -y ca-certificates curl gnupg nginx postgresql postgresql-contrib
 
 sudo mkdir -p /etc/apt/keyrings
 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg

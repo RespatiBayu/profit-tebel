@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { LocalSupabaseClient } from '@/lib/postgres/local-client'
 import { cleanupOrphanMasterProducts } from '@/lib/cleanup-orphan-products'
 import { MasterResolver, type MasterRow as ResolverMasterRow } from '@/lib/master-resolver'
 import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
@@ -37,7 +37,7 @@ const ORDER_COMPARE_FIELDS = [
 type ProgressReporter = (progress: number, label: string) => Promise<void> | void
 
 export interface UploadProcessorContext {
-  supabase: SupabaseClient
+  supabase: LocalSupabaseClient
   userId: string
   userEmail: string | null
   marketplace: string
@@ -73,7 +73,7 @@ function mergeSourceTags(
 }
 
 async function loadMasterRows(
-  supabase: SupabaseClient,
+  supabase: LocalSupabaseClient,
   storeId: string,
 ): Promise<MasterProductRow[]> {
   const { data } = await supabase
@@ -91,7 +91,7 @@ function replaceMasterRow(rows: MasterProductRow[], next: MasterProductRow) {
 }
 
 async function syncMasterProductsFromNumericRows(params: {
-  supabase: SupabaseClient
+  supabase: LocalSupabaseClient
   userId: string
   storeId: string
   marketplace: string
@@ -215,7 +215,7 @@ async function syncMasterProductsFromNumericRows(params: {
 }
 
 async function syncMasterProductsFromSellerSkus(params: {
-  supabase: SupabaseClient
+  supabase: LocalSupabaseClient
   userId: string
   storeId: string
   marketplace: string
