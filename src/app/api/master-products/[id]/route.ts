@@ -45,18 +45,43 @@ export async function PATCH(
     if (isLinkOnlyUpdate) {
       const { data: product, error: fetchErr } = await supabase
         .from('master_products')
-        .select('id')
+        .select('id,store_id')
         .eq('id', params.id)
         .maybeSingle()
       if (fetchErr || !product) return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 })
 
+      const linkedItemId = body?.linked_item_id ?? null
+      const updatePayload: Record<string, unknown> = { linked_item_id: linkedItemId }
+
+      // When linking to an item, pull the item's HPP into the master product so
+      // Mapping Produk can display it as read-only info (HPP is managed in Master Item).
+      if (linkedItemId) {
+        const { data: item } = await supabase
+          .from('items')
+          .select('cost_per_unit')
+          .eq('id', linkedItemId)
+          .maybeSingle()
+        if (item && typeof item.cost_per_unit === 'number') {
+          updatePayload.hpp = item.cost_per_unit
+        }
+      }
+
       const { error: updateErr } = await supabase
         .from('master_products')
-        .update({ linked_item_id: body?.linked_item_id ?? null })
+        .update(updatePayload)
         .eq('id', params.id)
       if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
-      return NextResponse.json({ success: true })
+      // Recalculate order HPP if the linked item's HPP was applied.
+      if ('hpp' in updatePayload) {
+        try {
+          await recalculateEstimatedHppForStore(supabase, (product.store_id as string | null) ?? null)
+        } catch (backfillErr) {
+          console.error('HPP backfill after link error:', backfillErr)
+        }
+      }
+
+      return NextResponse.json({ success: true, hpp: updatePayload.hpp })
     }
 
     const hpp = parseNonNegativeNumber(body?.hpp)

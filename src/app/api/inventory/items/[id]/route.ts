@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
+import { recalculateEstimatedHppForStore } from '@/lib/recalculate-estimated-hpp'
 
 type Params = { params: { id: string } }
 
@@ -96,6 +97,36 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // HPP dikelola di Master Item — bila cost_per_unit berubah, dorong nilainya ke
+  // semua master_products (Mapping Produk) yang ter-link ke item ini, lalu
+  // hitung ulang estimated_hpp pada order terkait.
+  if (body.cost_per_unit !== undefined) {
+    try {
+      const { data: linkedProducts } = await supabase
+        .from('master_products')
+        .select('id,store_id')
+        .eq('linked_item_id', params.id)
+
+      if (linkedProducts && linkedProducts.length > 0) {
+        await supabase
+          .from('master_products')
+          .update({ hpp: body.cost_per_unit })
+          .eq('linked_item_id', params.id)
+
+        const storeIds = Array.from(
+          new Set(linkedProducts.map((p) => (p.store_id as string | null) ?? null))
+        )
+        for (const storeId of storeIds) {
+          await recalculateEstimatedHppForStore(supabase, storeId)
+        }
+      }
+    } catch (syncErr) {
+      console.error('Sync item HPP to linked products error:', syncErr)
+      // Non-fatal — item tersimpan, sinkronisasi mapping gagal.
+    }
+  }
+
   return NextResponse.json({ item: data })
 }
 

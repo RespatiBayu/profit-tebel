@@ -18,7 +18,6 @@ import {
 import {
   Package,
   Search,
-  Save,
   AlertCircle,
   CheckCircle,
   ArrowUpDown,
@@ -149,11 +148,6 @@ function ItemLinkPicker({
   )
 }
 
-interface EditingProduct {
-  hpp: string
-  packaging_cost: string
-}
-
 interface MasterProductsResponse {
   products: MasterProduct[]
   error?: string
@@ -170,36 +164,8 @@ function isNumericProductId(value: string | null | undefined) {
   return !!value && /^\d+$/.test(value)
 }
 
-function buildDraft(product: MasterProduct): EditingProduct {
-  return {
-    hpp: product.hpp ? String(product.hpp) : '',
-    packaging_cost: product.packaging_cost ? String(product.packaging_cost) : '',
-  }
-}
-
-function parseDraftNumber(value: string) {
-  const normalized = value.trim().replace(',', '.')
-  if (!normalized) return 0
-
-  const parsed = Number(normalized)
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return null
-  }
-
-  return parsed
-}
-
-function isDraftDirty(product: MasterProduct, draft?: EditingProduct) {
-  if (!draft) return false
-
-  const hpp = parseDraftNumber(draft.hpp)
-  const packagingCost = parseDraftNumber(draft.packaging_cost)
-
-  if (hpp === null || packagingCost === null) {
-    return true
-  }
-
-  return hpp !== product.hpp || packagingCost !== product.packaging_cost
+function formatRupiah(value: number) {
+  return 'Rp ' + value.toLocaleString('id-ID')
 }
 
 export default function ProductsPage() {
@@ -212,9 +178,6 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'hpp'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const [drafts, setDrafts] = useState<Record<string, EditingProduct>>({})
-  const [savingAll, setSavingAll] = useState(false)
-  const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -226,6 +189,10 @@ export default function ProductsPage() {
 
   function handleLinked(productId: string, itemId: string | null, itemName: string | null) {
     setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
+    // Linking pulls the item's HPP into the product server-side; refresh to show it.
+    if (itemId) {
+      loadProducts()
+    }
   }
 
   const scopeParams = useCallback(() => {
@@ -249,20 +216,14 @@ export default function ProductsPage() {
 
       if (!response.ok) {
         setProducts([])
-        setDrafts({})
-        setSaved({})
         setError(json?.error ?? 'Gagal mengambil data produk')
         return
       }
 
       setProducts(json?.products ?? [])
-      setDrafts({})
-      setSaved({})
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
       setProducts([])
-      setDrafts({})
-      setSaved({})
       setError(`Gagal mengambil data produk: ${message}`)
     } finally {
       setLoading(false)
@@ -272,137 +233,6 @@ export default function ProductsPage() {
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
-
-  function resetDraft(id: string) {
-    setDrafts((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-  }
-
-  function updateDraft(product: MasterProduct, patch: Partial<EditingProduct>) {
-    setDrafts((prev) => {
-      const nextDraft = {
-        ...(prev[product.id] ?? buildDraft(product)),
-        ...patch,
-      }
-      const next = { ...prev }
-
-      if (isDraftDirty(product, nextDraft)) {
-        next[product.id] = nextDraft
-      } else {
-        delete next[product.id]
-      }
-
-      return next
-    })
-    setError(null)
-    setSuccessMessage(null)
-  }
-
-  async function saveAllProducts() {
-    const pendingChanges = products.flatMap((product) => {
-      const draft = drafts[product.id]
-      if (!isDraftDirty(product, draft)) {
-        return []
-      }
-
-      const hpp = parseDraftNumber(draft?.hpp ?? '')
-      const packaging_cost = parseDraftNumber(draft?.packaging_cost ?? '')
-
-      return [{ product, hpp, packaging_cost }]
-    })
-
-    if (pendingChanges.length === 0) {
-      return
-    }
-
-    if (pendingChanges.some((item) => item.hpp === null || item.packaging_cost === null)) {
-      setError('Masih ada input HPP atau Packaging yang tidak valid')
-      return
-    }
-
-    setSavingAll(true)
-    setError(null)
-    setSuccessMessage(null)
-
-    try {
-      const response = await fetch('/api/master-products', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          updates: pendingChanges.map((item) => ({
-            id: item.product.id,
-            hpp: item.hpp,
-            packaging_cost: item.packaging_cost,
-          })),
-        }),
-      })
-
-      const json = await response.json().catch(() => null) as {
-        updatedCount?: number
-        error?: string
-      } | null
-
-      if (!response.ok) {
-        setError(`Gagal menyimpan: ${json?.error ?? response.statusText}`)
-        return
-      }
-
-      const updatedIds = pendingChanges.map((item) => item.product.id)
-      const updateMap = new Map(
-        pendingChanges.map((item) => [
-          item.product.id,
-          {
-            hpp: item.hpp ?? 0,
-            packaging_cost: item.packaging_cost ?? 0,
-          },
-        ])
-      )
-
-      setProducts((prev) =>
-        prev.map((product) => {
-          const next = updateMap.get(product.id)
-          return next ? { ...product, ...next } : product
-        })
-      )
-
-      setDrafts((prev) => {
-        const next = { ...prev }
-        updatedIds.forEach((id) => {
-          delete next[id]
-        })
-        return next
-      })
-
-      setSaved((prev) => {
-        const next = { ...prev }
-        updatedIds.forEach((id) => {
-          next[id] = true
-        })
-        return next
-      })
-
-      setTimeout(() => {
-        setSaved((prev) => {
-          const next = { ...prev }
-          updatedIds.forEach((id) => {
-            delete next[id]
-          })
-          return next
-        })
-      }, 2000)
-
-      setSuccessMessage(`${json?.updatedCount ?? pendingChanges.length} produk berhasil disimpan`)
-      router.refresh()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
-      setError(`Gagal menyimpan: ${message}`)
-    } finally {
-      setSavingAll(false)
-    }
-  }
 
   async function deleteProduct(productId: string) {
     if (!confirm('Apakah kamu yakin ingin menghapus produk ini? Aksi ini tidak bisa dibatalkan.')) {
@@ -425,7 +255,6 @@ export default function ProductsPage() {
 
       // Remove from state
       setProducts((prev) => prev.filter((p) => p.id !== productId))
-      resetDraft(productId)
       router.refresh()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
@@ -524,14 +353,6 @@ export default function ProductsPage() {
     })
 
   const noHppCount = products.filter((p) => !p.hpp || p.hpp === 0).length
-  const pendingChanges = products.filter((product) => isDraftDirty(product, drafts[product.id]))
-  const invalidChanges = pendingChanges.filter((product) => {
-    const draft = drafts[product.id]
-    return (
-      parseDraftNumber(draft?.hpp ?? '') === null ||
-      parseDraftNumber(draft?.packaging_cost ?? '') === null
-    )
-  })
 
   function toggleSort(col: 'name' | 'hpp') {
     if (sortBy === col) setSortDir((d) => d === 'asc' ? 'desc' : 'asc')
@@ -624,14 +445,13 @@ export default function ProductsPage() {
         </Alert>
       )}
 
-      {pendingChanges.length > 0 && (
-        <Alert className="border-amber-200 bg-amber-50">
-          <AlertCircle className="h-4 w-4 text-amber-600" />
-          <AlertDescription className="text-amber-800">
-            <strong>{pendingChanges.length} perubahan</strong> belum disimpan.
-            {invalidChanges.length > 0
-              ? ` Perbaiki ${invalidChanges.length} baris yang masih belum valid dulu.`
-              : ' Kamu bisa isi banyak baris sekaligus lalu klik simpan semua.'}
+      {/* Info: HPP & Packaging dikelola di Master Item */}
+      {!loading && products.length > 0 && (
+        <Alert className="border-blue-200 bg-blue-50">
+          <AlertCircle className="h-4 w-4 text-blue-600" />
+          <AlertDescription className="text-blue-800">
+            HPP &amp; Packaging kini diatur di <strong>Master Item</strong> (Inventori &amp; Produksi).
+            Di halaman ini nilainya hanya ditampilkan sebagai informasi. Hubungkan produk ke item lewat kolom <strong>Link Inventori</strong> agar HPP terisi otomatis.
           </AlertDescription>
         </Alert>
       )}
@@ -669,31 +489,6 @@ export default function ProductsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {pendingChanges.length > 0 && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setDrafts({})}
-                  disabled={savingAll}
-                >
-                  Reset Perubahan
-                </Button>
-              )}
-              <Button
-                size="sm"
-                className="gap-2"
-                onClick={saveAllProducts}
-                disabled={savingAll || pendingChanges.length === 0 || invalidChanges.length > 0}
-              >
-                <Save className="h-4 w-4" />
-                {savingAll
-                  ? 'Menyimpan...'
-                  : pendingChanges.length > 0
-                  ? `Simpan ${pendingChanges.length} Perubahan`
-                  : 'Simpan Perubahan'}
-              </Button>
             </div>
           </div>
 
@@ -739,22 +534,12 @@ export default function ProductsPage() {
                   ))
                 ) : (
                   filtered.map((product) => {
-                    const isSaved = !!saved[product.id]
                     const hasNoHpp = !product.hpp || product.hpp === 0
                     const productId = getDisplayProductId(product)
                     const sellerSku = getDisplaySellerSku(product)
                     const sourceTags = product.source_tags ?? []
-                    const draft = drafts[product.id] ?? buildDraft(product)
-                    const parsedHpp = parseDraftNumber(draft.hpp)
-                    const parsedPackagingCost = parseDraftNumber(draft.packaging_cost)
-                    const hppInvalid = parsedHpp === null
-                    const packagingInvalid = parsedPackagingCost === null
-                    const isDirty = isDraftDirty(product, drafts[product.id])
-                    const rowTone = isDirty
-                      ? 'bg-amber-50/60'
-                      : hasNoHpp
-                      ? 'bg-orange-50/50'
-                      : undefined
+                    const hasPackaging = !!product.packaging_cost && product.packaging_cost > 0
+                    const rowTone = hasNoHpp ? 'bg-orange-50/50' : undefined
 
                     return (
                       <TableRow key={product.id} className={rowTone}>
@@ -787,28 +572,18 @@ export default function ProductsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            min={0}
-                            placeholder="0"
-                            className={`h-8 w-28 text-sm ${hppInvalid ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
-                            value={draft.hpp}
-                            onChange={(e) => updateDraft(product, { hpp: e.target.value })}
-                            onKeyDown={(e) => e.key === 'Enter' && saveAllProducts()}
-                            disabled={savingAll}
-                          />
+                          {hasNoHpp ? (
+                            <span className="text-xs text-muted-foreground">Belum diisi</span>
+                          ) : (
+                            <span className="text-sm font-medium tabular-nums">{formatRupiah(product.hpp)}</span>
+                          )}
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            min={0}
-                            placeholder="0"
-                            className={`h-8 w-28 text-sm ${packagingInvalid ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
-                            value={draft.packaging_cost}
-                            onChange={(e) => updateDraft(product, { packaging_cost: e.target.value })}
-                            onKeyDown={(e) => e.key === 'Enter' && saveAllProducts()}
-                            disabled={savingAll}
-                          />
+                          {hasPackaging ? (
+                            <span className="text-sm tabular-nums">{formatRupiah(product.packaging_cost)}</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <ItemLinkPicker
@@ -820,41 +595,12 @@ export default function ProductsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap items-center gap-1">
-                            {isSaved ? (
-                              <span className="flex items-center gap-1 text-green-600 text-xs">
-                                <CheckCircle className="h-3.5 w-3.5" />
-                                Tersimpan
-                              </span>
-                            ) : savingAll && isDirty ? (
-                              <span className="text-xs text-muted-foreground">Menyimpan...</span>
-                            ) : hppInvalid || packagingInvalid ? (
-                              <span className="text-xs text-red-600">Cek angka</span>
-                            ) : isDirty ? (
-                              <span className="text-xs text-amber-700">Belum disimpan</span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">
-                                {hasNoHpp ? 'Siap diisi' : 'Siap'}
-                              </span>
-                            )}
-
-                            {isDirty && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 text-xs"
-                                onClick={() => resetDraft(product.id)}
-                                disabled={savingAll}
-                              >
-                                Reset
-                              </Button>
-                            )}
-
                             <Button
                               size="sm"
                               variant="ghost"
                               className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
                               onClick={() => deleteProduct(product.id)}
-                              disabled={deleting[product.id] || savingAll}
+                              disabled={deleting[product.id]}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                               {deleting[product.id] ? 'Hapus...' : 'Hapus'}
