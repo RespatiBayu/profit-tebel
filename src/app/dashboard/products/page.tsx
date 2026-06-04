@@ -201,8 +201,9 @@ export default function ProductsPage() {
   function handleLinked(productId: string, itemId: string | null, itemName: string | null, hpp: number | null, packagingCost: number | null) {
     setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
     setError(null)
-    // Linking pulls the item's HPP & packaging into the product server-side; reflect it locally.
-    if (itemId && (hpp != null || packagingCost != null)) {
+    // Linking pulls the item's HPP & packaging into the product server-side;
+    // unlinking clears them back to 0. Reflect whatever the server returns locally.
+    if (hpp != null || packagingCost != null) {
       setProducts((prev) => prev.map((p) => (p.id === productId
         ? { ...p, ...(hpp != null ? { hpp } : {}), ...(packagingCost != null ? { packaging_cost: packagingCost } : {}) }
         : p)))

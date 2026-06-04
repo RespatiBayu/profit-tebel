@@ -55,7 +55,8 @@ export async function PATCH(
 
       // When linking to an item, pull the item's HPP & packaging into the master
       // product so Mapping Produk can display them as read-only info (both are
-      // managed in Master Item).
+      // managed in Master Item). When unlinking, clear them back to 0 since the
+      // values no longer have a source.
       if (linkedItemId) {
         const { data: item } = await supabase
           .from('items')
@@ -68,6 +69,9 @@ export async function PATCH(
         if (item && typeof item.packaging_cost === 'number') {
           updatePayload.packaging_cost = item.packaging_cost
         }
+      } else {
+        updatePayload.hpp = 0
+        updatePayload.packaging_cost = 0
       }
 
       const { error: updateErr } = await supabase
