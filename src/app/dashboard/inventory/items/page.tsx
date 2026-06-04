@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Plus, Search, Pencil, Trash2, Loader2, Package,
-  FlaskConical, Boxes, ShoppingBag, Filter,
+  FlaskConical, Boxes, ShoppingBag, Filter, PackageSearch,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ItemFormDrawer } from '@/components/inventory/item-form-drawer'
+import { ImportMasterDialog } from '@/components/inventory/import-master-dialog'
 import type { Item, ItemType } from '@/types'
 
 const TYPE_CONFIG: Record<ItemType, { label: string; icon: React.ElementType; variant: string }> = {
@@ -57,6 +58,7 @@ export default function ItemsPage() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<ItemType | 'all'>('all')
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [editItem, setEditItem] = useState<Item | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Item | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
@@ -123,10 +125,16 @@ export default function ItemsPage() {
             Kelola bahan mentah, barang setengah jadi, dan barang jadi.
           </p>
         </div>
-        <Button onClick={() => { setEditItem(null); setDrawerOpen(true) }} className="gap-2 shrink-0">
-          <Plus className="h-4 w-4" />
-          Tambah Item
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" onClick={() => setImportOpen(true)} className="gap-2">
+            <PackageSearch className="h-4 w-4" />
+            Import dari Master Produk
+          </Button>
+          <Button onClick={() => { setEditItem(null); setDrawerOpen(true) }} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Tambah Item
+          </Button>
+        </div>
       </div>
 
       {/* Filter bar */}
@@ -254,6 +262,13 @@ export default function ItemsPage() {
         item={editItem}
         onClose={() => setDrawerOpen(false)}
         onSaved={handleSaved}
+      />
+
+      {/* Import dari Master Produk */}
+      <ImportMasterDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={fetchItems}
       />
 
       {/* Delete Confirm */}
