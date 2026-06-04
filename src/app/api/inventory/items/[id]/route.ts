@@ -64,6 +64,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     type?: string
     unit?: string
     cost_per_unit?: number
+    packaging_cost?: number
     min_stock_qty?: number
     store_id?: string | null
     notes?: string | null
@@ -80,6 +81,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (body.type !== undefined) patch.type = body.type
   if (body.unit !== undefined) patch.unit = body.unit.trim() || 'pcs'
   if (body.cost_per_unit !== undefined) patch.cost_per_unit = body.cost_per_unit
+  if (body.packaging_cost !== undefined) patch.packaging_cost = Math.max(0, Number(body.packaging_cost) || 0)
   if (body.min_stock_qty !== undefined) patch.min_stock_qty = Math.max(0, Number(body.min_stock_qty) || 0)
   if (body.store_id !== undefined) patch.store_id = body.store_id
   if (body.notes !== undefined) patch.notes = body.notes?.trim() || null
@@ -98,10 +100,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // HPP dikelola di Master Item — bila cost_per_unit berubah, dorong nilainya ke
-  // semua master_products (Mapping Produk) yang ter-link ke item ini, lalu
-  // hitung ulang estimated_hpp pada order terkait.
-  if (body.cost_per_unit !== undefined) {
+  // HPP & packaging dikelola di Master Item — bila cost_per_unit / packaging_cost
+  // berubah, dorong nilainya ke semua master_products (Mapping Produk) yang
+  // ter-link ke item ini, lalu hitung ulang estimated_hpp pada order terkait.
+  const costChanged = patch.cost_per_unit !== undefined
+  const packagingChanged = patch.packaging_cost !== undefined
+  if (costChanged || packagingChanged) {
     try {
       const { data: linkedProducts } = await supabase
         .from('master_products')
@@ -109,9 +113,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         .eq('linked_item_id', params.id)
 
       if (linkedProducts && linkedProducts.length > 0) {
+        const syncPayload: Record<string, unknown> = {}
+        if (costChanged) syncPayload.hpp = patch.cost_per_unit
+        if (packagingChanged) syncPayload.packaging_cost = patch.packaging_cost
+
         await supabase
           .from('master_products')
-          .update({ hpp: body.cost_per_unit })
+          .update(syncPayload)
           .eq('linked_item_id', params.id)
 
         const storeIds = Array.from(
@@ -122,7 +130,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         }
       }
     } catch (syncErr) {
-      console.error('Sync item HPP to linked products error:', syncErr)
+      console.error('Sync item HPP/packaging to linked products error:', syncErr)
       // Non-fatal — item tersimpan, sinkronisasi mapping gagal.
     }
   }

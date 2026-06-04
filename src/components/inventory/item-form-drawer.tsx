@@ -41,6 +41,7 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
   const [unit, setUnit]             = useState('pcs')
   const [customUnit, setCustomUnit] = useState('')
   const [costPerUnit, setCostPerUnit]   = useState('')
+  const [packagingCost, setPackagingCost] = useState('')
   // 'manual' = user isi HPP sendiri; 'auto' = HPP otomatis terbentuk dari Formula
   const [hppMode, setHppMode]       = useState<'manual' | 'auto'>('manual')
   const [minStockQty, setMinStockQty]   = useState('')
@@ -56,13 +57,14 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
         setUnit(isCommon ? item.unit : 'custom')
         setCustomUnit(isCommon ? '' : item.unit)
         setCostPerUnit(item.cost_per_unit > 0 ? String(item.cost_per_unit) : '')
+        setPackagingCost((item.packaging_cost ?? 0) > 0 ? String(item.packaging_cost) : '')
         // Infer mode: bahan mentah selalu manual; lainnya manual jika sudah ada HPP terisi
         setHppMode(item.type === 'raw_material' || item.cost_per_unit > 0 ? 'manual' : 'auto')
         setMinStockQty(item.min_stock_qty > 0 ? String(item.min_stock_qty) : '')
         setNotes(item.notes ?? '')
       } else {
         setName(''); setSku(''); setType('raw_material')
-        setUnit('pcs'); setCustomUnit(''); setCostPerUnit('')
+        setUnit('pcs'); setCustomUnit(''); setCostPerUnit(''); setPackagingCost('')
         setHppMode('manual')
         setMinStockQty(''); setNotes('')
       }
@@ -89,6 +91,14 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
         ? (parseFloat(costPerUnit.replace(/\./g, '').replace(',', '.')) || 0)
         : (isEdit ? (item?.cost_per_unit ?? 0) : 0)
 
+      // Biaya packaging hanya untuk barang jadi. Pada mode manual diisi user;
+      // pada mode otomatis pertahankan nilai lama saat edit.
+      const packagingValue = type === 'finished_good'
+        ? (useManualCost
+            ? (parseFloat(packagingCost.replace(/\./g, '').replace(',', '.')) || 0)
+            : (isEdit ? (item?.packaging_cost ?? 0) : 0))
+        : 0
+
       const res    = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -98,6 +108,7 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
           type,
           unit: resolvedUnit,
           cost_per_unit: costValue,
+          packaging_cost: packagingValue,
           min_stock_qty: parseFloat(minStockQty.replace(',', '.')) || 0,
           notes: notes.trim() || null,
         }),
@@ -309,6 +320,29 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
                     HPP {type === 'semi_finished' ? 'barang setengah jadi' : 'barang jadi'} kamu isi manual.
                     Bisa diganti ke otomatis kapan saja.
                   </p>
+
+                  {/* Biaya packaging — hanya untuk barang jadi */}
+                  {type === 'finished_good' && (
+                    <div className="space-y-1.5 pt-1">
+                      <Label htmlFor="item-packaging" className="text-sm font-medium">
+                        Biaya Packaging per {resolvedUnit}
+                        <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">(opsional)</span>
+                      </Label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground select-none">Rp</span>
+                        <Input
+                          id="item-packaging"
+                          className="pl-9 h-10"
+                          placeholder="0"
+                          value={packagingCost}
+                          onChange={(e) => setPackagingCost(e.target.value.replace(/[^0-9.,]/g, ''))}
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-snug">
+                        Biaya kemasan/packaging per unit. Ikut dihitung sebagai biaya saat produk dijual.
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="rounded-xl bg-muted/60 border border-border px-4 py-3 flex items-start gap-2.5">

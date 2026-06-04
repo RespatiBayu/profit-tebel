@@ -27,6 +27,7 @@ import {
   X,
   Download,
   FileUp,
+  RotateCcw,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
 import type { MasterProduct, MasterProductSourceTag, Item } from '@/types'
@@ -42,7 +43,7 @@ function ItemLinkPicker({
   productId: string
   linkedItemId?: string | null
   linkedItemName?: string | null
-  onLinked: (itemId: string | null, itemName: string | null, hpp: number | null) => void
+  onLinked: (itemId: string | null, itemName: string | null, hpp: number | null, packagingCost: number | null) => void
   onError: (message: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -81,12 +82,12 @@ function ItemLinkPicker({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linked_item_id: itemId }),
       })
-      const json = await res.json().catch(() => null) as { hpp?: number | null; error?: string } | null
+      const json = await res.json().catch(() => null) as { hpp?: number | null; packaging_cost?: number | null; error?: string } | null
       if (!res.ok) {
         onError(json?.error ?? 'Gagal menghubungkan item. Coba lagi.')
         return
       }
-      onLinked(itemId, itemName, json?.hpp ?? null)
+      onLinked(itemId, itemName, json?.hpp ?? null, json?.packaging_cost ?? null)
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Gagal menghubungkan item. Coba lagi.')
     } finally {
@@ -194,14 +195,17 @@ export default function ProductsPage() {
   const [linkedOverrides, setLinkedOverrides] = useState<Record<string, { id: string | null; name: string | null }>>({})
 
   const [bulkUploading, setBulkUploading] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const bulkInputRef = useRef<HTMLInputElement>(null)
 
-  function handleLinked(productId: string, itemId: string | null, itemName: string | null, hpp: number | null) {
+  function handleLinked(productId: string, itemId: string | null, itemName: string | null, hpp: number | null, packagingCost: number | null) {
     setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
     setError(null)
-    // Linking pulls the item's HPP into the product server-side; reflect it locally.
-    if (itemId && hpp != null) {
-      setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, hpp } : p)))
+    // Linking pulls the item's HPP & packaging into the product server-side; reflect it locally.
+    if (itemId && (hpp != null || packagingCost != null)) {
+      setProducts((prev) => prev.map((p) => (p.id === productId
+        ? { ...p, ...(hpp != null ? { hpp } : {}), ...(packagingCost != null ? { packaging_cost: packagingCost } : {}) }
+        : p)))
     }
   }
 
@@ -243,6 +247,40 @@ export default function ProductsPage() {
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
+
+  async function resetCosts() {
+    if (!confirm(
+      'Reset semua HPP & Packaging di Mapping Produk ke 0?\n\n' +
+      'Setelah reset, isi HPP & Packaging di Master Item, lalu hubungkan tiap produk ke item-nya agar nilainya terisi otomatis.'
+    )) {
+      return
+    }
+
+    setResetting(true)
+    setError(null)
+    setSuccessMessage(null)
+    try {
+      const params = scopeParams()
+      const url = params.size > 0
+        ? `/api/master-products/reset-costs?${params.toString()}`
+        : '/api/master-products/reset-costs'
+      const res = await fetch(url, { method: 'POST' })
+      const json = await res.json().catch(() => null) as { resetCount?: number; error?: string } | null
+      if (!res.ok) {
+        setError(json?.error ?? 'Gagal mereset HPP & Packaging')
+        return
+      }
+      setLinkedOverrides({})
+      setSuccessMessage(`${json?.resetCount ?? 0} produk direset. Hubungkan ke Master Item untuk mengisi HPP & Packaging.`)
+      await loadProducts()
+      router.refresh()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      setError(`Gagal mereset: ${message}`)
+    } finally {
+      setResetting(false)
+    }
+  }
 
   async function deleteProduct(productId: string) {
     if (!confirm('Apakah kamu yakin ingin menghapus produk ini? Aksi ini tidak bisa dibatalkan.')) {
@@ -422,6 +460,17 @@ export default function ProductsPage() {
             <FileUp className="h-4 w-4" />
             {bulkUploading ? 'Mengunggah...' : 'Upload Excel'}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            onClick={resetCosts}
+            disabled={resetting || loading || products.length === 0}
+            title="Reset semua HPP & Packaging ke 0, lalu isi ulang dari Master Item via Link Inventori"
+          >
+            <RotateCcw className={`h-4 w-4 ${resetting ? 'animate-spin' : ''}`} />
+            {resetting ? 'Mereset...' : 'Reset HPP & Packaging'}
+          </Button>
           <DashboardLink href="/dashboard/upload">
             <Button variant="outline" size="sm" className="gap-2">
               <Upload className="h-4 w-4" />
@@ -600,7 +649,7 @@ export default function ProductsPage() {
                             productId={product.id}
                             linkedItemId={linkedOverrides[product.id]?.id ?? product.linked_item_id}
                             linkedItemName={linkedOverrides[product.id]?.name ?? product.linked_item_name}
-                            onLinked={(itemId, itemName, hpp) => handleLinked(product.id, itemId, itemName, hpp)}
+                            onLinked={(itemId, itemName, hpp, packagingCost) => handleLinked(product.id, itemId, itemName, hpp, packagingCost)}
                             onError={(message) => setError(message)}
                           />
                         </TableCell>

@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   // Fetch the selected master products (RLS scopes to current user)
   const { data: products, error: fetchErr } = await supabase
     .from('master_products')
-    .select('id, marketplace_product_id, seller_sku, product_name, hpp, store_id, linked_item_id')
+    .select('id, marketplace_product_id, seller_sku, product_name, hpp, packaging_cost, store_id, linked_item_id')
     .in('id', productIds)
 
   if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
@@ -68,7 +68,8 @@ export async function POST(request: NextRequest) {
           type: 'finished_good',
           unit: 'pcs',
           cost_per_unit: product.hpp ?? 0,
-          notes: 'Diimpor dari Master Produk',
+          packaging_cost: product.packaging_cost ?? 0,
+          notes: 'Diimpor dari Mapping Produk',
         })
         .select('id, sku')
         .single()

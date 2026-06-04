@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   // Fetch items
   let query = supabase
     .from('items')
-    .select('id,user_id,store_id,name,sku,type,unit,cost_per_unit,min_stock_qty,notes,created_at,updated_at')
+    .select('id,user_id,store_id,name,sku,type,unit,cost_per_unit,packaging_cost,min_stock_qty,notes,created_at,updated_at')
     .eq('user_id', access.user.id)
     .order('type')
     .order('name')
@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
     type: string
     unit: string
     cost_per_unit: number
+    packaging_cost?: number
     store_id?: string | null
     notes?: string | null
   }
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest) {
       type: body.type,
       unit: body.unit?.trim() || 'pcs',
       cost_per_unit: body.cost_per_unit ?? 0,
+      packaging_cost: Math.max(0, Number(body.packaging_cost) || 0),
       notes: body.notes?.trim() || null,
     })
     .select()
