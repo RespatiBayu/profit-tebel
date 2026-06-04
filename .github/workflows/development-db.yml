@@ -1,0 +1,42 @@
+name: Development Database Migrations
+
+on:
+  push:
+    branches:
+      - development
+  workflow_dispatch:
+
+concurrency:
+  group: development-database-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply Supabase development migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DATABASE_URL: ${{ secrets.DEVELOPMENT_DATABASE_URL }}
+      MIGRATIONS_DIR: supabase/migrations
+      MIGRATIONS_TABLE: schema_migrations
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          if [[ -z "${DATABASE_URL}" ]]; then
+            echo "Missing GitHub secret: DEVELOPMENT_DATABASE_URL" >&2
+            exit 1
+          fi
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Apply migrations
+        run: ./scripts/apply-supabase-migrations.sh

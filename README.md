@@ -6,6 +6,8 @@ App Next.js untuk analisis profit marketplace, iklan, dan ROAS seller Shopee/Tik
 
 Copy `.env.example` ke `.env.local`, lalu isi semua value yang dibutuhkan.
 
+Untuk setup branch `development`, Vercel Preview, dan Supabase development database, lihat [docs/development-environment.md](docs/development-environment.md).
+
 Field analytics yang baru:
 
 - `NEXT_PUBLIC_GA_MEASUREMENT_ID`: Measurement ID Google Analytics 4, format `G-XXXXXXXXXX`
