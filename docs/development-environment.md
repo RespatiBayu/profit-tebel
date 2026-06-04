@@ -42,7 +42,7 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID=
 NEXT_PUBLIC_CLARITY_PROJECT_ID=
 ```
 
-Use a Supabase pooled connection string with SSL enabled for Vercel serverless runtime.
+Use a Supabase pooled connection string with SSL enabled for Vercel serverless runtime. Prefer the Supabase pooler URL for both Vercel and GitHub Actions; the direct database host can be IPv6-only in some regions and may fail from hosted CI runners.
 
 ## Supabase Development Database
 
@@ -51,7 +51,7 @@ Create a separate Supabase project, for example `profit-tebel-development`. Do n
 Add this GitHub repository secret:
 
 ```text
-DEVELOPMENT_DATABASE_URL=<supabase-development-postgres-url>
+DEVELOPMENT_DATABASE_URL=<supabase-development-pooled-postgres-url>
 ```
 
 The development database workflow is defined in `.github/workflows/development-db.yml`. It runs on every push to `development` and can also be run manually from GitHub Actions.
