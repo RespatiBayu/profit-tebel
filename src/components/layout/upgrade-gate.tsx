@@ -10,7 +10,7 @@ const features = [
   'Analisis profit unlimited dari laporan Shopee',
   'Analisis iklan: SCALE / OPTIMIZE / KILL',
   'Kalkulator ROAS dengan simulasi budget',
-  'Master produk & HPP tracker',
+  'Mapping produk & HPP tracker',
   'Data aman, tidak dibagikan ke siapapun',
   'Update fitur gratis selamanya',
 ]
@@ -41,7 +41,7 @@ export default function UpgradeGate() {
         return
       }
       if (data.redirectUrl) {
-        trackEvent('checkout_redirected', { provider: 'midtrans' })
+        trackEvent('checkout_redirected', { provider: 'ipaymu' })
         window.location.href = data.redirectUrl
         return
       }

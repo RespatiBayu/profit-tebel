@@ -20,9 +20,9 @@ Required variables:
 - `SESSION_TTL_DAYS`
 - `SUPERADMIN_EMAIL`
 - `NEXT_PUBLIC_APP_URL`
-- `MIDTRANS_SERVER_KEY`
-- `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY`
-- `MIDTRANS_IS_PRODUCTION`
+- `IPAYMU_VA`
+- `IPAYMU_API_KEY`
+- `IPAYMU_IS_PRODUCTION`
 - `ADMIN_EMAILS`
 
 For a domain-based deploy, set:
@@ -40,7 +40,9 @@ This deploy uses the VPS Postgres database directly. Initialize a fresh database
 sudo -u postgres createuser profit_tebel
 sudo -u postgres createdb profit_tebel -O profit_tebel
 sudo -u postgres psql -c "alter user profit_tebel with password 'strong-password';"
-psql "$DATABASE_URL" -f server/migrations/001_init.sql
+for file in server/migrations/*.sql; do
+  psql "$DATABASE_URL" -f "$file"
+done
 ```
 
 Create the first superadmin account from the app/admin tooling, or run the demo script after setting `DATABASE_URL`:
@@ -99,6 +101,9 @@ cd /var/www/profit-tebel
 git pull origin production
 npm ci
 npm run build
+for file in server/migrations/*.sql; do
+  psql "$DATABASE_URL" -f "$file"
+done
 sudo systemctl restart profit-tebel
 ```
 

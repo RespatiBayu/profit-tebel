@@ -30,7 +30,67 @@ export async function PATCH(
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const body = await request.json().catch(() => null) as { hpp?: number; packaging_cost?: number } | null
+    const body = await request.json().catch(() => null) as {
+      hpp?: number
+      packaging_cost?: number
+      linked_item_id?: string | null
+    } | null
+
+    // Handle linked_item_id-only update (no HPP change)
+    const isLinkOnlyUpdate = body !== null &&
+      !('hpp' in (body ?? {})) &&
+      !('packaging_cost' in (body ?? {})) &&
+      'linked_item_id' in (body ?? {})
+
+    if (isLinkOnlyUpdate) {
+      const { data: product, error: fetchErr } = await supabase
+        .from('master_products')
+        .select('id,store_id')
+        .eq('id', params.id)
+        .maybeSingle()
+      if (fetchErr || !product) return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 })
+
+      const linkedItemId = body?.linked_item_id ?? null
+      const updatePayload: Record<string, unknown> = { linked_item_id: linkedItemId }
+
+      // When linking to an item, pull the item's HPP & packaging into the master
+      // product so Mapping Produk can display them as read-only info (both are
+      // managed in Master Item). When unlinking, clear them back to 0 since the
+      // values no longer have a source.
+      if (linkedItemId) {
+        const { data: item } = await supabase
+          .from('items')
+          .select('cost_per_unit,packaging_cost')
+          .eq('id', linkedItemId)
+          .maybeSingle()
+        if (item && typeof item.cost_per_unit === 'number') {
+          updatePayload.hpp = item.cost_per_unit
+        }
+        if (item && typeof item.packaging_cost === 'number') {
+          updatePayload.packaging_cost = item.packaging_cost
+        }
+      } else {
+        updatePayload.hpp = 0
+        updatePayload.packaging_cost = 0
+      }
+
+      const { error: updateErr } = await supabase
+        .from('master_products')
+        .update(updatePayload)
+        .eq('id', params.id)
+      if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
+
+      // NOTE: Order estimated_hpp is intentionally NOT recalculated here to keep
+      // linking instant/reliable (a full-store recalc can exceed the serverless
+      // timeout). Order HPP refreshes when the item's cost is edited in Master Item
+      // or via the "Recalculate HPP" button on the upload page.
+      return NextResponse.json({
+        success: true,
+        hpp: updatePayload.hpp ?? null,
+        packaging_cost: updatePayload.packaging_cost ?? null,
+      })
+    }
+
     const hpp = parseNonNegativeNumber(body?.hpp)
     const packaging_cost = parseNonNegativeNumber(body?.packaging_cost)
 
@@ -46,10 +106,13 @@ export async function PATCH(
 
     if (fetchErr || !product) return NextResponse.json({ error: 'Produk tidak ditemukan' }, { status: 404 })
 
-    // Save HPP
+    // Build update payload
+    const updatePayload: Record<string, unknown> = { hpp, packaging_cost }
+    if (body && 'linked_item_id' in body) updatePayload.linked_item_id = body.linked_item_id ?? null
+
     const { error: updateErr } = await supabase
       .from('master_products')
-      .update({ hpp, packaging_cost })
+      .update(updatePayload)
       .eq('id', params.id)
 
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })

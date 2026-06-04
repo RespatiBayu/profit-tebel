@@ -30,38 +30,46 @@ import {
   ChevronRight,
   Store,
   ShieldCheck,
+  Boxes,
+  Sparkles,
 } from 'lucide-react'
 import { StoreSwitcher } from './store-switcher'
 import { PeriodSwitcher } from './period-switcher'
 import { MarketplaceSwitcher } from './marketplace-switcher'
 import { DashboardLink } from './dashboard-link'
+import { SubscriptionBanner } from './subscription-banner'
+import type { SubscriptionStatus } from '@/types'
 
 const baseNavItems = [
-  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true },
-  { href: '/dashboard/profit', label: 'Dashboard Analisis', icon: TrendingUp },
-  { href: '/dashboard/ads', label: 'Detail Iklan', icon: BarChart3 },
-  { href: '/dashboard/roas-calculator', label: 'Kalkulator ROAS', icon: Calculator },
-  { href: '/dashboard/products', label: 'Master Produk', icon: Package },
-  { href: '/dashboard/stores', label: 'Toko Saya', icon: Store },
-  { href: '/dashboard/upload', label: 'Upload Data', icon: Upload },
+  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true, pro: false },
+  { href: '/dashboard/profit', label: 'Dashboard Analisis', icon: TrendingUp, pro: false },
+  { href: '/dashboard/ads', label: 'Detail Iklan', icon: BarChart3, pro: false },
+  { href: '/dashboard/roas-calculator', label: 'Kalkulator ROAS', icon: Calculator, pro: false },
+  { href: '/dashboard/products', label: 'Mapping Produk', icon: Package, pro: false },
+  { href: '/dashboard/stores', label: 'Toko Saya', icon: Store, pro: false },
+  { href: '/dashboard/upload', label: 'Upload Data', icon: Upload, pro: false },
+  { href: '/dashboard/inventory', label: 'Inventori & Produksi', icon: Boxes, pro: false },
 ]
 
 function getNavItems(userRole: AppUserRole) {
   return isPrivilegedRole(userRole)
-    ? [...baseNavItems, { href: '/dashboard/admin/users', label: 'Manajemen User', icon: ShieldCheck }]
+    ? [...baseNavItems, { href: '/dashboard/admin/users', label: 'Manajemen User', icon: ShieldCheck, pro: false }]
     : baseNavItems
 }
 
 function NavLink({
   item,
   onClick,
+  hasInventoryAccess,
 }: {
   item: ReturnType<typeof getNavItems>[number]
   onClick?: () => void
+  hasInventoryAccess?: boolean
 }) {
   const pathname = usePathname()
   const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
   const Icon = item.icon
+  const showProBadge = item.pro && !hasInventoryAccess
 
   return (
     <DashboardLink
@@ -78,17 +86,25 @@ function NavLink({
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      {item.label}
-      {isActive && <ChevronRight className="h-3 w-3 ml-auto" />}
+      <span className="flex-1 min-w-0 truncate">{item.label}</span>
+      {showProBadge && (
+        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold bg-gradient-to-r from-amber-400 to-orange-400 text-white px-1.5 py-0.5 rounded-full shrink-0">
+          <Sparkles className="h-2.5 w-2.5" />
+          PRO
+        </span>
+      )}
+      {isActive && !showProBadge && <ChevronRight className="h-3 w-3 ml-auto shrink-0" />}
     </DashboardLink>
   )
 }
 
 function Sidebar({
   userRole,
+  hasInventoryAccess,
   onClose,
 }: {
   userRole: AppUserRole
+  hasInventoryAccess: boolean
   onClose?: () => void
 }) {
   const navItems = getNavItems(userRole)
@@ -109,7 +125,7 @@ function Sidebar({
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
         {navItems.map((item) => (
-          <NavLink key={item.href} item={item} onClick={onClose} />
+          <NavLink key={item.href} item={item} onClick={onClose} hasInventoryAccess={hasInventoryAccess} />
         ))}
       </nav>
 
@@ -125,13 +141,22 @@ export default function DashboardShell({
   children,
   user,
   userRole,
+  subscription,
+  hasInventoryAccess,
 }: {
   children: React.ReactNode
   user: LocalUser
   userRole: AppUserRole
+  subscription: SubscriptionStatus
+  hasInventoryAccess: boolean
 }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Halaman yang tidak perlu filter marketplace / toko / periode
+  const hideGlobalFilters = pathname.startsWith('/dashboard/roas-calculator') ||
+    pathname.startsWith('/dashboard/inventory')
 
   const supabase = createClient()
 
@@ -159,13 +184,13 @@ export default function DashboardShell({
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-60 border-r border-sidebar-border shrink-0 bg-[hsl(var(--sidebar-background)/0.96)] backdrop-blur-xl">
-        <Sidebar userRole={userRole} />
+        <Sidebar userRole={userRole} hasInventoryAccess={hasInventoryAccess} />
       </aside>
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="p-0 w-60">
-          <Sidebar userRole={userRole} onClose={() => setMobileOpen(false)} />
+          <Sidebar userRole={userRole} hasInventoryAccess={hasInventoryAccess} onClose={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>
 
@@ -188,9 +213,13 @@ export default function DashboardShell({
 
           {/* Store switcher + marketplace + period filter (global) */}
           <div className="flex-1 flex items-center gap-3 lg:justify-start justify-center flex-wrap">
-            <MarketplaceSwitcher />
-            <StoreSwitcher />
-            <PeriodSwitcher />
+            {!hideGlobalFilters && (
+              <>
+                <MarketplaceSwitcher />
+                <StoreSwitcher />
+                <PeriodSwitcher />
+              </>
+            )}
           </div>
 
           {/* User menu */}
@@ -219,19 +248,22 @@ export default function DashboardShell({
           </DropdownMenu>
         </header>
 
+        {/* Subscription expiry banner — tampil D-7 s/d expired */}
+        <SubscriptionBanner subscription={subscription} />
+
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
           {children}
         </main>
 
         {/* Mobile Bottom Nav */}
-        <MobileBottomNav userRole={userRole} />
+        <MobileBottomNav userRole={userRole} hasInventoryAccess={hasInventoryAccess} />
       </div>
     </div>
   )
 }
 
-function MobileBottomNav({ userRole }: { userRole: AppUserRole }) {
+function MobileBottomNav({ userRole, hasInventoryAccess }: { userRole: AppUserRole; hasInventoryAccess: boolean }) {
   const pathname = usePathname()
   const navItems = getNavItems(userRole)
   return (
@@ -239,19 +271,23 @@ function MobileBottomNav({ userRole }: { userRole: AppUserRole }) {
       {navItems.slice(0, 5).map((item) => {
         const Icon = item.icon
         const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
+        const showProBadge = item.pro && !hasInventoryAccess
         return (
           <DashboardLink
             key={item.href}
             href={item.href}
             onClick={() => trackEvent('dashboard_nav_clicked', { destination: item.href, surface: 'mobile_bottom_nav' })}
             className={cn(
-              'flex flex-col items-center gap-1 px-3 py-2 text-xs rounded-xl transition-colors',
+              'relative flex flex-col items-center gap-1 px-3 py-2 text-xs rounded-xl transition-colors',
               isActive
                 ? 'bg-primary/10 text-primary'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
             <Icon className={cn('h-5 w-5', isActive && 'stroke-[2.5]')} />
+            {showProBadge && (
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-400" />
+            )}
             <span className="truncate max-w-[56px] text-center leading-tight">
               {item.label.split(' ')[0]}
             </span>

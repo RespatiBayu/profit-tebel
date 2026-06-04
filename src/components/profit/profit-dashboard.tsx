@@ -45,6 +45,12 @@ import {
   Zap,
   Tag,
   Banknote,
+  Lightbulb,
+  Users,
+  Repeat,
+  Wallet,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react'
 import {
   buildHppMap,
@@ -70,14 +76,13 @@ import {
   calculateDailyDetail,
 } from '@/lib/calculations/dashboard-analytics'
 import {
-  ScaleRecommendationsSection,
-  RoasTargetsSection,
   BusyDaysSection,
   TopProductsSection,
   TopBuyersSection,
   DailyDetailSection,
 } from '@/components/profit/dashboard-sections'
 import { DashboardLink } from '@/components/layout/dashboard-link'
+import { StockCriticalCard } from '@/components/profit/stock-critical-card'
 import type {
   AvailablePeriods,
   DbOrder,
@@ -393,6 +398,20 @@ function ProductProfitTable({ rows }: { rows: ProductProfitRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Section group divider — pemisah visual antar-kelompok section di dashboard
+// ---------------------------------------------------------------------------
+
+function SectionDivider({ icon: Icon, title }: { icon: typeof Lightbulb; title: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-4">
+      <Icon className="h-4 w-4 shrink-0 text-primary" />
+      <h2 className="whitespace-nowrap text-sm font-bold tracking-tight">{title}</h2>
+      <div className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Custom tooltip for charts
 // ---------------------------------------------------------------------------
 
@@ -567,42 +586,76 @@ export default function ProfitDashboard({
   const topBuyers = useMemo(() => calculateTopBuyers(filteredOrders), [filteredOrders])
   const dailyDetail = useMemo(() => calculateDailyDetail(filteredOrders), [filteredOrders])
 
-  // Derive avg selling price per product from ads data (most reliable — actual realized price)
-  const sellingPriceMap = useMemo(() => {
-    const m = new Map<string, number>()
-    const agg = new Map<string, { gmv: number; units: number }>()
-    for (const a of filteredAdsData) {
-      if (!a.product_code || a.product_code === '-') continue
-      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
-      e.gmv += a.gmv
-      e.units += a.units_sold
-      agg.set(a.product_code, e)
-    }
-    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
-      if (units > 0) m.set(code, gmv / units)
-    }
-    // Fallback: derive from orders if no ads data for a product
-    return m
-  }, [filteredAdsData])
-
   const negativeProducts = productRows.filter((r) => r.hasHpp && r.profit < 0)
   const totalProducts = masterProducts.length
   const hppFilled = totalProducts - noHppCount
   const hppProgress = totalProducts > 0 ? Math.round((hppFilled / totalProducts) * 100) : 0
 
-  const PENDING_STATUSES = ['Telah Dikirim', 'Sedang Dikirim', 'Perlu Dikirim', 'Belum Bayar']
+  // Kontribusi profit per produk (Pareto 80/20): produk mana yang benar-benar
+  // bikin untung. Omzet tinggi ≠ profit tinggi, jadi diurut berdasarkan profit.
+  const profitContribution = useMemo(() => {
+    const withHpp = productRows.filter((r) => r.hasHpp)
+    const winners = withHpp.filter((r) => r.profit > 0).sort((a, b) => b.profit - a.profit)
+    const losers  = withHpp.filter((r) => r.profit < 0).sort((a, b) => a.profit - b.profit)
 
-  // Pending KPIs: compute all 7 KPI components from Order.all pending orders
-  // so they can be merged with confirmed income KPIs in the summary cards.
-  // estimated_hpp is pre-computed server-side at upload time (migration 012),
-  // so no runtime SKU mapping is needed here.
+    const totalProfit = winners.reduce((s, r) => s + r.profit, 0)
+    const totalLoss   = losers.reduce((s, r) => s + r.profit, 0) // negatif
+
+    // Berapa produk untuk capai 80% total profit (Pareto)
+    let cum = 0
+    let paretoCount = 0
+    for (const r of winners) {
+      cum += r.profit
+      paretoCount++
+      if (totalProfit > 0 && cum >= totalProfit * 0.8) break
+    }
+
+    // Top 6 untuk ditampilkan
+    const top = winners.slice(0, 6).map((r) => ({
+      ...r,
+      sharePct: totalProfit > 0 ? (r.profit / totalProfit) * 100 : 0,
+    }))
+
+    return {
+      hasData: withHpp.length > 0,
+      winners, losers, top,
+      totalProfit, totalLoss,
+      paretoCount,
+      winnerCount: winners.length,
+      loserCount: losers.length,
+    }
+  }, [productRows])
+
+  // Fallback fee rate (% of omzet) bila belum ada data income untuk kalibrasi.
+  // ≈ admin (Star, beauty) 8.25% + ongkir xtra 4% + promo xtra 4.5% ≈ 16.75%.
+  const DEFAULT_FEE_RATE_ON_OMZET = 0.16
+
+  // Himpunan order yang SUDAH dilepas (ada di file Income) — kunci rekonsiliasi.
+  const incomeOrderNumbers = useMemo(
+    () => new Set(filteredOrders.map((o) => o.order_number)),
+    [filteredOrders]
+  )
+
+  // Estimasi KPI untuk order BELUM DILEPAS.
+  //
+  // PENTING: order belum-dilepas ditentukan dari KEBERADAAN di file Income,
+  // bukan dari label status. Sebuah order bisa berstatus "Selesai" tapi dananya
+  // belum cair (masih ditahan Shopee), sehingga tidak ada di file Income.
+  // Kalau pakai label status (Telah Dikirim/Perlu Dikirim/dll), order "Selesai
+  // yang belum cair" akan terlewat → angka dashboard jadi lebih kecil dari real.
+  //
+  // Jadi: belum-dilepas = order_all non-Batal yang order_number-nya TIDAK ada
+  // di file Income. Biaya & net income-nya diestimasi pakai rate yang dikalibrasi
+  // dari order terkonfirmasi (yang biayanya real). estimated_hpp di-precompute
+  // server-side saat upload (migration 012).
   const pendingKpis = useMemo(() => {
-    const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
+    const pending = filteredOrdersAll.filter(
+      (o) => o.status_pesanan !== 'Batal' && !incomeOrderNumbers.has(o.order_number)
+    )
 
     let totalOmzet    = 0   // SUM(harga_awal × qty)
     let totalDiskon   = 0   // product discount + seller voucher
     let totalHpp      = 0   // pre-computed estimated_hpp from DB
-    let totalNetIncome = 0  // total_pembayaran (est. seller payout after Shopee fees)
     let ordersNoHpp   = 0
 
     for (const order of pending) {
@@ -618,9 +671,6 @@ export default function ProfitDashboard({
       // Seller-borne voucher/bundle discount at order level
       totalDiskon += order.seller_voucher ?? 0
 
-      // Net income = total_pembayaran (estimated seller payout, parallel to total_income in income file)
-      totalNetIncome += order.total_pembayaran
-
       // HPP: use pre-computed value from DB (computed server-side at upload time)
       const hpp = order.estimated_hpp ?? 0
       totalHpp += hpp
@@ -628,10 +678,26 @@ export default function ProfitDashboard({
     }
 
     const grossIncome = totalOmzet - totalDiskon
-    // Estimate Shopee fees using the same rate as confirmed orders (fee rate on omzet)
-    const feeRateOnOmzet = kpis.totalOmzet > 0 ? kpis.totalFees / kpis.totalOmzet : 0
+
+    // Kalibrasi dari order terkonfirmasi (biaya real):
+    //  - feeRate = total biaya marketplace / total omzet
+    //  - netRate = total net income / total omzet  (menangkap SEMUA potongan:
+    //    biaya + ongkir + diskon + refund dalam satu rasio empiris)
+    const feeRateOnOmzet = kpis.totalOmzet > 0
+      ? kpis.totalFees / kpis.totalOmzet
+      : DEFAULT_FEE_RATE_ON_OMZET
+    const netRateOnOmzet = kpis.totalOmzet > 0
+      ? kpis.totalNetIncome / kpis.totalOmzet
+      : 0
+
     const totalFees = totalOmzet * feeRateOnOmzet
-    // Real profit = net income (after Shopee fees) - HPP (no ads attribution for pending)
+    // Net income estimasi: pakai netRate hasil kalibrasi; jika belum ada data
+    // income, fallback ke gross − fees default.
+    const totalNetIncome = netRateOnOmzet > 0
+      ? totalOmzet * netRateOnOmzet
+      : grossIncome - totalFees
+
+    // Real profit = net income (setelah biaya Shopee) − HPP (tanpa alokasi iklan)
     const realProfit = totalNetIncome - totalHpp
 
     return {
@@ -648,20 +714,38 @@ export default function ProfitDashboard({
       hasPendingData: pending.length > 0,
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredOrdersAll, kpis.totalFees, kpis.totalOmzet])
+  }, [filteredOrdersAll, incomeOrderNumbers, kpis.totalFees, kpis.totalOmzet, kpis.totalNetIncome])
 
+  // Ringkasan cakupan data: berapa order biayanya AKTUAL (sudah dilepas / ada di
+  // Income) vs ESTIMASI (belum dilepas). Ini dasar badge confidence di dashboard.
+  // Selalu ditampilkan selama ada Income data — kalau Order All tidak ada /
+  // semua sudah dilepas, tampilkan 100% aktual dengan estimasi = 0.
   const pendingSummary = useMemo(() => {
-    const pending = filteredOrdersAll.filter((o) => o.status_pesanan && PENDING_STATUSES.includes(o.status_pesanan))
-    const selesai = filteredOrdersAll.filter((o) => o.status_pesanan === 'Selesai')
+    // Tidak ada Order All untuk periode ini → semua order yang ada di Income
+    // dianggap 100% sudah dilepas (tidak ada estimasi yang perlu ditampilkan).
+    if (filteredOrdersAll.length === 0) {
+      const n = filteredOrders.length
+      return {
+        hasData: n > 0,
+        countNonBatal: n,
+        countBatal: 0,
+        countReleased: n,
+        countUnreleased: 0,
+        coveragePct: n > 0 ? 100 : 0,
+        totalUnreleasedGmv: 0,
+        byStatus: [] as { status: string; count: number; total: number }[],
+      }
+    }
 
-    // Reconciliation
-    const selesaiNumbers = new Set(selesai.map((o) => o.order_number))
-    const incomeNumbers  = new Set(filteredOrders.map((o) => o.order_number))
-    const matchedCount   = Array.from(selesaiNumbers).filter((n) => incomeNumbers.has(n)).length
+    const nonBatal   = filteredOrdersAll.filter((o) => o.status_pesanan !== 'Batal')
+    const batal      = filteredOrdersAll.filter((o) => o.status_pesanan === 'Batal')
+    const released   = nonBatal.filter((o) => incomeOrderNumbers.has(o.order_number))
+    const unreleased = nonBatal.filter((o) => !incomeOrderNumbers.has(o.order_number))
 
-    // Breakdown by status
+    // Breakdown status untuk order yang belum dilepas (biasanya "Selesai" yang
+    // dananya belum cair, tapi bisa juga Telah/Sedang/Perlu Dikirim, Belum Bayar).
     const statusMap = new Map<string, { count: number; total: number }>()
-    for (const o of pending) {
+    for (const o of unreleased) {
       const s = o.status_pesanan ?? 'Lainnya'
       const cur = statusMap.get(s) ?? { count: 0, total: 0 }
       cur.count += 1
@@ -671,17 +755,165 @@ export default function ProfitDashboard({
     const byStatus = Array.from(statusMap.entries()).map(([status, v]) => ({ status, ...v }))
       .sort((a, b) => b.total - a.total)
 
+    const totalNonBatal = nonBatal.length
+    const coveragePct = totalNonBatal > 0
+      ? Math.round((released.length / totalNonBatal) * 100)
+      : 100  // Semua order di Order All ter-match ke Income → 100%
+
     return {
-      totalPending: pending.reduce((s, o) => s + o.total_pembayaran, 0),
-      countPending: pending.length,
+      hasData: true,
+      countNonBatal: totalNonBatal,
+      countBatal: batal.length,
+      countReleased: released.length,
+      countUnreleased: unreleased.length,
+      coveragePct,
+      totalUnreleasedGmv: unreleased.reduce((s, o) => s + o.total_pembayaran, 0),
       byStatus,
-      totalSelesai: selesai.reduce((s, o) => s + o.total_pembayaran, 0),
-      countSelesai: selesai.length,
-      matchedWithIncome: matchedCount,
-      hasData: filteredOrdersAll.length > 0,
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredOrdersAll, filteredOrders])
+  }, [filteredOrdersAll, filteredOrders, incomeOrderNumbers])
+
+  // Insight margin & efisiensi iklan (gabungan confirmed + estimasi).
+  const marginInsight = useMemo(() => {
+    const p = pendingKpis.hasPendingData
+    const omzet     = kpis.totalOmzet     + (p ? pendingKpis.totalOmzet     : 0)
+    const gross     = kpis.grossIncome    + (p ? pendingKpis.grossIncome    : 0)
+    const netIncome = kpis.totalNetIncome + (p ? pendingKpis.totalNetIncome : 0)
+    const hpp       = kpis.totalHppCost   + (p ? pendingKpis.totalHpp       : 0)
+    const adSpend   = kpis.totalAdSpend   // iklan tidak dialokasikan ke estimasi
+    const realProfit = kpis.realProfit    + (p ? pendingKpis.realProfit     : 0)
+
+    // Gross profit = penghasilan bersih − HPP (sebelum iklan)
+    const grossProfit = netIncome - hpp
+    return {
+      hasHpp: kpis.hasHppData || (p && pendingKpis.hasHppData),
+      netMarginPct: omzet > 0 ? (realProfit / omzet) * 100 : null,
+      // % profit kotor yang dimakan iklan
+      adShareOfGrossProfit: grossProfit > 0 ? (adSpend / grossProfit) * 100 : null,
+      // % dari net income yang dimakan iklan
+      adShareOfNet: netIncome > 0 ? (adSpend / netIncome) * 100 : null,
+      grossProfit,
+      realProfit,
+      adSpend,
+      grossMarginPct: gross > 0 ? (grossProfit / gross) * 100 : null,
+    }
+  }, [kpis, pendingKpis])
+
+  // ROI Modal: seberapa produktif modal yang diputar. Modal barang = HPP dari
+  // barang yang terjual (confirmed + estimasi). ROI barang = profit kotor / modal
+  // barang (sebelum iklan). ROI usaha = real profit / (modal barang + iklan).
+  const roiModal = useMemo(() => {
+    const p = pendingKpis.hasPendingData
+    const modalBarang = kpis.totalHppCost   + (p ? pendingKpis.totalHpp       : 0)
+    const netIncome   = kpis.totalNetIncome + (p ? pendingKpis.totalNetIncome : 0)
+    const adSpend     = kpis.totalAdSpend
+    const realProfit  = kpis.realProfit     + (p ? pendingKpis.realProfit     : 0)
+    const grossProfit = netIncome - modalBarang
+    const totalModal  = modalBarang + adSpend
+    return {
+      hasData: marginInsight.hasHpp && modalBarang > 0,
+      modalBarang,
+      adSpend,
+      totalModal,
+      realProfit,
+      grossProfit,
+      // ROI atas modal barang saja (sebelum iklan)
+      roiBarangPct: modalBarang > 0 ? (grossProfit / modalBarang) * 100 : null,
+      // ROI atas total modal usaha (barang + iklan)
+      roiUsahaPct: totalModal > 0 ? (realProfit / totalModal) * 100 : null,
+    }
+  }, [kpis, pendingKpis, marginInsight.hasHpp])
+
+  // Repeat Buyer Rate: % pembeli yang order lebih dari sekali. Sumber: file Income
+  // (punya buyer_username). Mengukur loyalitas & kualitas basis pelanggan.
+  const repeatBuyer = useMemo(() => {
+    const byBuyer = new Map<string, { count: number; omzet: number }>()
+    for (const o of filteredOrders) {
+      const key = o.buyer_username?.trim()
+      if (!key) continue
+      const e = byBuyer.get(key) ?? { count: 0, omzet: 0 }
+      e.count += 1
+      e.omzet += o.original_price
+      byBuyer.set(key, e)
+    }
+    const buyers = Array.from(byBuyer.values())
+    const totalBuyers = buyers.length
+    const repeatBuyers = buyers.filter((b) => b.count > 1)
+    const totalOrders = buyers.reduce((s, b) => s + b.count, 0)
+    const totalOmzet = buyers.reduce((s, b) => s + b.omzet, 0)
+    const repeatOmzet = repeatBuyers.reduce((s, b) => s + b.omzet, 0)
+    return {
+      hasData: totalBuyers > 0,
+      totalBuyers,
+      repeatCount: repeatBuyers.length,
+      repeatRatePct: totalBuyers > 0 ? (repeatBuyers.length / totalBuyers) * 100 : 0,
+      avgOrdersPerBuyer: totalBuyers > 0 ? totalOrders / totalBuyers : 0,
+      repeatOmzetSharePct: totalOmzet > 0 ? (repeatOmzet / totalOmzet) * 100 : 0,
+      repeatOmzet,
+    }
+  }, [filteredOrders])
+
+  // Insight & Aksi Otomatis: rangkum semua sinyal jadi daftar rekomendasi
+  // berprioritas. tone: bad (merah) → warn (oranye) → good (hijau) → info (biru).
+  const autoInsights = useMemo(() => {
+    type Tone = 'bad' | 'warn' | 'good' | 'info'
+    const out: { tone: Tone; title: string; desc: string }[] = []
+
+    // Efisiensi iklan vs profit kotor
+    if (marginInsight.adShareOfGrossProfit != null) {
+      const v = marginInsight.adShareOfGrossProfit
+      if (v >= 80) out.push({ tone: 'bad', title: 'Iklan terlalu boros', desc: `Iklan memakan ${v.toFixed(0)}% profit kotor. Pangkas/hentikan kampanye ROAS rendah.` })
+      else if (v >= 50) out.push({ tone: 'warn', title: 'Porsi iklan tinggi', desc: `Iklan ambil ${v.toFixed(0)}% profit kotor. Awasi kampanye di bawah target ROAS.` })
+      else out.push({ tone: 'good', title: 'Iklan masih sehat', desc: `Iklan hanya ${v.toFixed(0)}% dari profit kotor — ada ruang untuk scale.` })
+    }
+
+    // Net margin
+    if (marginInsight.netMarginPct != null) {
+      const m = marginInsight.netMarginPct
+      if (m < 0) out.push({ tone: 'bad', title: 'Margin negatif', desc: `Net margin ${m.toFixed(1)}%. Usaha rugi pada periode ini — evaluasi harga & biaya.` })
+      else if (m < 5) out.push({ tone: 'warn', title: 'Margin tipis', desc: `Net margin cuma ${m.toFixed(1)}%. Rawan rugi kalau biaya/iklan naik sedikit.` })
+    }
+
+    // Produk rugi
+    if (profitContribution.loserCount > 0) {
+      out.push({ tone: 'bad', title: `${profitContribution.loserCount} produk rugi`, desc: `Total rugi ${formatRp(Math.abs(profitContribution.totalLoss))}. Naikkan harga, setop iklan, atau cek ulang HPP.` })
+    }
+
+    // Pareto produk juara
+    if (profitContribution.hasData && profitContribution.paretoCount > 0) {
+      out.push({ tone: 'info', title: 'Fokus produk juara', desc: `${profitContribution.paretoCount} produk menyumbang 80% profit. Jaga stok & prioritaskan iklannya.` })
+    }
+
+    // Kampanye siap scale
+    if (scalable.length > 0) {
+      out.push({ tone: 'good', title: `${scalable.length} kampanye siap scale`, desc: `ROAS tinggi & konversi cukup — naikkan budget bertahap (20-30%).` })
+    }
+
+    // Repeat buyer
+    if (repeatBuyer.hasData) {
+      if (repeatBuyer.repeatRatePct < 10) out.push({ tone: 'warn', title: 'Repeat buyer rendah', desc: `Cuma ${repeatBuyer.repeatRatePct.toFixed(0)}% pembeli balik lagi. Coba follow-up chat / voucher loyalitas.` })
+      else if (repeatBuyer.repeatRatePct >= 25) out.push({ tone: 'good', title: 'Pelanggan loyal', desc: `${repeatBuyer.repeatRatePct.toFixed(0)}% pembeli order ulang — basis pelanggan sehat.` })
+    }
+
+    // ROI modal
+    if (roiModal.hasData && roiModal.roiBarangPct != null) {
+      const r = roiModal.roiBarangPct
+      out.push({ tone: r >= 30 ? 'good' : r < 0 ? 'bad' : 'info', title: `ROI modal ${r.toFixed(0)}%`, desc: `Tiap Rp1 modal barang balik jadi Rp${(r / 100 + 1).toFixed(2)} (sebelum iklan).` })
+    }
+
+    // HPP belum lengkap
+    if (noHppCount > 0) {
+      out.push({ tone: 'warn', title: `${noHppCount} produk belum ada HPP`, desc: `Real Profit belum 100% akurat. Lengkapi HPP untuk hasil presisi.` })
+    }
+
+    // Cakupan data estimasi
+    if (pendingSummary.hasData && pendingSummary.coveragePct < 100) {
+      out.push({ tone: 'info', title: `${pendingSummary.coveragePct}% biaya aktual`, desc: `${pendingSummary.countUnreleased} order masih estimasi (dana belum cair). Upload Income terbaru untuk akurasi.` })
+    }
+
+    // Urutkan: bad → warn → good → info
+    const rank: Record<Tone, number> = { bad: 0, warn: 1, good: 2, info: 3 }
+    return out.sort((a, b) => rank[a.tone] - rank[b.tone])
+  }, [marginInsight, profitContribution, scalable, repeatBuyer, roiModal, noHppCount, pendingSummary])
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
@@ -690,7 +922,10 @@ export default function ProfitDashboard({
         <div>
           <h1 className="text-2xl font-bold">Dashboard Analisis</h1>
           <p className="text-muted-foreground mt-0.5">
-            {filteredOrders.length.toLocaleString('id-ID')} order
+            {(filteredOrders.length + pendingKpis.orderCount).toLocaleString('id-ID')} order
+            {pendingKpis.hasPendingData && (
+              <span className="text-xs"> · {filteredOrders.length} aktual + {pendingKpis.orderCount} estimasi</span>
+            )}
           </p>
         </div>
       </div>
@@ -737,6 +972,8 @@ export default function ProfitDashboard({
         </Alert>
       )}
 
+      <SectionDivider icon={Lightbulb} title="Ringkasan & Aksi" />
+
       {/* KPI Cards */}
       {(() => {
         // If pending data exists, show combined (confirmed + pending) values
@@ -756,8 +993,8 @@ export default function ProfitDashboard({
         const curCount = kpis.orderCount
         const prevCount = prevKpis.orderCount
 
-        const pendingLabel = p ? ` (+${pendingKpis.orderCount} pending)` : ''
-        const pendingNote  = p ? ' · incl. estimasi pending' : ''
+        const pendingLabel = p ? ` (+${pendingKpis.orderCount} est.)` : ''
+        const pendingNote  = p ? ' · incl. estimasi belum dilepas' : ''
 
         return (
           <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
@@ -859,7 +1096,7 @@ export default function ProfitDashboard({
                   : 'Isi HPP dulu untuk melihat'
               }
               icon={TrendingUp}
-              tooltip={`Profit sebenarnya: Net Income − HPP − Packaging − Biaya Iklan.${p ? ' Pending: total_pembayaran − HPP (tanpa alokasi iklan).' : ''}`}
+              tooltip={`Profit sebenarnya: Net Income − HPP − Packaging − Biaya Iklan.${p ? ' Order belum dilepas: net income diestimasi dari rata-rata order yang sudah dilepas, lalu dikurangi HPP (tanpa alokasi iklan).' : ''}`}
               pctOmzet={hasHpp ? pct(profit) : null}
               delta={
                 hasHpp
@@ -872,98 +1109,120 @@ export default function ProfitDashboard({
         )
       })()}
 
-      {/* Dana Pending & Rekonsiliasi */}
+      {/* === SECTION: Insight & Aksi Otomatis === */}
+      {autoInsights.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lightbulb className="h-4 w-4 text-amber-500" />
+              Insight &amp; Aksi
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Rangkuman otomatis dari data periode ini — diurut dari yang paling perlu ditindak.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid sm:grid-cols-2 gap-2.5">
+              {autoInsights.map((ins, i) => {
+                const theme = ins.tone === 'bad'
+                  ? { box: 'border-red-200 bg-red-50', icon: 'text-red-600', Icon: AlertTriangle }
+                  : ins.tone === 'warn'
+                  ? { box: 'border-orange-200 bg-orange-50', icon: 'text-orange-600', Icon: AlertCircle }
+                  : ins.tone === 'good'
+                  ? { box: 'border-green-200 bg-green-50', icon: 'text-green-600', Icon: CheckCircle2 }
+                  : { box: 'border-blue-200 bg-blue-50', icon: 'text-blue-600', Icon: Info }
+                const Icon = theme.Icon
+                return (
+                  <div key={i} className={`flex items-start gap-2.5 rounded-lg border p-3 ${theme.box}`}>
+                    <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${theme.icon}`} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold leading-tight">{ins.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{ins.desc}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {(kpis.totalOmzet > 0 || pendingSummary.hasData || marginInsight.hasHpp || roiModal.hasData || repeatBuyer.hasData) && (
+        <SectionDivider icon={Banknote} title="Kesehatan Profit" />
+      )}
+
+      {/* === SECTION: Stok Kritis (inventory low-stock) === */}
+      <StockCriticalCard />
+
+      {/* Cakupan Data & Estimasi */}
       {pendingSummary.hasData && (
         <Card className="border-teal-200 bg-teal-50/30">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-md bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
-                  <span className="text-base">⏳</span>
+                  <span className="text-base">🎯</span>
                 </div>
                 <div>
-                  <CardTitle className="text-base">Dana Pending & Rekonsiliasi</CardTitle>
+                  <CardTitle className="text-base">Cakupan Data & Estimasi</CardTitle>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Dari file Order.all · angka KPI di atas sudah termasuk estimasi pending
+                    {pendingSummary.countUnreleased === 0
+                      ? 'Semua order di periode ini sudah dilepas — biaya 100% aktual, tidak ada estimasi.'
+                      : 'Real Profit di atas = biaya aktual (order yang dananya sudah dilepas) + estimasi (order belum dilepas)'}
                   </p>
                 </div>
               </div>
-              {pendingSummary.countPending > 0 && (
-                <div className="text-right">
-                  <p className="text-xl font-bold text-teal-700">{formatRp(pendingSummary.totalPending)}</p>
-                  <p className="text-xs text-muted-foreground">{pendingSummary.countPending} pesanan pending</p>
-                </div>
-              )}
+              <div className="text-right">
+                <p className="text-xl font-bold text-teal-700">{pendingSummary.coveragePct}%</p>
+                <p className="text-xs text-muted-foreground">biaya aktual</p>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Coverage bar */}
+            <div className="space-y-1.5">
+              <div className="h-2.5 rounded-full bg-amber-200 overflow-hidden flex">
+                <div
+                  className="h-full bg-teal-500"
+                  style={{ width: `${pendingSummary.coveragePct}%` }}
+                  title={`${pendingSummary.countReleased} order biaya aktual`}
+                />
+              </div>
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span><span className="inline-block w-2 h-2 rounded-sm bg-teal-500 mr-1 align-middle" />{pendingSummary.countReleased} order biaya aktual ({pendingSummary.coveragePct}%)</span>
+                <span><span className="inline-block w-2 h-2 rounded-sm bg-amber-400 mr-1 align-middle" />{pendingSummary.countUnreleased} order estimasi ({100 - pendingSummary.coveragePct}%)</span>
+              </div>
+            </div>
+
             {/* HPP coverage warning */}
             {pendingKpis.ordersNoHpp > 0 && (
               <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1.5 border border-amber-200">
-                ⚠️ {pendingKpis.ordersNoHpp} pesanan pending tidak dapat dihitung HPP-nya — pastikan HPP semua produk sudah diisi agar estimasi lebih akurat.
+                ⚠️ {pendingKpis.ordersNoHpp} order estimasi tidak dapat dihitung HPP-nya — pastikan HPP semua produk sudah diisi agar estimasi lebih akurat.
               </p>
-            )}
-
-            {/* Pending breakdown by status */}
-            {pendingSummary.countPending > 0 ? (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Breakdown Status Pending</p>
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {pendingSummary.byStatus.map(({ status, count, total }) => {
-                    const color = status === 'Telah Dikirim'
-                      ? 'bg-blue-50 border-blue-200 text-blue-700'
-                      : status === 'Sedang Dikirim'
-                      ? 'bg-amber-50 border-amber-200 text-amber-700'
-                      : status === 'Perlu Dikirim'
-                      ? 'bg-orange-50 border-orange-200 text-orange-700'
-                      : 'bg-gray-50 border-gray-200 text-gray-600'
-                    return (
-                      <div key={status} className={`rounded-lg border p-3 flex items-center justify-between gap-2 ${color}`}>
-                        <div>
-                          <p className="text-xs font-semibold">{status}</p>
-                          <p className="text-xs opacity-80">{count} pesanan</p>
-                        </div>
-                        <p className="text-sm font-bold tabular-nums">{formatRp(total)}</p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">✅ Semua pesanan di periode ini sudah dilepas dananya</p>
             )}
 
             {/* Rekonsiliasi */}
             <div className="border-t pt-3 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Rekonsiliasi Order</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Rekonsiliasi Order (periode ini)</p>
               <div className="grid sm:grid-cols-3 gap-3 text-sm">
                 <div className="bg-white rounded-lg border p-3">
-                  <p className="text-xs text-muted-foreground">Order Selesai (Order.all)</p>
-                  <p className="font-bold text-lg">{pendingSummary.countSelesai}</p>
-                  <p className="text-xs text-muted-foreground">{formatRp(pendingSummary.totalSelesai)} (GMV Pembeli)</p>
+                  <p className="text-xs text-muted-foreground">Total Order (non-batal)</p>
+                  <p className="font-bold text-lg">{pendingSummary.countNonBatal}</p>
+                  <p className="text-xs text-muted-foreground">{pendingSummary.countBatal} batal dikecualikan</p>
                 </div>
-                <div className="bg-white rounded-lg border p-3">
-                  <p className="text-xs text-muted-foreground">Order di Income File</p>
-                  <p className="font-bold text-lg">{filteredOrders.length}</p>
+                <div className="bg-green-50 border-green-200 rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Biaya Aktual (sudah dilepas)</p>
+                  <p className="font-bold text-lg text-green-700">{pendingSummary.countReleased}</p>
                   <p className="text-xs text-muted-foreground">{formatRp(kpis.totalNetIncome)} (Net Income)</p>
                 </div>
-                <div className={`rounded-lg border p-3 ${pendingSummary.matchedWithIncome === pendingSummary.countSelesai && pendingSummary.countSelesai > 0 ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
-                  <p className="text-xs text-muted-foreground">Order Cocok (Match)</p>
-                  <p className={`font-bold text-lg ${pendingSummary.matchedWithIncome === pendingSummary.countSelesai && pendingSummary.countSelesai > 0 ? 'text-green-700' : 'text-amber-700'}`}>
-                    {pendingSummary.matchedWithIncome}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {pendingSummary.matchedWithIncome === pendingSummary.countSelesai && pendingSummary.countSelesai > 0
-                      ? '✅ Semua cocok'
-                      : `⚠️ ${pendingSummary.countSelesai - pendingSummary.matchedWithIncome} belum di income file`}
-                  </p>
+                <div className="bg-amber-50 border-amber-200 rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Estimasi (belum dilepas)</p>
+                  <p className="font-bold text-lg text-amber-700">{pendingSummary.countUnreleased}</p>
+                  <p className="text-xs text-muted-foreground">{formatRp(pendingKpis.totalNetIncome)} (Net est.)</p>
                 </div>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                * GMV Pembeli ≠ Net Income — GMV adalah jumlah dibayar pembeli, Net Income adalah penerimaan penjual setelah biaya platform.
-                {pendingSummary.countSelesai > 0 && filteredOrders.length > pendingSummary.matchedWithIncome &&
-                  ` ${filteredOrders.length - pendingSummary.matchedWithIncome} order di income file kemungkinan dari periode sebelumnya.`
-                }
+                * Order &quot;belum dilepas&quot; ditentukan dari keberadaan di file Income (bukan label status) — order bisa berstatus &quot;Selesai&quot; tapi dananya belum cair. Biaya &amp; net income-nya diestimasi dari rata-rata order yang sudah dilepas. Begitu dananya cair, angka otomatis mengeras jadi aktual.
               </p>
             </div>
           </CardContent>
@@ -982,7 +1241,7 @@ export default function ProfitDashboard({
                 <CardTitle className="text-base">Alur Dana: Omzet → Real Profit</CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Rincian semua pengurangan dari omzet kotor sampai profit bersih
-                  {pendingKpis.hasPendingData && <span className="text-teal-600 font-medium"> · incl. estimasi pending</span>}
+                  {pendingKpis.hasPendingData && <span className="text-teal-600 font-medium"> · incl. estimasi belum dilepas</span>}
                   {prevPeriodLabel && (
                     <span className="ml-1">· dibanding <strong>{prevPeriodLabel}</strong></span>
                   )}
@@ -1041,9 +1300,9 @@ export default function ProfitDashboard({
                 // For discount and marketplace_fee groups, we may inject pending items
                 const pendingItem: Row | null =
                   hasPending && g.id === 'discount' && pendingKpis.totalDiskon > 0
-                    ? { kind: 'cost', label: 'Diskon Pending (Est.)', value: pendingKpis.totalDiskon, prev: 0, color: '#f59e0b', hint: 'Diskon produk + voucher penjual dari pesanan pending' }
+                    ? { kind: 'cost', label: 'Diskon Belum Dilepas (Est.)', value: pendingKpis.totalDiskon, prev: 0, color: '#f59e0b', hint: 'Diskon produk + voucher penjual dari order yang belum dilepas dananya' }
                     : hasPending && g.id === 'marketplace_fee' && pendingKpis.totalFees > 0
-                    ? { kind: 'cost', label: 'Biaya Marketplace Pending (Est.)', value: pendingKpis.totalFees, prev: 0, color: '#a78bfa', hint: 'Estimasi berdasarkan rata-rata fee rate dari order terkonfirmasi' }
+                    ? { kind: 'cost', label: 'Biaya Marketplace Belum Dilepas (Est.)', value: pendingKpis.totalFees, prev: 0, color: '#a78bfa', hint: 'Estimasi berdasarkan rata-rata fee rate dari order yang sudah dilepas' }
                     : null
 
                 if (items.length === 0 && !pendingItem) continue
@@ -1272,22 +1531,126 @@ export default function ProfitDashboard({
             {!kpis.hasHppData && (
               <div className="flex items-start gap-2 mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md px-3 py-2">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                <span>Isi HPP di Master Produk untuk melihat Real Profit setelah dikurangi HPP + Biaya Iklan.</span>
+                <span>Isi HPP di Mapping Produk untuk melihat Real Profit setelah dikurangi HPP + Biaya Iklan.</span>
               </div>
             )}
           </CardContent>
         </Card>
       )}
 
-      {/* === SECTION: Scale Recommendations (iklan yang bisa di-scale) === */}
-      {filteredAdsData.length > 0 && (
-        <ScaleRecommendationsSection scalable={scalable} allRecs={scaleRecs} />
+      {/* === SECTION: Margin & Efisiensi Iklan === */}
+      {marginInsight.hasHpp && (
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Net Margin</p>
+              <p className={`text-3xl font-bold ${(marginInsight.netMarginPct ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {marginInsight.netMarginPct != null ? `${marginInsight.netMarginPct.toFixed(1)}%` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Real Profit ÷ Total Omzet</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Iklan Memakan Profit Kotor</p>
+              <p className={`text-3xl font-bold ${
+                (marginInsight.adShareOfGrossProfit ?? 0) >= 80 ? 'text-red-600'
+                : (marginInsight.adShareOfGrossProfit ?? 0) >= 50 ? 'text-orange-500'
+                : 'text-blue-600'
+              }`}>
+                {marginInsight.adShareOfGrossProfit != null ? `${marginInsight.adShareOfGrossProfit.toFixed(0)}%` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {formatRp(marginInsight.adSpend)} iklan dari {formatRp(marginInsight.grossProfit)} profit kotor
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground mb-1">Profit Kotor (sebelum iklan)</p>
+              <p className="text-3xl font-bold text-emerald-600">{formatRp(marginInsight.grossProfit)}</p>
+              <p className="text-xs text-muted-foreground mt-1">Net Income − HPP</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      {marginInsight.hasHpp && (marginInsight.adShareOfGrossProfit ?? 0) >= 80 && (
+        <Alert variant="destructive">
+          <TrendingDown className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Iklan memakan {marginInsight.adShareOfGrossProfit!.toFixed(0)}% dari profit kotor.</strong>{' '}
+            Profit bersih lo tipis banget karena biaya iklan. Cek tab Detail Iklan — matikan/optimasi campaign dengan ROAS rendah.
+          </AlertDescription>
+        </Alert>
       )}
 
-      {/* === SECTION: ROAS Targets per Product === */}
-      {masterProducts.length > 0 && (
-        <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
+      {/* === SECTION: ROI Modal & Repeat Buyer === */}
+      {(roiModal.hasData || repeatBuyer.hasData) && (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {roiModal.hasData && (
+            <>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Wallet className="h-3.5 w-3.5" /> ROI Modal Barang
+                  </p>
+                  <p className={`text-3xl font-bold ${(roiModal.roiBarangPct ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {roiModal.roiBarangPct != null ? `${roiModal.roiBarangPct.toFixed(0)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Profit kotor {formatRp(roiModal.grossProfit)} ÷ modal {formatRp(roiModal.modalBarang)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Banknote className="h-3.5 w-3.5" /> ROI Usaha (+ iklan)
+                  </p>
+                  <p className={`text-3xl font-bold ${(roiModal.roiUsahaPct ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {roiModal.roiUsahaPct != null ? `${roiModal.roiUsahaPct.toFixed(0)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Real profit {formatRp(roiModal.realProfit)} ÷ modal usaha {formatRp(roiModal.totalModal)}
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          )}
+          {repeatBuyer.hasData && (
+            <>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Repeat className="h-3.5 w-3.5" /> Repeat Buyer Rate
+                  </p>
+                  <p className={`text-3xl font-bold ${repeatBuyer.repeatRatePct >= 25 ? 'text-emerald-600' : repeatBuyer.repeatRatePct >= 10 ? 'text-blue-600' : 'text-orange-500'}`}>
+                    {repeatBuyer.repeatRatePct.toFixed(0)}%
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {repeatBuyer.repeatCount} dari {repeatBuyer.totalBuyers} pembeli order ulang
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5">
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5" /> Omzet dari Repeat Buyer
+                  </p>
+                  <p className="text-3xl font-bold text-indigo-600">
+                    {repeatBuyer.repeatOmzetSharePct.toFixed(0)}%
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {formatRp(repeatBuyer.repeatOmzet)} · {repeatBuyer.avgOrdersPerBuyer.toFixed(1)} order/pembeli
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
       )}
+
+      <SectionDivider icon={Package} title="Tren & Produk" />
 
       {/* === SECTION: Trend Chart === */}
       <Card>
@@ -1323,6 +1686,77 @@ export default function ProfitDashboard({
             </CardContent>
           </Card>
 
+      {/* === SECTION: Kontribusi Profit per Produk (Pareto) === */}
+      {profitContribution.hasData && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <CardTitle className="text-base">Kontribusi Profit per Produk</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Produk mana yang benar-benar bikin untung (diurut Real Profit, bukan omzet)
+                </p>
+              </div>
+              {profitContribution.totalProfit > 0 && profitContribution.winnerCount > 0 && (
+                <div className="text-right">
+                  <p className="text-sm font-bold text-primary">
+                    {profitContribution.paretoCount} produk = 80% profit
+                  </p>
+                  <p className="text-xs text-muted-foreground">dari {profitContribution.winnerCount} produk untung</p>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Top kontributor profit */}
+            <div className="space-y-2">
+              {profitContribution.top.map((r) => (
+                <div key={r.productId} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="truncate flex-1 min-w-0" title={r.productName}>{r.productName}</span>
+                    <span className="font-semibold text-green-700 tabular-nums shrink-0">{formatRp(r.profit)}</span>
+                    <span className="text-xs text-muted-foreground w-12 text-right shrink-0">{r.sharePct.toFixed(0)}%</span>
+                  </div>
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full bg-green-500" style={{ width: `${Math.min(100, r.sharePct)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Produk rugi */}
+            {profitContribution.loserCount > 0 && (
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-xs font-medium text-red-600 uppercase tracking-wide">
+                  ⚠️ {profitContribution.loserCount} Produk Rugi · total {formatRp(profitContribution.totalLoss)}
+                </p>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {profitContribution.losers.slice(0, 6).map((r) => (
+                    <div key={r.productId} className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-2 text-sm">
+                      <span className="truncate flex-1 min-w-0" title={r.productName}>{r.productName}</span>
+                      <span className="font-semibold text-red-700 tabular-nums shrink-0">{formatRp(r.profit)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Produk rugi = harga jual − HPP − biaya − iklan masih minus. Pertimbangkan naikkan harga, kurangi diskon, atau stop iklannya.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* === SECTION: Per Product === */}
+      <Card>
+        <CardHeader className="pb-3"><CardTitle className="text-base">Profit per Produk</CardTitle></CardHeader>
+        <CardContent>
+          <ProductProfitTable rows={productRows} />
+        </CardContent>
+      </Card>
+
+      <SectionDivider icon={Users} title="Penjualan & Pembeli" />
+
       {/* === SECTION: Busy Days + Top Products + Top Buyers === */}
       <div className="grid md:grid-cols-2 gap-4">
         <BusyDaysSection rows={busyDays} />
@@ -1332,6 +1766,8 @@ export default function ProfitDashboard({
 
       {/* === SECTION: Daily Detail Table === */}
       <DailyDetailSection rows={dailyDetail} />
+
+      <SectionDivider icon={Receipt} title="Biaya & Pembayaran" />
 
       {/* === SECTION: Fee Breakdown === */}
       <div className="grid sm:grid-cols-2 gap-4">
@@ -1378,14 +1814,6 @@ export default function ProfitDashboard({
               </CardContent>
             </Card>
           </div>
-
-      {/* === SECTION: Per Product === */}
-      <Card>
-        <CardHeader className="pb-3"><CardTitle className="text-base">Profit per Produk</CardTitle></CardHeader>
-        <CardContent>
-          <ProductProfitTable rows={productRows} />
-        </CardContent>
-      </Card>
 
       {/* === SECTION: Payment Distribution === */}
       <div className="grid sm:grid-cols-2 gap-4">
@@ -1466,6 +1894,59 @@ export default function ProfitDashboard({
               </div>
             </CardContent>
           </Card>
+
+      <SectionDivider icon={Wallet} title="Arus Kas" />
+
+      {/* === SECTION: Proyeksi Dana Cair (Escrow Forecast) === */}
+      {pendingKpis.hasPendingData && (
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <span className="text-base">💸</span>
+              </div>
+              <div>
+                <CardTitle className="text-base">Proyeksi Dana Cair</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Estimasi penerimaan bersih dari order yang dananya belum dilepas Shopee
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid sm:grid-cols-3 gap-3 text-sm">
+              <div className="bg-white rounded-lg border border-emerald-200 p-3">
+                <p className="text-xs text-muted-foreground">Estimasi Dana Belum Cair</p>
+                <p className="font-bold text-2xl text-emerald-700">{formatRp(pendingKpis.totalNetIncome)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">dari {pendingKpis.orderCount} order belum dilepas</p>
+              </div>
+              <div className="bg-white rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Rata-rata Jeda Pencairan</p>
+                <p className="font-bold text-2xl text-blue-600">
+                  {cashFlow.ordersWithBothDates > 0 ? cashFlow.avgDays : '—'}
+                  {cashFlow.ordersWithBothDates > 0 && <span className="text-base font-normal"> hari</span>}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {cashFlow.ordersWithBothDates > 0
+                    ? 'sejak pesanan dibuat → dana cair'
+                    : 'belum cukup data pencairan'}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Perkiraan Cair Maksimal</p>
+                <p className="font-bold text-2xl text-orange-600">
+                  {cashFlow.ordersWithBothDates > 0 ? `~${cashFlow.maxDays}` : '—'}
+                  {cashFlow.ordersWithBothDates > 0 && <span className="text-base font-normal"> hari</span>}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">setelah tanggal pesanan dibuat</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              * Estimasi net memakai rata-rata potongan dari order yang sudah dilepas. Jeda pencairan dihitung dari order yang sudah ada tanggal cairnya{cashFlow.ordersWithBothDates > 0 ? ` (${cashFlow.ordersWithBothDates} order)` : ''}.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* === SECTION: Cash Flow === */}
       <div className="grid sm:grid-cols-3 gap-4">

@@ -367,10 +367,15 @@ export default function LandingPage() {
             </div>
             <span className="font-semibold">Profit Tebel</span>
           </div>
-          <p className="text-sm text-muted-foreground">
-            © 2026 Profit Tebel. Dibuat untuk seller Indonesia.
-          </p>
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+            <Link href="/syarat-ketentuan" className="hover:text-foreground">Syarat &amp; Ketentuan</Link>
+            <Link href="/kebijakan-refund" className="hover:text-foreground">Kebijakan Refund</Link>
+            <Link href="/faq" className="hover:text-foreground">FAQ</Link>
+          </div>
         </div>
+        <p className="mt-4 text-center text-sm text-muted-foreground">
+          © 2026 Profit Tebel. Dibuat untuk seller Indonesia.
+        </p>
       </footer>
     </div>
   );

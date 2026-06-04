@@ -1,5 +1,5 @@
 import type { LocalUser } from '@/lib/postgres/auth'
-import type { AppUserRole } from '@/types'
+import type { AppUserRole, SubscriptionPlan, SubscriptionStatus } from '@/types'
 
 const SUPERADMIN_EMAIL = (
   process.env.SUPERADMIN_EMAIL ?? 'profittebel.admin@gmail.com'
@@ -12,6 +12,8 @@ type ProfileRoleRow = {
   is_paid: boolean | null
   role: string | null
   created_by_id: string | null
+  subscription_plan: string | null
+  subscription_expires_at: string | null
 }
 
 export type CurrentUserAccess = {
@@ -22,6 +24,38 @@ export type CurrentUserAccess = {
   isSuperadmin: boolean
   isManagedAccount: boolean
   isPaid: boolean
+  subscription: SubscriptionStatus
+  hasInventoryAccess: boolean  // true jika boleh akses fitur pembelian/inventori/produksi
+}
+
+export function resolveSubscription(profile: ProfileRoleRow | null, isPrivileged: boolean): SubscriptionStatus {
+  if (isPrivileged) {
+    // superadmin & admin selalu punya akses penuh
+    return { plan: 'lifetime', isActive: true, expiresAt: null, daysRemaining: null }
+  }
+
+  const plan = (profile?.subscription_plan ?? null) as SubscriptionPlan
+  const expiresAt = profile?.subscription_expires_at ?? null
+
+  if (plan === 'lifetime') {
+    return { plan, isActive: true, expiresAt: null, daysRemaining: null }
+  }
+
+  if (plan === 'monthly') {
+    if (!expiresAt) return { plan, isActive: false, expiresAt: null, daysRemaining: null }
+    const now = new Date()
+    const expiry = new Date(expiresAt)
+    const msRemaining = expiry.getTime() - now.getTime()
+    const daysRemaining = Math.floor(msRemaining / (1000 * 60 * 60 * 24))
+    return {
+      plan,
+      isActive: msRemaining > 0,
+      expiresAt,
+      daysRemaining,
+    }
+  }
+
+  return { plan: plan ?? 'free', isActive: false, expiresAt: null, daysRemaining: null }
 }
 
 export function normalizeEmail(email: string | null | undefined) {
@@ -33,7 +67,7 @@ export function isSuperadminEmail(email: string | null | undefined) {
 }
 
 export function isAppUserRole(role: string | null | undefined): role is AppUserRole {
-  return role === 'superadmin' || role === 'admin' || role === 'member'
+  return role === 'superadmin' || role === 'member'
 }
 
 export function resolveUserRole(
@@ -44,6 +78,11 @@ export function resolveUserRole(
     return role
   }
 
+  // role lama 'admin' → downgrade ke member (role admin dihapus)
+  if (role === 'admin') {
+    return 'member'
+  }
+
   if (isSuperadminEmail(email)) {
     return 'superadmin'
   }
@@ -52,23 +91,20 @@ export function resolveUserRole(
 }
 
 export function isPrivilegedRole(role: AppUserRole) {
-  return role === 'superadmin' || role === 'admin'
+  return role === 'superadmin'
 }
 
 export function getManagedRole(role: AppUserRole): AppUserRole | null {
   if (role === 'superadmin') {
-    return 'admin'
-  }
-
-  if (role === 'admin') {
     return 'member'
   }
-
   return null
 }
 
 export function canCreateStore(role: AppUserRole) {
-  return role !== 'member'
+  // Member boleh membuat toko sendiri (jadi pemilik/owner toko itu).
+  // Superadmin juga bisa. Store di-scope per user_id lewat RLS.
+  return role === 'superadmin' || role === 'member'
 }
 
 export async function getCurrentUserAccess(
@@ -93,21 +129,26 @@ export async function getCurrentUserAccess(
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id,email,full_name,is_paid,role,created_by_id')
+    .select('id,email,full_name,is_paid,role,created_by_id,subscription_plan,subscription_expires_at')
     .eq('id', user.id)
     .maybeSingle()
 
   const typedProfile = (profile ?? null) as ProfileRoleRow | null
   const role = resolveUserRole(typedProfile?.role, user.email)
   const isManagedAccount = Boolean(typedProfile?.created_by_id)
+  const isPrivileged = isPrivilegedRole(role)
+  const subscription = resolveSubscription(typedProfile, isPrivileged)
 
   return {
     user,
     profile: typedProfile,
     role,
-    isPrivileged: isPrivilegedRole(role),
+    isPrivileged,
     isSuperadmin: role === 'superadmin',
     isManagedAccount,
-    isPaid: isPrivilegedRole(role) || isManagedAccount || (typedProfile?.is_paid ?? false),
+    // Semua user terotentikasi dapat akses Basic (dashboard). Pro = subscription aktif.
+    isPaid: true,
+    subscription,
+    hasInventoryAccess: isPrivileged || subscription.isActive,
   }
 }

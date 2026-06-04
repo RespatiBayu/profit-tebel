@@ -85,14 +85,14 @@ export function RecalculateHppButton({ storeId, disabled = false }: Props) {
             )}
             <AlertDescription className={`text-xs space-y-1 ${noMasterHpp ? 'text-amber-900' : 'text-green-800'}`}>
               <p className="font-medium">
-                {noMasterHpp ? 'HPP tidak bisa dihitung — master produk kosong:' : 'HPP berhasil dihitung ulang:'}
+                {noMasterHpp ? 'HPP tidak bisa dihitung — mapping produk kosong:' : 'HPP berhasil dihitung ulang:'}
               </p>
               <ul className="list-disc list-inside space-y-0.5">
                 <li className={noMasterHpp ? 'font-medium text-amber-800' : ''}>
-                  {result.mastersWithHpp}/{result.totalMasters} master produk punya HPP terisi
+                  {result.mastersWithHpp}/{result.totalMasters} mapping produk punya HPP terisi
                 </li>
                 {result.migratedMasters > 0 && (
-                  <li>{result.migratedMasters} master produk di-migrasi numeric ID → SKU</li>
+                  <li>{result.migratedMasters} mapping produk di-migrasi numeric ID → SKU</li>
                 )}
                 <li>
                   {result.ordersAllWithHpp}/{result.ordersAllUpdated} order pending dapat HPP &gt; 0
@@ -118,7 +118,7 @@ export function RecalculateHppButton({ storeId, disabled = false }: Props) {
                   href="/dashboard/products"
                   className="inline-block underline font-medium text-amber-800 mt-1"
                 >
-                  → Buka menu Master Produk untuk isi HPP
+                  → Buka menu Mapping Produk untuk isi HPP
                 </DashboardLink>
               ) : (
                 <Button

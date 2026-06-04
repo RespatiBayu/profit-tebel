@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   const productsQuery = supabase
     .from('master_products')
-    .select('id, marketplace_product_id, seller_sku, numeric_id, source_tags, product_name, hpp, packaging_cost, marketplace, category, notes')
+    .select('id, marketplace_product_id, seller_sku, numeric_id, source_tags, product_name, hpp, packaging_cost, marketplace, category, notes, linked_item_id, linked_item:items!linked_item_id(name)')
     .order('product_name', { ascending: true })
 
   if (storeId) {
@@ -81,29 +81,43 @@ export async function GET(request: NextRequest) {
 
   const orderedSourceTags: MasterProductSourceTag[] = ['income', 'orders_all', 'ads', 'ads_product']
 
-  return NextResponse.json({
-    products: typedProducts.map((product) => ({
-      ...product,
-      source_tags: orderedSourceTags.filter((tag) => {
-        if ((product.source_tags ?? []).includes(tag)) return true
-        if (tag === 'orders_all') return !!product.seller_sku
-        if (tag === 'income') {
-          if (!product.numeric_id && !(product.source_tags ?? []).includes('income')) return false
-          return (
-            incomeSet.has(product.marketplace_product_id) ||
-            (!!product.seller_sku && incomeSet.has(product.seller_sku))
-          )
-        }
-        if (tag === 'ads') return adsSet.has(product.marketplace_product_id)
-        if (tag === 'ads_product') return adsProductSet.has(product.marketplace_product_id)
-        return false
-      }),
-      has_income_data:
-        incomeSet.has(product.marketplace_product_id) ||
-        (!!product.seller_sku && incomeSet.has(product.seller_sku)),
-      has_ads_data: adsSet.has(product.marketplace_product_id),
-    })),
+  const mappedProducts = typedProducts.map((product) => ({
+    ...product,
+    source_tags: orderedSourceTags.filter((tag) => {
+      if ((product.source_tags ?? []).includes(tag)) return true
+      if (tag === 'orders_all') return !!product.seller_sku
+      if (tag === 'income') {
+        if (!product.numeric_id && !(product.source_tags ?? []).includes('income')) return false
+        return (
+          incomeSet.has(product.marketplace_product_id) ||
+          (!!product.seller_sku && incomeSet.has(product.seller_sku))
+        )
+      }
+      if (tag === 'ads') return adsSet.has(product.marketplace_product_id)
+      if (tag === 'ads_product') return adsProductSet.has(product.marketplace_product_id)
+      return false
+    }),
+    has_income_data:
+      incomeSet.has(product.marketplace_product_id) ||
+      (!!product.seller_sku && incomeSet.has(product.seller_sku)),
+    has_ads_data: adsSet.has(product.marketplace_product_id),
+    linked_item_name: ((product as unknown as { linked_item?: { name: string }[] | null }).linked_item?.[0]?.name) ?? null,
+  }))
+
+  // Mapping Produk hanya menampilkan produk dari Income (sudah dilepas) dan/atau
+  // Order.all. Produk yang sumbernya HANYA dari Iklan disembunyikan (tidak dipakai
+  // untuk perhitungan HPP/profit). Produk tanpa tag sumber yang dikenali (mis.
+  // ditambahkan manual) tetap ditampilkan.
+  const visibleProducts = mappedProducts.filter((product) => {
+    const tags = product.source_tags ?? []
+    const fromIncomeOrOrders = tags.includes('income') || tags.includes('orders_all')
+    const fromAds = tags.includes('ads') || tags.includes('ads_product')
+    if (fromIncomeOrOrders) return true
+    if (fromAds) return false
+    return true
   })
+
+  return NextResponse.json({ products: visibleProducts })
 }
 
 export async function PATCH(request: NextRequest) {

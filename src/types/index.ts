@@ -127,9 +127,217 @@ export interface UploadJobStatusResponse {
   finishedAt: string | null
 }
 
-export type AppUserRole = 'superadmin' | 'admin' | 'member'
+export type AppUserRole = 'superadmin' | 'member'
+
+// ============================================================
+// SUBSCRIPTION
+// ============================================================
+export type SubscriptionPlan = 'free' | 'monthly' | 'lifetime' | null
+
+export interface SubscriptionStatus {
+  plan: SubscriptionPlan
+  isActive: boolean          // true jika inventory features boleh diakses
+  expiresAt: string | null   // ISO string
+  daysRemaining: number | null  // null jika bukan monthly; negatif = expired
+}
 
 export type StoreAccessRole = 'owner' | 'member'
+
+// ============================================================
+// INVENTORY — Master Items
+// ============================================================
+export type ItemType = 'raw_material' | 'semi_finished' | 'finished_good'
+
+export interface Item {
+  id: string
+  user_id: string
+  store_id: string | null
+  name: string
+  sku: string | null
+  type: ItemType
+  unit: string               // pcs, kg, gram, liter, ml, lusin, dll
+  cost_per_unit: number      // harga manual / fallback
+  packaging_cost: number     // biaya packaging per unit (barang jadi), 0 = tidak diset
+  min_stock_qty: number      // batas stok minimum, 0 = tidak diset
+  notes: string | null
+  created_at: string
+  updated_at: string
+  // Computed from item_stock view (joined on demand)
+  qty_on_hand?: number
+  avg_cost?: number | null
+}
+
+// ============================================================
+// INVENTORY — Bill of Materials (BOM)
+// ============================================================
+export interface BomLine {
+  id: string
+  bom_id: string
+  input_item_id: string
+  qty_per_output: number
+  sort_order: number
+  notes: string | null
+  // Joined
+  input_item?: Item
+}
+
+export interface BomHeader {
+  id: string
+  user_id: string
+  store_id: string | null
+  output_item_id: string
+  output_qty: number
+  name: string | null
+  notes: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  // Joined
+  output_item?: Item
+  lines?: BomLine[]
+  // Computed
+  hpp_per_unit?: number | null  // kalkulasi rekursif dari lines
+}
+
+// ============================================================
+// INVENTORY — Purchase Orders
+// ============================================================
+export type PurchaseOrderStatus = 'draft' | 'confirmed' | 'received' | 'cancelled'
+
+export interface PurchaseOrderLine {
+  id: string
+  po_id: string
+  item_id: string
+  qty_ordered: number
+  qty_received: number
+  unit_cost: number
+  // Computed
+  total_cost?: number
+  // Joined
+  item?: Item
+}
+
+export interface PurchaseOrder {
+  id: string
+  user_id: string
+  store_id: string | null
+  po_number: string | null
+  date: string               // ISO date
+  supplier: string | null
+  status: PurchaseOrderStatus
+  notes: string | null
+  total_amount: number
+  created_at: string
+  updated_at: string
+  lines?: PurchaseOrderLine[]
+}
+
+// ============================================================
+// INVENTORY — Transactions & Stock
+// ============================================================
+export type InventoryTransactionType =
+  | 'purchase_in'
+  | 'production_in'
+  | 'production_out'
+  | 'sale_out'
+  | 'adjustment'
+
+export interface InventoryTransaction {
+  id: string
+  user_id: string
+  store_id: string | null
+  item_id: string
+  transaction_type: InventoryTransactionType
+  reference_id: string | null
+  reference_type: string | null
+  qty: number                // positif = masuk, negatif = keluar
+  unit_cost: number | null
+  date: string               // ISO date
+  notes: string | null
+  created_at: string
+  // Joined
+  item?: Item
+}
+
+export interface ItemStock {
+  user_id: string
+  store_id: string | null
+  item_id: string
+  qty_on_hand: number
+  avg_cost: number | null
+  last_transaction_date: string | null
+  transaction_count: number
+}
+
+// ============================================================
+// INVENTORY — Stock Opname
+// ============================================================
+export type StockOpnameStatus = 'draft' | 'finalized'
+
+export interface StockOpnameLine {
+  id: string
+  session_id: string
+  item_id: string
+  system_qty: number
+  actual_qty: number | null
+  notes: string | null
+  // Joined
+  item?: Pick<Item, 'id' | 'name' | 'unit' | 'type' | 'sku'>
+}
+
+export interface StockOpnameSession {
+  id: string
+  user_id: string
+  store_id: string | null
+  name: string
+  status: StockOpnameStatus
+  date: string
+  notes: string | null
+  finalized_at: string | null
+  created_at: string
+  updated_at: string
+  // Joined
+  lines?: StockOpnameLine[]
+}
+
+// ============================================================
+// INVENTORY — Production Orders
+// ============================================================
+export type ProductionOrderStatus = 'draft' | 'in_progress' | 'completed' | 'cancelled'
+
+export interface ProductionOrderLine {
+  id: string
+  production_order_id: string
+  item_id: string
+  planned_qty: number
+  actual_qty: number | null
+  unit_cost_snapshot: number | null
+  // Joined
+  item?: Item
+  // Enriched from item_stock
+  avg_cost?: number | null
+}
+
+export interface ProductionOrder {
+  id: string
+  user_id: string
+  store_id: string | null
+  bom_id: string
+  po_number: string | null
+  status: ProductionOrderStatus
+  planned_qty: number
+  actual_qty: number | null
+  date: string               // ISO date
+  notes: string | null
+  total_material_cost: number | null
+  hpp_per_unit: number | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+  // Joined
+  bom?: BomHeader
+  lines?: ProductionOrderLine[]
+}
 
 export interface AvailablePeriods {
   years: string[]
@@ -164,6 +372,8 @@ export interface MasterProduct {
   notes: string | null
   has_income_data?: boolean
   has_ads_data?: boolean
+  linked_item_id?: string | null
+  linked_item_name?: string | null   // joined display name
 }
 
 // DB row from `orders` table (what Supabase returns)
@@ -398,6 +608,9 @@ export interface TrafficLightRow {
   /** BEP ROAS — titik impas berdasarkan HPP + fee preset marketplace.
    *  Formula: harga jual / (harga jual − HPP − total fee). null kalau HPP/units nggak cukup. */
   bepRoas: number | null
+  /** Real ROAS = (GMV × 0.89 − total HPP cost) / Ad Spend
+   *  Memperhitungkan PPN 11% dari GMV + HPP. null kalau HPP belum diisi. */
+  realRoas: number | null
 }
 
 export interface FunnelRow {

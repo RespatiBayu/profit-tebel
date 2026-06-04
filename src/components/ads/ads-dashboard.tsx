@@ -25,7 +25,7 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts'
-import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight } from 'lucide-react'
+import { TrendingUp, Target, Flame, AlertCircle, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Lightbulb, Eye, MousePointerClick, ShoppingCart, Ticket, AlertTriangle, CheckCircle2, TrendingDown, Zap } from 'lucide-react'
 import {
   calculateAdsOverview,
   buildTrafficLightRows,
@@ -43,6 +43,7 @@ import {
 } from '@/lib/calculations/profit'
 import { ROAS_THRESHOLDS } from '@/lib/constants/marketplace-fees'
 import { buildMasterProductMap } from '@/lib/master-product-map'
+import { RoasTargetsSection } from '@/components/profit/dashboard-sections'
 import type {
   AvailablePeriods,
   DbAdsRow,
@@ -88,18 +89,16 @@ function formatPct(n: number) {
 // ---------------------------------------------------------------------------
 
 const SIGNAL_CONFIG = {
-  scale: { label: '🟢 SCALE', color: 'bg-green-100 text-green-800 border-green-300' },
-  optimize: { label: '🟡 OPTIMIZE', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
-  kill: { label: '🔴 KILL', color: 'bg-red-100 text-red-800 border-red-300' },
-  neutral: { label: '⚪ —', color: 'bg-muted text-muted-foreground border-border' },
+  scale:    { color: 'bg-green-500' },
+  optimize: { color: 'bg-yellow-400' },
+  kill:     { color: 'bg-red-500' },
+  neutral:  { color: 'bg-gray-300' },
 } as const
 
 function SignalBadge({ signal }: { signal: keyof typeof SIGNAL_CONFIG }) {
-  const { label, color } = SIGNAL_CONFIG[signal]
+  const { color } = SIGNAL_CONFIG[signal]
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${color}`}>
-      {label}
-    </span>
+    <span className={`inline-block h-3 w-3 rounded-full ${color}`} />
   )
 }
 
@@ -114,6 +113,31 @@ function AdStatusBadge({ status }: { status: string | null }) {
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${color}`}>
       {status}
     </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Insight tone styling
+// ---------------------------------------------------------------------------
+
+const AD_INSIGHT_TONE = {
+  bad:  { box: 'border-red-200 bg-red-50',       iconColor: 'text-red-600',    icon: AlertTriangle },
+  warn: { box: 'border-amber-200 bg-amber-50',   iconColor: 'text-amber-600',  icon: AlertCircle },
+  good: { box: 'border-green-200 bg-green-50',   iconColor: 'text-green-600',  icon: CheckCircle2 },
+  info: { box: 'border-blue-200 bg-blue-50',     iconColor: 'text-blue-600',   icon: Lightbulb },
+} as const
+
+// ---------------------------------------------------------------------------
+// Section divider (visual group heading)
+// ---------------------------------------------------------------------------
+
+function SectionDivider({ icon: Icon, title }: { icon: typeof Lightbulb; title: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-4">
+      <Icon className="h-4 w-4 shrink-0 text-primary" />
+      <h2 className="whitespace-nowrap text-sm font-bold tracking-tight">{title}</h2>
+      <div className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
+    </div>
   )
 }
 
@@ -352,7 +376,7 @@ function TrafficLightTable({
                         {row.bepRoas.toFixed(2)}x
                       </span>
                     ) : (
-                      <span className="text-xs text-muted-foreground" title="Isi HPP produk di Master Produk">—</span>
+                      <span className="text-xs text-muted-foreground" title="Isi HPP produk di Mapping Produk">—</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -812,6 +836,125 @@ export default function AdsDashboard({
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
 
+  // Avg realized selling price per product (GMV / units sold) from ads data — feeds Target ROAS.
+  const sellingPriceMap = useMemo(() => {
+    const m = new Map<string, number>()
+    const agg = new Map<string, { gmv: number; units: number }>()
+    for (const a of filteredAds) {
+      if (!a.product_code || a.product_code === '-') continue
+      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
+      e.gmv += a.gmv; e.units += a.units_sold; agg.set(a.product_code, e)
+    }
+    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
+      if (units > 0) m.set(code, gmv / units)
+    }
+    return m
+  }, [filteredAds])
+
+  // === Diagnosa Funnel: agregat tayang→klik→beli untuk cari titik bocor ===
+  const funnelDiag = useMemo(() => {
+    let impressions = 0, clicks = 0, conversions = 0, adSpend = 0, gmv = 0
+    for (const a of perProductAdRows) {
+      impressions += a.impressions
+      clicks += a.clicks
+      conversions += a.conversions
+      adSpend += a.ad_spend
+      gmv += a.gmv
+    }
+    const ctr = impressions > 0 ? clicks / impressions : 0
+    const cvr = clicks > 0 ? conversions / clicks : 0
+    const cpc = clicks > 0 ? adSpend / clicks : 0
+    const cpm = impressions > 0 ? (adSpend / impressions) * 1000 : 0
+    const cpa = conversions > 0 ? adSpend / conversions : 0
+    // Tentukan diagnosa titik bocor terlemah (benchmark kasar Shopee).
+    let leak: { stage: string; msg: string; tone: 'bad' | 'warn' | 'good' } | null = null
+    if (impressions > 0) {
+      if (ctr < 0.01) {
+        leak = { stage: 'Tayang → Klik', tone: 'bad', msg: `CTR ${(ctr * 100).toFixed(2)}% — banyak yang lihat tapi sedikit yang klik. Perbaiki thumbnail, judul, dan harga coret biar lebih menarik.` }
+      } else if (cvr > 0 && cvr < 0.02) {
+        leak = { stage: 'Klik → Beli', tone: 'bad', msg: `Dari yang klik, cuma ${(cvr * 100).toFixed(1)}% yang beli. Cek harga, foto produk, ulasan, dan ongkir — pengunjung datang tapi ragu checkout.` }
+      } else if (ctr < 0.02) {
+        leak = { stage: 'Tayang → Klik', tone: 'warn', msg: `CTR ${(ctr * 100).toFixed(2)}% masih bisa dinaikin. Coba variasi materi iklan biar lebih banyak yang klik.` }
+      } else if (cvr < 0.04) {
+        leak = { stage: 'Klik → Beli', tone: 'warn', msg: `Konversi ${(cvr * 100).toFixed(1)}% cukup, tapi masih ada ruang. Perkuat halaman produk & ulasan.` }
+      } else {
+        leak = { stage: 'Funnel sehat', tone: 'good', msg: `CTR ${(ctr * 100).toFixed(2)}% & konversi ${(cvr * 100).toFixed(1)}% sudah bagus. Fokus naikin budget di iklan SCALE.` }
+      }
+    }
+    return { impressions, clicks, conversions, adSpend, gmv, ctr, cvr, cpc, cpm, cpa, leak, hasData: impressions > 0 }
+  }, [perProductAdRows])
+
+  // === Uang Hangus: spend yang kebakar di iklan KILL (rugi) ===
+  const wastedSpend = useMemo(() => {
+    const killRows = trafficLightRows
+      .filter((r) => r.signal === 'kill' && r.adSpend > 0)
+      .sort((a, b) => b.adSpend - a.adSpend)
+    const total = killRows.reduce((s, r) => s + r.adSpend, 0)
+    const gmvBack = killRows.reduce((s, r) => s + r.gmv, 0)
+    const totalSpendAll = trafficLightRows.reduce((s, r) => s + r.adSpend, 0)
+    const sharePct = totalSpendAll > 0 ? (total / totalSpendAll) * 100 : 0
+    return { killRows, total, gmvBack, sharePct, count: killRows.length, hasData: killRows.length > 0 }
+  }, [trafficLightRows])
+
+  // === Dampak Voucher: berapa GMV iklan yang didorong voucher vs organik ===
+  const voucherImpact = useMemo(() => {
+    let voucherCost = 0, voucheredSales = 0, gmv = 0
+    for (const a of perProductAdRows) {
+      voucherCost += a.voucher_amount
+      voucheredSales += a.vouchered_sales
+      gmv += a.gmv
+    }
+    const sharePct = gmv > 0 ? (voucheredSales / gmv) * 100 : 0
+    return { voucherCost, voucheredSales, gmv, sharePct, hasData: voucherCost > 0 || voucheredSales > 0 }
+  }, [perProductAdRows])
+
+  // === Insight & Aksi Otomatis: ranking bad → warn → good → info ===
+  const autoInsights = useMemo(() => {
+    type Insight = { tone: 'bad' | 'warn' | 'good' | 'info'; text: string }
+    const out: Insight[] = []
+
+    if (wastedSpend.hasData) {
+      out.push({
+        tone: 'bad',
+        text: `${wastedSpend.count} iklan rugi (KILL) menghabiskan ${formatRpFull(wastedSpend.total)}${wastedSpend.sharePct > 0 ? ` (${wastedSpend.sharePct.toFixed(0)}% dari total ad spend)` : ''}. Jeda atau perbaiki dulu sebelum makin boros.`,
+      })
+    }
+    if (funnelDiag.leak && funnelDiag.leak.tone !== 'good') {
+      out.push({ tone: funnelDiag.leak.tone, text: `${funnelDiag.leak.stage}: ${funnelDiag.leak.msg}` })
+    }
+    if (voucherImpact.hasData && voucherImpact.sharePct >= 40) {
+      out.push({
+        tone: 'warn',
+        text: `${voucherImpact.sharePct.toFixed(0)}% penjualan iklan didorong voucher (${formatRpFull(voucherImpact.voucherCost)} biaya voucher). Profit asli lebih tipis dari ROAS yang terlihat — hitung ulang margin.`,
+      })
+    }
+    if (kpis.scaleCount > 0) {
+      out.push({
+        tone: 'good',
+        text: `${kpis.scaleCount} iklan layak SCALE (ROAS di atas target). Naikkan budget bertahap ~20% biar nggak ganggu efisiensi.`,
+      })
+    }
+    if (funnelDiag.leak && funnelDiag.leak.tone === 'good' && kpis.scaleCount === 0) {
+      out.push({ tone: 'good', text: funnelDiag.leak.msg })
+    }
+    if (!hasHppData) {
+      out.push({
+        tone: 'info',
+        text: 'Isi HPP di Mapping Produk biar sinyal SCALE/OPTIMIZE/KILL dan Target ROAS akurat — sekarang sebagian iklan belum bisa dinilai untung/ruginya.',
+      })
+    }
+    if (kpis.overallRoas > 0) {
+      if (kpis.overallRoas >= ROAS_THRESHOLDS.scale) {
+        out.push({ tone: 'good', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× — iklan kamu secara keseluruhan sehat. Pertahankan & scale yang menang.` })
+      } else if (kpis.overallRoas < ROAS_THRESHOLDS.kill) {
+        out.push({ tone: 'bad', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× masih rendah. Pangkas iklan rugi & alihkan budget ke produk yang menang.` })
+      }
+    }
+
+    const rank = { bad: 0, warn: 1, good: 2, info: 3 }
+    return out.sort((a, b) => rank[a.tone] - rank[b.tone])
+  }, [wastedSpend, funnelDiag, voucherImpact, kpis, hasHppData])
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -826,6 +969,8 @@ export default function AdsDashboard({
           </p>
         </div>
       </div>
+
+      <SectionDivider icon={Lightbulb} title="Ringkasan & Aksi" />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -904,6 +1049,35 @@ export default function AdsDashboard({
       </div>
       )}
 
+      {/* === SECTION: Insight & Aksi Otomatis === */}
+      {autoInsights.length > 0 && (
+        <Card className="border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lightbulb className="h-4 w-4 text-primary" />
+              Insight & Aksi Otomatis
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Temuan penting dari data iklan periode ini, lengkap dengan saran aksinya.</p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="space-y-2">
+              {autoInsights.map((ins, i) => {
+                const cfg = AD_INSIGHT_TONE[ins.tone]
+                const Icon = cfg.icon
+                return (
+                  <div key={i} className={`flex items-start gap-2.5 rounded-lg border p-3 ${cfg.box}`}>
+                    <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${cfg.iconColor}`} />
+                    <p className="text-sm leading-snug">{ins.text}</p>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <SectionDivider icon={Target} title="Performa per Iklan" />
+
       {/* === SECTION: Traffic Light Table === */}
       <Card>
         <CardHeader className="pb-3">
@@ -925,6 +1099,67 @@ export default function AdsDashboard({
         </CardContent>
       </Card>
 
+      {/* === SECTION: Uang Hangus (spend di iklan rugi) === */}
+      {wastedSpend.hasData && (
+        <Card className="border-red-200 bg-red-50/40">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Flame className="h-4 w-4 text-red-600" />
+              Uang Hangus
+              <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                {wastedSpend.count} iklan
+              </span>
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Ad spend yang kebakar di iklan rugi (sinyal KILL) periode ini. Jeda/perbaiki dulu biar nggak makin boros.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border border-red-200 bg-white p-3">
+                <p className="text-xs text-muted-foreground">Total hangus</p>
+                <p className="text-lg font-bold text-red-600 tabular-nums">{formatRp(wastedSpend.total)}</p>
+                {wastedSpend.sharePct > 0 && (
+                  <p className="text-[11px] text-muted-foreground">{wastedSpend.sharePct.toFixed(0)}% dari total ad spend</p>
+                )}
+              </div>
+              <div className="rounded-lg border border-red-200 bg-white p-3">
+                <p className="text-xs text-muted-foreground">GMV balik</p>
+                <p className="text-lg font-bold tabular-nums">{formatRp(wastedSpend.gmvBack)}</p>
+                <p className="text-[11px] text-muted-foreground">dari iklan rugi tsb.</p>
+              </div>
+              <div className="col-span-2 rounded-lg border border-red-200 bg-white p-3 sm:col-span-1">
+                <p className="text-xs text-muted-foreground">Iklan rugi</p>
+                <p className="text-lg font-bold tabular-nums">{wastedSpend.count}</p>
+                <p className="text-[11px] text-muted-foreground">perlu di-jeda / diperbaiki</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {wastedSpend.killRows.slice(0, 6).map((r, i) => (
+                <div key={`${r.productCode}-${i}`} className="flex items-center gap-3 rounded-lg border border-red-200 bg-white p-3">
+                  <TrendingDown className="h-4 w-4 shrink-0 text-red-500" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold leading-tight">{r.productName || r.productCode}</p>
+                    <p className="text-xs text-muted-foreground">
+                      ROAS {r.roas.toFixed(2)}× · {r.conversions} konversi
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold text-red-600 tabular-nums">{formatRp(r.adSpend)}</p>
+                    <p className="text-[11px] text-muted-foreground">balik {formatRp(r.gmv)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {wastedSpend.killRows.length > 6 && (
+              <p className="mt-2 text-center text-xs text-muted-foreground">
+                +{wastedSpend.killRows.length - 6} iklan rugi lainnya — lihat tabel “Rekomendasi per Iklan” di atas.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* === SECTION: ROAS Bar Chart === */}
       <Card>
         <CardHeader className="pb-3">
@@ -940,6 +1175,74 @@ export default function AdsDashboard({
         </CardContent>
       </Card>
 
+      {/* === SECTION: ROAS Targets per Product === */}
+      {masterProducts.length > 0 && (
+        <RoasTargetsSection products={masterProducts} sellingPriceMap={sellingPriceMap} />
+      )}
+
+      <SectionDivider icon={Zap} title="Funnel & Efisiensi" />
+
+      {/* === SECTION: Diagnosa Funnel === */}
+      {funnelDiag.hasData && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Zap className="h-4 w-4 text-primary" />
+              Diagnosa Funnel
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Alur tayang → klik → beli. Cari di mana calon pembeli paling banyak hilang.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {/* Funnel stage strip */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                <Eye className="mx-auto mb-1 h-4 w-4 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">Tayang</p>
+                <p className="text-base font-bold tabular-nums">{funnelDiag.impressions.toLocaleString('id-ID')}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                <MousePointerClick className="mx-auto mb-1 h-4 w-4 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">Klik</p>
+                <p className="text-base font-bold tabular-nums">{funnelDiag.clicks.toLocaleString('id-ID')}</p>
+                <p className="text-[11px] text-muted-foreground">CTR {(funnelDiag.ctr * 100).toFixed(2)}%</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                <ShoppingCart className="mx-auto mb-1 h-4 w-4 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">Beli</p>
+                <p className="text-base font-bold tabular-nums">{funnelDiag.conversions.toLocaleString('id-ID')}</p>
+                <p className="text-[11px] text-muted-foreground">CVR {(funnelDiag.cvr * 100).toFixed(1)}%</p>
+              </div>
+            </div>
+            {/* Cost metrics */}
+            <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">CPM (per 1.000 tayang)</p>
+                <p className="text-sm font-bold tabular-nums">{formatRp(funnelDiag.cpm)}</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">CPC (per klik)</p>
+                <p className="text-sm font-bold tabular-nums">{formatRp(funnelDiag.cpc)}</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">CPA (per pembeli)</p>
+                <p className="text-sm font-bold tabular-nums">{formatRp(funnelDiag.cpa)}</p>
+              </div>
+            </div>
+            {/* Diagnosis */}
+            {funnelDiag.leak && (
+              <div className={`mt-3 flex items-start gap-2.5 rounded-lg border p-3 ${AD_INSIGHT_TONE[funnelDiag.leak.tone].box}`}>
+                {(() => { const I = AD_INSIGHT_TONE[funnelDiag.leak.tone].icon; return <I className={`h-4 w-4 mt-0.5 shrink-0 ${AD_INSIGHT_TONE[funnelDiag.leak.tone].iconColor}`} /> })()}
+                <p className="text-sm leading-snug">
+                  <span className="font-semibold">{funnelDiag.leak.stage}:</span> {funnelDiag.leak.msg}
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* === SECTION: Funnel === */}
       <Card>
         <CardHeader className="pb-3">
@@ -950,6 +1253,50 @@ export default function AdsDashboard({
         </CardContent>
       </Card>
 
+      {/* === SECTION: Dampak Voucher === */}
+      {voucherImpact.hasData && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Ticket className="h-4 w-4 text-pink-600" />
+              Dampak Voucher
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Seberapa besar penjualan iklan yang didorong voucher. Makin tinggi, makin tipis profit asli dibanding ROAS yang terlihat.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Biaya voucher</p>
+                <p className="text-lg font-bold text-pink-600 tabular-nums">{formatRp(voucherImpact.voucherCost)}</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Penjualan ber-voucher</p>
+                <p className="text-lg font-bold tabular-nums">{formatRp(voucherImpact.voucheredSales)}</p>
+              </div>
+              <div className="col-span-2 rounded-lg border p-3 sm:col-span-1">
+                <p className="text-xs text-muted-foreground">Porsi GMV dari voucher</p>
+                <p className="text-lg font-bold tabular-nums">{voucherImpact.sharePct.toFixed(0)}%</p>
+              </div>
+            </div>
+            {/* Share bar */}
+            <div className="mt-3">
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-pink-500 transition-all" style={{ width: `${Math.min(voucherImpact.sharePct, 100)}%` }} />
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {voucherImpact.sharePct >= 40
+                  ? 'Penjualan iklan cukup bergantung ke voucher — pastikan margin masih sehat setelah potongan voucher.'
+                  : 'Ketergantungan voucher masih wajar.'}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <SectionDivider icon={TrendingUp} title="Profit & Atribusi" />
+
       {/* === SECTION: Quadrant Matrix === */}
       {hasIncomeData && (
         <Card>
@@ -959,7 +1306,7 @@ export default function AdsDashboard({
               {!hasHppData && (
                 <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">
                   <AlertCircle className="h-3.5 w-3.5" />
-                  Isi HPP di Master Produk untuk melihat quadrant
+                  Isi HPP di Mapping Produk untuk melihat quadrant
                 </div>
               )}
             </div>

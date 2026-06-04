@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,19 +18,144 @@ import {
 import {
   Package,
   Search,
-  Save,
   AlertCircle,
   CheckCircle,
   ArrowUpDown,
   Upload,
   Trash2,
+  Link2,
+  X,
+  Download,
+  FileUp,
+  RotateCcw,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
-import type { MasterProduct, MasterProductSourceTag } from '@/types'
+import type { MasterProduct, MasterProductSourceTag, Item } from '@/types'
 
-interface EditingProduct {
-  hpp: string
-  packaging_cost: string
+// Inline item link picker per row
+function ItemLinkPicker({
+  productId,
+  linkedItemId,
+  linkedItemName,
+  onLinked,
+  onError,
+}: {
+  productId: string
+  linkedItemId?: string | null
+  linkedItemName?: string | null
+  onLinked: (itemId: string | null, itemName: string | null, hpp: number | null, packagingCost: number | null) => void
+  onError: (message: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [items, setItems] = useState<Item[]>([])
+  const [saving, setSaving] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const search = useCallback(async (query: string) => {
+    const params = new URLSearchParams({ q: query || '' })
+    const res = await fetch(`/api/inventory/items?${params}`)
+    const data = await res.json() as { items?: Item[] }
+    setItems((data.items ?? []).filter((i) => i.type !== 'raw_material'))
+  }, [])
+
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => search(q), 200)
+      return () => clearTimeout(t)
+    }
+  }, [q, open, search])
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  async function saveLink(itemId: string | null, itemName: string | null) {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/master-products/${productId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linked_item_id: itemId }),
+      })
+      const json = await res.json().catch(() => null) as { hpp?: number | null; packaging_cost?: number | null; error?: string } | null
+      if (!res.ok) {
+        onError(json?.error ?? 'Gagal menghubungkan item. Coba lagi.')
+        return
+      }
+      onLinked(itemId, itemName, json?.hpp ?? null, json?.packaging_cost ?? null)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Gagal menghubungkan item. Coba lagi.')
+    } finally {
+      setSaving(false)
+      setOpen(false)
+      setQ('')
+    }
+  }
+
+  if (linkedItemId && linkedItemName && !open) {
+    return (
+      <div className="flex items-center gap-1 text-xs">
+        <Link2 className="h-3 w-3 text-primary shrink-0" />
+        <span className="text-primary font-medium truncate max-w-[100px]">{linkedItemName}</span>
+        <button
+          type="button"
+          onClick={() => saveLink(null, null)}
+          disabled={saving}
+          className="text-muted-foreground hover:text-destructive ml-0.5"
+          title="Hapus link"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      {open ? (
+        <>
+          <Input
+            autoFocus
+            placeholder="Cari item..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="h-7 text-xs w-32"
+          />
+          <div className="absolute top-full left-0 z-50 mt-1 bg-popover border rounded-lg shadow-lg w-48 max-h-36 overflow-y-auto">
+            {items.length === 0 ? (
+              <p className="text-xs text-muted-foreground p-2 text-center">Tidak ada item</p>
+            ) : (
+              items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="w-full text-left px-2 py-1.5 hover:bg-muted/60 text-xs"
+                  onMouseDown={(e) => { e.preventDefault(); saveLink(item.id, item.name) }}
+                >
+                  <p className="font-medium truncate">{item.name}</p>
+                  <p className="text-muted-foreground">{item.type === 'semi_finished' ? 'Setengah Jadi' : 'Barang Jadi'}</p>
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Link2 className="h-3 w-3" />
+          {saving ? 'Menyimpan...' : 'Link item'}
+        </button>
+      )}
+    </div>
+  )
 }
 
 interface MasterProductsResponse {
@@ -49,36 +174,8 @@ function isNumericProductId(value: string | null | undefined) {
   return !!value && /^\d+$/.test(value)
 }
 
-function buildDraft(product: MasterProduct): EditingProduct {
-  return {
-    hpp: product.hpp ? String(product.hpp) : '',
-    packaging_cost: product.packaging_cost ? String(product.packaging_cost) : '',
-  }
-}
-
-function parseDraftNumber(value: string) {
-  const normalized = value.trim().replace(',', '.')
-  if (!normalized) return 0
-
-  const parsed = Number(normalized)
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return null
-  }
-
-  return parsed
-}
-
-function isDraftDirty(product: MasterProduct, draft?: EditingProduct) {
-  if (!draft) return false
-
-  const hpp = parseDraftNumber(draft.hpp)
-  const packagingCost = parseDraftNumber(draft.packaging_cost)
-
-  if (hpp === null || packagingCost === null) {
-    return true
-  }
-
-  return hpp !== product.hpp || packagingCost !== product.packaging_cost
+function formatRupiah(value: number) {
+  return 'Rp ' + value.toLocaleString('id-ID')
 }
 
 export default function ProductsPage() {
@@ -91,200 +188,98 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'hpp'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const [drafts, setDrafts] = useState<Record<string, EditingProduct>>({})
-  const [savingAll, setSavingAll] = useState(false)
-  const [saved, setSaved] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  // linked_item overrides per product (keyed by product.id)
+  const [linkedOverrides, setLinkedOverrides] = useState<Record<string, { id: string | null; name: string | null }>>({})
 
-  useEffect(() => {
-    let active = true
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const bulkInputRef = useRef<HTMLInputElement>(null)
 
-    async function loadProducts() {
-      setLoading(true)
-      setError(null)
-
-      try {
-        const params = new URLSearchParams()
-        if (storeId) {
-          params.set('store', storeId)
-        }
-        if (marketplace) {
-          params.set('marketplace', marketplace)
-        }
-
-        const url = params.size > 0
-          ? `/api/master-products?${params.toString()}`
-          : '/api/master-products'
-        const response = await fetch(url, { cache: 'no-store' })
-        const json = await response.json().catch(() => null) as MasterProductsResponse | null
-
-        if (!active) return
-
-        if (!response.ok) {
-          setProducts([])
-          setDrafts({})
-          setSaved({})
-          setSuccessMessage(null)
-          setError(json?.error ?? 'Gagal mengambil data produk')
-          return
-        }
-
-        setProducts(json?.products ?? [])
-        setDrafts({})
-        setSaved({})
-        setSuccessMessage(null)
-      } catch (err) {
-        if (!active) return
-        const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
-        setProducts([])
-        setDrafts({})
-        setSaved({})
-        setSuccessMessage(null)
-        setError(`Gagal mengambil data produk: ${message}`)
-      } finally {
-        if (active) {
-          setLoading(false)
-        }
-      }
+  function handleLinked(productId: string, itemId: string | null, itemName: string | null, hpp: number | null, packagingCost: number | null) {
+    setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
+    setError(null)
+    // Linking pulls the item's HPP & packaging into the product server-side;
+    // unlinking clears them back to 0. Reflect whatever the server returns locally.
+    if (hpp != null || packagingCost != null) {
+      setProducts((prev) => prev.map((p) => (p.id === productId
+        ? { ...p, ...(hpp != null ? { hpp } : {}), ...(packagingCost != null ? { packaging_cost: packagingCost } : {}) }
+        : p)))
     }
-
-    loadProducts()
-
-    return () => {
-      active = false
-    }
-  }, [marketplace, storeId])
-
-  function resetDraft(id: string) {
-    setDrafts((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
   }
 
-  function updateDraft(product: MasterProduct, patch: Partial<EditingProduct>) {
-    setDrafts((prev) => {
-      const nextDraft = {
-        ...(prev[product.id] ?? buildDraft(product)),
-        ...patch,
-      }
-      const next = { ...prev }
+  const scopeParams = useCallback(() => {
+    const params = new URLSearchParams()
+    if (storeId) params.set('store', storeId)
+    if (marketplace) params.set('marketplace', marketplace)
+    return params
+  }, [storeId, marketplace])
 
-      if (isDraftDirty(product, nextDraft)) {
-        next[product.id] = nextDraft
-      } else {
-        delete next[product.id]
-      }
-
-      return next
-    })
+  const loadProducts = useCallback(async () => {
+    setLoading(true)
     setError(null)
-    setSuccessMessage(null)
-  }
-
-  async function saveAllProducts() {
-    const pendingChanges = products.flatMap((product) => {
-      const draft = drafts[product.id]
-      if (!isDraftDirty(product, draft)) {
-        return []
-      }
-
-      const hpp = parseDraftNumber(draft?.hpp ?? '')
-      const packaging_cost = parseDraftNumber(draft?.packaging_cost ?? '')
-
-      return [{ product, hpp, packaging_cost }]
-    })
-
-    if (pendingChanges.length === 0) {
-      return
-    }
-
-    if (pendingChanges.some((item) => item.hpp === null || item.packaging_cost === null)) {
-      setError('Masih ada input HPP atau Packaging yang tidak valid')
-      return
-    }
-
-    setSavingAll(true)
-    setError(null)
-    setSuccessMessage(null)
 
     try {
-      const response = await fetch('/api/master-products', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          updates: pendingChanges.map((item) => ({
-            id: item.product.id,
-            hpp: item.hpp,
-            packaging_cost: item.packaging_cost,
-          })),
-        }),
-      })
-
-      const json = await response.json().catch(() => null) as {
-        updatedCount?: number
-        error?: string
-      } | null
+      const params = scopeParams()
+      const url = params.size > 0
+        ? `/api/master-products?${params.toString()}`
+        : '/api/master-products'
+      const response = await fetch(url, { cache: 'no-store' })
+      const json = await response.json().catch(() => null) as MasterProductsResponse | null
 
       if (!response.ok) {
-        setError(`Gagal menyimpan: ${json?.error ?? response.statusText}`)
+        setProducts([])
+        setError(json?.error ?? 'Gagal mengambil data produk')
         return
       }
 
-      const updatedIds = pendingChanges.map((item) => item.product.id)
-      const updateMap = new Map(
-        pendingChanges.map((item) => [
-          item.product.id,
-          {
-            hpp: item.hpp ?? 0,
-            packaging_cost: item.packaging_cost ?? 0,
-          },
-        ])
-      )
+      setProducts(json?.products ?? [])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      setProducts([])
+      setError(`Gagal mengambil data produk: ${message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [scopeParams])
 
-      setProducts((prev) =>
-        prev.map((product) => {
-          const next = updateMap.get(product.id)
-          return next ? { ...product, ...next } : product
-        })
-      )
+  useEffect(() => {
+    loadProducts()
+  }, [loadProducts])
 
-      setDrafts((prev) => {
-        const next = { ...prev }
-        updatedIds.forEach((id) => {
-          delete next[id]
-        })
-        return next
-      })
+  async function resetCosts() {
+    if (!confirm(
+      'Reset semua HPP & Packaging di Mapping Produk ke 0?\n\n' +
+      'Setelah reset, isi HPP & Packaging di Master Item, lalu hubungkan tiap produk ke item-nya agar nilainya terisi otomatis.'
+    )) {
+      return
+    }
 
-      setSaved((prev) => {
-        const next = { ...prev }
-        updatedIds.forEach((id) => {
-          next[id] = true
-        })
-        return next
-      })
-
-      setTimeout(() => {
-        setSaved((prev) => {
-          const next = { ...prev }
-          updatedIds.forEach((id) => {
-            delete next[id]
-          })
-          return next
-        })
-      }, 2000)
-
-      setSuccessMessage(`${json?.updatedCount ?? pendingChanges.length} produk berhasil disimpan`)
+    setResetting(true)
+    setError(null)
+    setSuccessMessage(null)
+    try {
+      const params = scopeParams()
+      const url = params.size > 0
+        ? `/api/master-products/reset-costs?${params.toString()}`
+        : '/api/master-products/reset-costs'
+      const res = await fetch(url, { method: 'POST' })
+      const json = await res.json().catch(() => null) as { resetCount?: number; error?: string } | null
+      if (!res.ok) {
+        setError(json?.error ?? 'Gagal mereset HPP & Packaging')
+        return
+      }
+      setLinkedOverrides({})
+      setSuccessMessage(`${json?.resetCount ?? 0} produk direset. Hubungkan ke Master Item untuk mengisi HPP & Packaging.`)
+      await loadProducts()
       router.refresh()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
-      setError(`Gagal menyimpan: ${message}`)
+      setError(`Gagal mereset: ${message}`)
     } finally {
-      setSavingAll(false)
+      setResetting(false)
     }
   }
 
@@ -309,12 +304,81 @@ export default function ProductsPage() {
 
       // Remove from state
       setProducts((prev) => prev.filter((p) => p.id !== productId))
-      resetDraft(productId)
       router.refresh()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
       setError(`Gagal menghapus produk: ${message}`)
       setDeleting((prev) => ({ ...prev, [productId]: false }))
+    }
+  }
+
+  function downloadTemplate() {
+    const params = scopeParams()
+    const url = params.size > 0
+      ? `/api/master-products/template?${params.toString()}`
+      : '/api/master-products/template'
+    const a = document.createElement('a')
+    a.href = url
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
+  async function handleBulkFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = '' // reset agar file yang sama bisa diupload lagi
+    if (!file) return
+
+    setBulkUploading(true)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      const params = scopeParams()
+      const url = params.size > 0
+        ? `/api/master-products/bulk?${params.toString()}`
+        : '/api/master-products/bulk'
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(url, { method: 'POST', body: formData })
+      const json = await response.json().catch(() => null) as {
+        updated?: number
+        created?: number
+        createBlocked?: string | null
+        createBlockedCount?: number
+        createFailedCount?: number
+        skippedNoNameCount?: number
+        invalidRows?: number
+        error?: string
+      } | null
+
+      if (!response.ok) {
+        setError(json?.error ?? 'Gagal memproses file Excel')
+        return
+      }
+
+      const parts: string[] = []
+      parts.push(`${json?.updated ?? 0} produk diperbarui`)
+      if (json?.created) parts.push(`${json.created} produk baru ditambahkan`)
+      if (json?.createFailedCount) parts.push(`${json.createFailedCount} produk baru gagal dibuat`)
+      if (json?.skippedNoNameCount) parts.push(`${json.skippedNoNameCount} baris dilewati (tanpa nama)`)
+      if (json?.invalidRows) parts.push(`${json.invalidRows} baris angka tidak valid`)
+      setSuccessMessage(parts.join(' · '))
+
+      // Kalau pembuatan produk baru diblokir (banyak toko), tampilkan sebagai peringatan.
+      if (json?.createBlocked) {
+        setError(`${json.createBlockedCount ?? ''} produk baru belum dibuat: ${json.createBlocked}`.trim())
+      }
+
+      await loadProducts()
+      router.refresh()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
+      setError(`Gagal upload: ${message}`)
+    } finally {
+      setBulkUploading(false)
     }
   }
 
@@ -338,14 +402,6 @@ export default function ProductsPage() {
     })
 
   const noHppCount = products.filter((p) => !p.hpp || p.hpp === 0).length
-  const pendingChanges = products.filter((product) => isDraftDirty(product, drafts[product.id]))
-  const invalidChanges = pendingChanges.filter((product) => {
-    const draft = drafts[product.id]
-    return (
-      parseDraftNumber(draft?.hpp ?? '') === null ||
-      parseDraftNumber(draft?.packaging_cost ?? '') === null
-    )
-  })
 
   function toggleSort(col: 'name' | 'hpp') {
     if (sortBy === col) setSortDir((d) => d === 'asc' ? 'desc' : 'asc')
@@ -368,7 +424,7 @@ export default function ProductsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Master Produk</h1>
+          <h1 className="text-2xl font-bold">Mapping Produk</h1>
           <p className="text-muted-foreground mt-1">
             {products.length} produk terdaftar
             {noHppCount > 0 && (
@@ -376,12 +432,53 @@ export default function ProductsPage() {
             )}
           </p>
         </div>
-        <DashboardLink href="/dashboard/upload">
-          <Button variant="outline" size="sm" className="gap-2">
-            <Upload className="h-4 w-4" />
-            Upload Data
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={bulkInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleBulkFile}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={downloadTemplate}
+            disabled={loading || products.length === 0}
+            title={products.length === 0 ? 'Belum ada produk untuk dijadikan template' : 'Unduh template Excel berisi produk & HPP saat ini'}
+          >
+            <Download className="h-4 w-4" />
+            Template Excel
           </Button>
-        </DashboardLink>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => bulkInputRef.current?.click()}
+            disabled={bulkUploading || loading}
+          >
+            <FileUp className="h-4 w-4" />
+            {bulkUploading ? 'Mengunggah...' : 'Upload Excel'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            onClick={resetCosts}
+            disabled={resetting || loading || products.length === 0}
+            title="Reset semua HPP & Packaging ke 0, lalu isi ulang dari Master Item via Link Inventori"
+          >
+            <RotateCcw className={`h-4 w-4 ${resetting ? 'animate-spin' : ''}`} />
+            {resetting ? 'Mereset...' : 'Reset HPP & Packaging'}
+          </Button>
+          <DashboardLink href="/dashboard/upload">
+            <Button variant="outline" size="sm" className="gap-2">
+              <Upload className="h-4 w-4" />
+              Upload Data
+            </Button>
+          </DashboardLink>
+        </div>
       </div>
 
       {/* HPP alert */}
@@ -408,14 +505,13 @@ export default function ProductsPage() {
         </Alert>
       )}
 
-      {pendingChanges.length > 0 && (
-        <Alert className="border-amber-200 bg-amber-50">
-          <AlertCircle className="h-4 w-4 text-amber-600" />
-          <AlertDescription className="text-amber-800">
-            <strong>{pendingChanges.length} perubahan</strong> belum disimpan.
-            {invalidChanges.length > 0
-              ? ` Perbaiki ${invalidChanges.length} baris yang masih belum valid dulu.`
-              : ' Kamu bisa isi banyak baris sekaligus lalu klik simpan semua.'}
+      {/* Info: HPP & Packaging dikelola di Master Item */}
+      {!loading && products.length > 0 && (
+        <Alert className="border-blue-200 bg-blue-50">
+          <AlertCircle className="h-4 w-4 text-blue-600" />
+          <AlertDescription className="text-blue-800">
+            HPP &amp; Packaging kini diatur di <strong>Master Item</strong> (Inventori &amp; Produksi).
+            Di halaman ini nilainya hanya ditampilkan sebagai informasi. Hubungkan produk ke item lewat kolom <strong>Link Inventori</strong> agar HPP terisi otomatis.
           </AlertDescription>
         </Alert>
       )}
@@ -454,31 +550,6 @@ export default function ProductsPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {pendingChanges.length > 0 && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setDrafts({})}
-                  disabled={savingAll}
-                >
-                  Reset Perubahan
-                </Button>
-              )}
-              <Button
-                size="sm"
-                className="gap-2"
-                onClick={saveAllProducts}
-                disabled={savingAll || pendingChanges.length === 0 || invalidChanges.length > 0}
-              >
-                <Save className="h-4 w-4" />
-                {savingAll
-                  ? 'Menyimpan...'
-                  : pendingChanges.length > 0
-                  ? `Simpan ${pendingChanges.length} Perubahan`
-                  : 'Simpan Perubahan'}
-              </Button>
-            </div>
           </div>
 
           <div className="border rounded-xl overflow-x-auto">
@@ -505,6 +576,7 @@ export default function ProductsPage() {
                     </button>
                   </TableHead>
                   <TableHead className="w-36">Packaging (Rp)</TableHead>
+                  <TableHead className="w-36">Link Inventori</TableHead>
                   <TableHead className="w-44">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -516,27 +588,18 @@ export default function ProductsPage() {
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                     </TableRow>
                   ))
                 ) : (
                   filtered.map((product) => {
-                    const isSaved = !!saved[product.id]
                     const hasNoHpp = !product.hpp || product.hpp === 0
                     const productId = getDisplayProductId(product)
                     const sellerSku = getDisplaySellerSku(product)
                     const sourceTags = product.source_tags ?? []
-                    const draft = drafts[product.id] ?? buildDraft(product)
-                    const parsedHpp = parseDraftNumber(draft.hpp)
-                    const parsedPackagingCost = parseDraftNumber(draft.packaging_cost)
-                    const hppInvalid = parsedHpp === null
-                    const packagingInvalid = parsedPackagingCost === null
-                    const isDirty = isDraftDirty(product, drafts[product.id])
-                    const rowTone = isDirty
-                      ? 'bg-amber-50/60'
-                      : hasNoHpp
-                      ? 'bg-orange-50/50'
-                      : undefined
+                    const hasPackaging = !!product.packaging_cost && product.packaging_cost > 0
+                    const rowTone = hasNoHpp ? 'bg-orange-50/50' : undefined
 
                     return (
                       <TableRow key={product.id} className={rowTone}>
@@ -569,66 +632,36 @@ export default function ProductsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            min={0}
-                            placeholder="0"
-                            className={`h-8 w-28 text-sm ${hppInvalid ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
-                            value={draft.hpp}
-                            onChange={(e) => updateDraft(product, { hpp: e.target.value })}
-                            onKeyDown={(e) => e.key === 'Enter' && saveAllProducts()}
-                            disabled={savingAll}
-                          />
+                          {hasNoHpp ? (
+                            <span className="text-xs text-muted-foreground">Belum diisi</span>
+                          ) : (
+                            <span className="text-sm font-medium tabular-nums">{formatRupiah(product.hpp)}</span>
+                          )}
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            min={0}
-                            placeholder="0"
-                            className={`h-8 w-28 text-sm ${packagingInvalid ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
-                            value={draft.packaging_cost}
-                            onChange={(e) => updateDraft(product, { packaging_cost: e.target.value })}
-                            onKeyDown={(e) => e.key === 'Enter' && saveAllProducts()}
-                            disabled={savingAll}
+                          {hasPackaging ? (
+                            <span className="text-sm tabular-nums">{formatRupiah(product.packaging_cost)}</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <ItemLinkPicker
+                            productId={product.id}
+                            linkedItemId={linkedOverrides[product.id]?.id ?? product.linked_item_id}
+                            linkedItemName={linkedOverrides[product.id]?.name ?? product.linked_item_name}
+                            onLinked={(itemId, itemName, hpp, packagingCost) => handleLinked(product.id, itemId, itemName, hpp, packagingCost)}
+                            onError={(message) => setError(message)}
                           />
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap items-center gap-1">
-                            {isSaved ? (
-                              <span className="flex items-center gap-1 text-green-600 text-xs">
-                                <CheckCircle className="h-3.5 w-3.5" />
-                                Tersimpan
-                              </span>
-                            ) : savingAll && isDirty ? (
-                              <span className="text-xs text-muted-foreground">Menyimpan...</span>
-                            ) : hppInvalid || packagingInvalid ? (
-                              <span className="text-xs text-red-600">Cek angka</span>
-                            ) : isDirty ? (
-                              <span className="text-xs text-amber-700">Belum disimpan</span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">
-                                {hasNoHpp ? 'Siap diisi' : 'Siap'}
-                              </span>
-                            )}
-
-                            {isDirty && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 text-xs"
-                                onClick={() => resetDraft(product.id)}
-                                disabled={savingAll}
-                              >
-                                Reset
-                              </Button>
-                            )}
-
                             <Button
                               size="sm"
                               variant="ghost"
                               className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
                               onClick={() => deleteProduct(product.id)}
-                              disabled={deleting[product.id] || savingAll}
+                              disabled={deleting[product.id]}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                               {deleting[product.id] ? 'Hapus...' : 'Hapus'}

@@ -35,10 +35,10 @@ function qid(identifier: string) {
 
 function parseSelectColumns(select: string | undefined) {
   if (!select || select.trim() === '*' || select.trim() === '') return '*'
-  const columns = select
-    .split(',')
+  const columns = splitTopLevel(select)
     .map((part) => part.trim())
     .filter(Boolean)
+    .filter((part) => !part.includes('(') && !part.includes(':'))
     .map((part) => part.split(/\s+/)[0])
     .map((part) => qid(part))
   return columns.length > 0 ? columns.join(', ') : '*'
@@ -139,6 +139,11 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
     return this
   }
 
+  neq(column: string, value: unknown) {
+    this.filters.push({ column, op: '<>', value })
+    return this
+  }
+
   in(column: string, value: unknown[]) {
     this.filters.push({ column, op: 'in', value })
     return this
@@ -151,6 +156,11 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
 
   lte(column: string, value: unknown) {
     this.filters.push({ column, op: '<=', value })
+    return this
+  }
+
+  gt(column: string, value: unknown) {
+    this.filters.push({ column, op: '>', value })
     return this
   }
 
@@ -171,6 +181,11 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
 
   like(column: string, value: string) {
     this.filters.push({ column, op: 'like', value })
+    return this
+  }
+
+  ilike(column: string, value: string) {
+    this.filters.push({ column, op: 'ilike', value })
     return this
   }
 
@@ -221,6 +236,10 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
     if (filter.op === 'like') {
       values.push(filter.value)
       return `${column} like $${values.length}`
+    }
+    if (filter.op === 'ilike') {
+      values.push(filter.value)
+      return `${column} ilike $${values.length}`
     }
     values.push(filter.value)
     return `${column} ${filter.op} $${values.length}`

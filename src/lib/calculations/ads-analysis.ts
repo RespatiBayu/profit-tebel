@@ -196,14 +196,16 @@ export function buildTrafficLightRows(
   return campaignRows
     .map((r) => {
       let trueRoas: number | null = null
+      let realRoas: number | null = null
       let profitPerUnit: number | null = null
       let bepRoas: number | null = null
       let avgSellingPriceOut = 0
       let hppPerUnitOut = 0
 
+      // PPN rate
+      const PPN = 0.11
+
       // ---- Strategy 1: Direct product_code lookup ----
-      // Works kalau Format 1 campaign row's product_code = specific product ID
-      // yang ada di master_products (produk tunggal per campaign)
       const direct = isAggregate(r) ? null : hppMap.get(r.product_code)
       if (direct && (direct.hpp > 0 || direct.packaging_cost > 0)) {
         const hppTotal = direct.hpp + direct.packaging_cost
@@ -211,16 +213,14 @@ export function buildTrafficLightRows(
         const totalHppCost = hppTotal * unitsSold
         const netGmv = r.gmv - totalHppCost
         trueRoas = r.ad_spend > 0 ? netGmv / r.ad_spend : 0
+        // Real ROAS: kurangi juga PPN 11% dari GMV
+        realRoas = r.ad_spend > 0 ? (r.gmv * (1 - PPN) - totalHppCost) / r.ad_spend : 0
         const avgSellingPrice = unitsSold > 0 ? r.gmv / unitsSold : 0
         profitPerUnit = avgSellingPrice - hppTotal
         avgSellingPriceOut = avgSellingPrice
         hppPerUnitOut = hppTotal
       } else if (r.ad_name && childPool.length > 0) {
         // ---- Strategy 2: Fallback via parent_iklan → Format 2 children ----
-        // Untuk campaign parent (GMV Max Auto/ROAS) yang cover banyak produk,
-        // cari anak produknya di Format 2. Match by parent_iklan == ad_name
-        // (normalized) dan same month-year. Sum HPP × units_sold dari tiap anak
-        // yang HPP-nya udah diisi di master_products.
         const targetAd = normalizeAdName(r.ad_name)
         const targetMonth = r.report_period_start?.slice(0, 7) ?? null
         let totalHppCost = 0
@@ -244,6 +244,7 @@ export function buildTrafficLightRows(
         }
         if (matchedChildren > 0 && r.ad_spend > 0) {
           trueRoas = (r.gmv - totalHppCost) / r.ad_spend
+          realRoas = (r.gmv * (1 - PPN) - totalHppCost) / r.ad_spend
           const avgPrice = totalUnits > 0 ? r.gmv / totalUnits : 0
           const avgHpp = totalUnits > 0 ? totalHppCost / totalUnits : 0
           profitPerUnit = avgPrice - avgHpp
@@ -275,6 +276,7 @@ export function buildTrafficLightRows(
         conversionRate: r.conversion_rate,
         signal,
         trueRoas,
+        realRoas,
         profitPerUnit,
         bepRoas,
       }
