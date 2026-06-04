@@ -1,3 +1,23 @@
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'items'
+      AND column_name = 'id'
+      AND data_type = 'text'
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'legacy_pos_items'
+  ) THEN
+    ALTER TABLE items RENAME TO legacy_pos_items;
+  END IF;
+END;
+$$;
+
 CREATE TABLE IF NOT EXISTS items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
