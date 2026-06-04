@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const access = await getCurrentUserAccess(supabase)
   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!access.hasInventoryAccess) return NextResponse.json({ error: 'Subscription required' }, { status: 403 })
+  // Master Item terbuka untuk paket Basic (setup HPP). Tidak butuh subscription Pro.
 
   const { searchParams } = new URL(request.url)
   const storeId = searchParams.get('store_id')
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const access = await getCurrentUserAccess(supabase)
   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!access.hasInventoryAccess) return NextResponse.json({ error: 'Subscription required' }, { status: 403 })
+  // Master Item terbuka untuk paket Basic (setup HPP). Tidak butuh subscription Pro.
 
   const body = await request.json() as {
     name: string

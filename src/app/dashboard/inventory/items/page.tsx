@@ -128,7 +128,7 @@ export default function ItemsPage() {
         <div className="flex items-center gap-2 shrink-0">
           <Button variant="outline" onClick={() => setImportOpen(true)} className="gap-2">
             <PackageSearch className="h-4 w-4" />
-            Import dari Master Produk
+            Import dari Mapping Produk
           </Button>
           <Button onClick={() => { setEditItem(null); setDrawerOpen(true) }} className="gap-2">
             <Plus className="h-4 w-4" />
@@ -264,7 +264,7 @@ export default function ItemsPage() {
         onSaved={handleSaved}
       />
 
-      {/* Import dari Master Produk */}
+      {/* Import dari Mapping Produk */}
       <ImportMasterDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -278,7 +278,7 @@ export default function ItemsPage() {
             <AlertDialogTitle>Hapus Item?</AlertDialogTitle>
             <AlertDialogDescription>
               Item <span className="font-semibold">{deleteTarget?.name}</span> akan dihapus permanen.
-              Item yang sudah memiliki transaksi stok atau digunakan di BOM tidak dapat dihapus.
+              Item yang sudah memiliki transaksi stok atau digunakan di Formula tidak dapat dihapus.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (

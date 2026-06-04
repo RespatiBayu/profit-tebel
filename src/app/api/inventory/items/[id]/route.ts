@@ -9,7 +9,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const supabase = await createClient()
   const access = await getCurrentUserAccess(supabase)
   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!access.hasInventoryAccess) return NextResponse.json({ error: 'Subscription required' }, { status: 403 })
+  // Master Item terbuka untuk paket Basic (setup HPP). Tidak butuh subscription Pro.
 
   const { data: item, error } = await supabase
     .from('items')
@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const supabase = await createClient()
   const access = await getCurrentUserAccess(supabase)
   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!access.hasInventoryAccess) return NextResponse.json({ error: 'Subscription required' }, { status: 403 })
+  // Master Item terbuka untuk paket Basic (setup HPP). Tidak butuh subscription Pro.
 
   const body = await request.json() as {
     name?: string
@@ -104,7 +104,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const supabase = await createClient()
   const access = await getCurrentUserAccess(supabase)
   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!access.hasInventoryAccess) return NextResponse.json({ error: 'Subscription required' }, { status: 403 })
+  // Master Item terbuka untuk paket Basic (setup HPP). Tidak butuh subscription Pro.
 
   // Cek apakah item dipakai di BOM
   const { count: bomCount } = await supabase

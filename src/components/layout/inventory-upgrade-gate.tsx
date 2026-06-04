@@ -25,7 +25,7 @@ const FEATURES = [
   {
     icon: Sparkles,
     title: 'HPP Otomatis',
-    desc: 'HPP di Master Produk ter-update otomatis berdasarkan Formula dan harga beli terakhir.',
+    desc: 'HPP di Mapping Produk ter-update otomatis berdasarkan Formula dan harga beli terakhir.',
   },
 ]
 

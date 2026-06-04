@@ -376,7 +376,7 @@ function TrafficLightTable({
                         {row.bepRoas.toFixed(2)}x
                       </span>
                     ) : (
-                      <span className="text-xs text-muted-foreground" title="Isi HPP produk di Master Produk">—</span>
+                      <span className="text-xs text-muted-foreground" title="Isi HPP produk di Mapping Produk">—</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -940,7 +940,7 @@ export default function AdsDashboard({
     if (!hasHppData) {
       out.push({
         tone: 'info',
-        text: 'Isi HPP di Master Produk biar sinyal SCALE/OPTIMIZE/KILL dan Target ROAS akurat — sekarang sebagian iklan belum bisa dinilai untung/ruginya.',
+        text: 'Isi HPP di Mapping Produk biar sinyal SCALE/OPTIMIZE/KILL dan Target ROAS akurat — sekarang sebagian iklan belum bisa dinilai untung/ruginya.',
       })
     }
     if (kpis.overallRoas > 0) {
@@ -1306,7 +1306,7 @@ export default function AdsDashboard({
               {!hasHppData && (
                 <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">
                   <AlertCircle className="h-3.5 w-3.5" />
-                  Isi HPP di Master Produk untuk melihat quadrant
+                  Isi HPP di Mapping Produk untuk melihat quadrant
                 </div>
               )}
             </div>

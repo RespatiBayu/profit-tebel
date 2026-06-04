@@ -41,6 +41,8 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
   const [unit, setUnit]             = useState('pcs')
   const [customUnit, setCustomUnit] = useState('')
   const [costPerUnit, setCostPerUnit]   = useState('')
+  // 'manual' = user isi HPP sendiri; 'auto' = HPP otomatis terbentuk dari Formula
+  const [hppMode, setHppMode]       = useState<'manual' | 'auto'>('manual')
   const [minStockQty, setMinStockQty]   = useState('')
   const [notes, setNotes]               = useState('')
 
@@ -54,11 +56,14 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
         setUnit(isCommon ? item.unit : 'custom')
         setCustomUnit(isCommon ? '' : item.unit)
         setCostPerUnit(item.cost_per_unit > 0 ? String(item.cost_per_unit) : '')
+        // Infer mode: bahan mentah selalu manual; lainnya manual jika sudah ada HPP terisi
+        setHppMode(item.type === 'raw_material' || item.cost_per_unit > 0 ? 'manual' : 'auto')
         setMinStockQty(item.min_stock_qty > 0 ? String(item.min_stock_qty) : '')
         setNotes(item.notes ?? '')
       } else {
         setName(''); setSku(''); setType('raw_material')
         setUnit('pcs'); setCustomUnit(''); setCostPerUnit('')
+        setHppMode('manual')
         setMinStockQty(''); setNotes('')
       }
       setError(null)
@@ -77,6 +82,13 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
     try {
       const url    = isEdit ? `/api/inventory/items/${item!.id}` : '/api/inventory/items'
       const method = isEdit ? 'PATCH' : 'POST'
+
+      const useManualCost = type === 'raw_material' || hppMode === 'manual'
+      // Mode otomatis: jangan timpa HPP hasil Formula. Saat edit, pertahankan nilai lama.
+      const costValue = useManualCost
+        ? (parseFloat(costPerUnit.replace(/\./g, '').replace(',', '.')) || 0)
+        : (isEdit ? (item?.cost_per_unit ?? 0) : 0)
+
       const res    = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -85,7 +97,7 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
           sku: sku.trim() || null,
           type,
           unit: resolvedUnit,
-          cost_per_unit: parseFloat(costPerUnit.replace(/\./g, '').replace(',', '.')) || 0,
+          cost_per_unit: costValue,
           min_stock_qty: parseFloat(minStockQty.replace(',', '.')) || 0,
           notes: notes.trim() || null,
         }),
@@ -150,7 +162,8 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
                     type="button"
                     onClick={() => {
                       setType(t.value)
-                      if (t.value !== 'raw_material') setCostPerUnit('')
+                      // Bahan mentah selalu manual; tipe lain default otomatis dari Formula
+                      setHppMode(t.value === 'raw_material' ? 'manual' : 'auto')
                     }}
                     className={`flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 transition-all text-center ${
                       selected
@@ -224,7 +237,7 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
             </div>
           </div>
 
-          {/* Harga manual — hanya untuk Bahan Mentah */}
+          {/* HPP — Bahan Mentah selalu manual; tipe lain bisa pilih manual / otomatis */}
           {type === 'raw_material' ? (
             <div className="space-y-1.5">
               <Label htmlFor="item-cost" className="text-sm font-medium">
@@ -246,17 +259,72 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
               </p>
             </div>
           ) : (
-            <div className="rounded-xl bg-muted/60 border border-border px-4 py-3 flex items-start gap-2.5">
-              <span className="text-base mt-0.5">⚙️</span>
-              <div>
-                <p className="text-xs font-medium text-foreground">
-                  Harga otomatis dari BOM
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                  HPP {type === 'semi_finished' ? 'barang setengah jadi' : 'barang jadi'} dihitung otomatis
-                  saat proses produksi selesai berdasarkan Formula (Resep Produksi) yang sudah dikonfigurasi.
-                </p>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Sumber HPP</Label>
+
+              {/* Segmented toggle: Manual vs Otomatis dari Formula */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHppMode('manual')}
+                  className={`rounded-xl border-2 px-3 py-2.5 text-left transition-all ${
+                    hppMode === 'manual'
+                      ? 'border-primary bg-primary/5 text-foreground'
+                      : 'border-border hover:bg-muted/50 text-muted-foreground'
+                  }`}
+                >
+                  <span className="block text-xs font-semibold">Input Manual</span>
+                  <span className="block text-[10px] leading-tight mt-0.5">Isi HPP sendiri</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHppMode('auto')}
+                  className={`rounded-xl border-2 px-3 py-2.5 text-left transition-all ${
+                    hppMode === 'auto'
+                      ? 'border-primary bg-primary/5 text-foreground'
+                      : 'border-border hover:bg-muted/50 text-muted-foreground'
+                  }`}
+                >
+                  <span className="block text-xs font-semibold">Otomatis dari Formula</span>
+                  <span className="block text-[10px] leading-tight mt-0.5">Dihitung dari Formula</span>
+                </button>
               </div>
+
+              {hppMode === 'manual' ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="item-cost" className="text-sm font-medium">
+                    HPP per {resolvedUnit}
+                  </Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground select-none">Rp</span>
+                    <Input
+                      id="item-cost"
+                      className="pl-9 h-10"
+                      placeholder="0"
+                      value={costPerUnit}
+                      onChange={(e) => setCostPerUnit(e.target.value.replace(/[^0-9.,]/g, ''))}
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    HPP {type === 'semi_finished' ? 'barang setengah jadi' : 'barang jadi'} kamu isi manual.
+                    Bisa diganti ke otomatis kapan saja.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-muted/60 border border-border px-4 py-3 flex items-start gap-2.5">
+                  <span className="text-base mt-0.5">⚙️</span>
+                  <div>
+                    <p className="text-xs font-medium text-foreground">
+                      HPP otomatis terbentuk dari Formula
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                      HPP {type === 'semi_finished' ? 'barang setengah jadi' : 'barang jadi'} dihitung
+                      otomatis saat proses produksi selesai, berdasarkan Formula (Resep Produksi) yang
+                      sudah dikonfigurasi.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

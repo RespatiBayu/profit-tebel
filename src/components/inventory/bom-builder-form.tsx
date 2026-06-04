@@ -181,7 +181,7 @@ export function BomBuilderForm({ bomId, initialData }: BomBuilderFormProps) {
       })
       const data = await res.json() as { bom?: { id: string }; success?: boolean; error?: string; synced_to_master?: boolean }
       if (!res.ok) { setSaveError(data.error ?? 'Terjadi kesalahan'); return }
-      if (data.synced_to_master) setSaveInfo('HPP juga diperbarui di Master Produk.')
+      if (data.synced_to_master) setSaveInfo('HPP juga diperbarui di Mapping Produk.')
       router.push('/dashboard/inventory/bom')
       router.refresh()
     } catch {

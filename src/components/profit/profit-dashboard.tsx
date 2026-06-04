@@ -1531,7 +1531,7 @@ export default function ProfitDashboard({
             {!kpis.hasHppData && (
               <div className="flex items-start gap-2 mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md px-3 py-2">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                <span>Isi HPP di Master Produk untuk melihat Real Profit setelah dikurangi HPP + Biaya Iklan.</span>
+                <span>Isi HPP di Mapping Produk untuk melihat Real Profit setelah dikurangi HPP + Biaya Iklan.</span>
               </div>
             )}
           </CardContent>

@@ -45,10 +45,10 @@ const baseNavItems = [
   { href: '/dashboard/profit', label: 'Dashboard Analisis', icon: TrendingUp, pro: false },
   { href: '/dashboard/ads', label: 'Detail Iklan', icon: BarChart3, pro: false },
   { href: '/dashboard/roas-calculator', label: 'Kalkulator ROAS', icon: Calculator, pro: false },
-  { href: '/dashboard/products', label: 'Master Produk', icon: Package, pro: false },
+  { href: '/dashboard/products', label: 'Mapping Produk', icon: Package, pro: false },
   { href: '/dashboard/stores', label: 'Toko Saya', icon: Store, pro: false },
   { href: '/dashboard/upload', label: 'Upload Data', icon: Upload, pro: false },
-  { href: '/dashboard/inventory', label: 'Inventori & Produksi', icon: Boxes, pro: true },
+  { href: '/dashboard/inventory', label: 'Inventori & Produksi', icon: Boxes, pro: false },
 ]
 
 function getNavItems(userRole: AppUserRole) {

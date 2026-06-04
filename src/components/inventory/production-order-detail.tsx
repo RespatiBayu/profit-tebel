@@ -123,7 +123,7 @@ export function ProductionOrderDetail({ order: initialOrder }: ProductionOrderDe
       if (!res.ok) { setErrorMsg(data.error ?? 'Gagal menyelesaikan produksi'); return }
 
       const msg = `Produksi selesai! HPP: ${formatRp(data.hpp_per_unit ?? 0)}/${order.bom?.output_item?.unit ?? 'unit'}` +
-        (data.synced_to_master ? ' · HPP diperbarui di Master Produk.' : '')
+        (data.synced_to_master ? ' · HPP diperbarui di Mapping Produk.' : '')
       setSuccessMsg(msg)
       setOrder((prev) => ({
         ...prev,

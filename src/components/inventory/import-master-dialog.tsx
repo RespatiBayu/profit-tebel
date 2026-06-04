@@ -122,7 +122,7 @@ export function ImportMasterDialog({ open, onClose, onImported }: ImportMasterDi
           <div>
             <h2 className="font-semibold text-base leading-none flex items-center gap-2">
               <PackageSearch className="h-4 w-4 text-primary" />
-              Import dari Master Produk
+              Import dari Mapping Produk
             </h2>
             <p className="text-xs text-muted-foreground mt-1.5">
               Pilih produk untuk dijadikan item “Barang Jadi”. Item akan otomatis ter-link ke produk
@@ -173,7 +173,7 @@ export function ImportMasterDialog({ open, onClose, onImported }: ImportMasterDi
             <div className="text-center py-12 text-muted-foreground text-sm">
               <PackageSearch className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
               {products.length === 0
-                ? 'Belum ada Master Produk. Isi HPP di menu Master Produk dulu.'
+                ? 'Belum ada Mapping Produk. Isi HPP di menu Mapping Produk dulu.'
                 : 'Tidak ada produk yang cocok.'}
             </div>
           ) : (
