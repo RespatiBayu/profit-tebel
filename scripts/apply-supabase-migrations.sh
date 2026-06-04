@@ -3,6 +3,7 @@ set -euo pipefail
 
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-supabase/migrations}"
 MIGRATIONS_TABLE="${MIGRATIONS_TABLE:-schema_migrations}"
+IDENTIFIER_RE='^[A-Za-z_][A-Za-z0-9_]*$'
 
 if [[ -z "${DATABASE_URL:-}" ]]; then
   echo "DATABASE_URL is required" >&2
@@ -14,14 +15,23 @@ if [[ ! -d "$MIGRATIONS_DIR" ]]; then
   exit 1
 fi
 
+if [[ ! "$MIGRATIONS_TABLE" =~ $IDENTIFIER_RE ]]; then
+  echo "Invalid migrations table name: $MIGRATIONS_TABLE" >&2
+  exit 1
+fi
+
+sql_quote() {
+  local value="${1//\'/\'\'}"
+  printf "'%s'" "$value"
+}
+
 psql "$DATABASE_URL" \
   --set=ON_ERROR_STOP=1 \
-  --set=migrations_table="$MIGRATIONS_TABLE" \
-  --command='CREATE TABLE IF NOT EXISTS :"migrations_table" (
+  --command="CREATE TABLE IF NOT EXISTS \"$MIGRATIONS_TABLE\" (
     filename text PRIMARY KEY,
     checksum text NOT NULL,
     applied_at timestamptz NOT NULL DEFAULT now()
-  );'
+  );"
 
 find "$MIGRATIONS_DIR" -maxdepth 1 -type f -name '*.sql' -print0 \
   | sort -z \
@@ -32,15 +42,15 @@ find "$MIGRATIONS_DIR" -maxdepth 1 -type f -name '*.sql' -print0 \
       else
         checksum="$(shasum -a 256 "$migration_file" | awk '{print $1}')"
       fi
+      filename_sql="$(sql_quote "$filename")"
+      checksum_sql="$(sql_quote "$checksum")"
 
       existing_checksum="$(
         psql "$DATABASE_URL" \
           --tuples-only \
           --no-align \
           --set=ON_ERROR_STOP=1 \
-          --set=migrations_table="$MIGRATIONS_TABLE" \
-          --set=filename="$filename" \
-          --command='SELECT checksum FROM :"migrations_table" WHERE filename = :'\''filename'\'';' \
+          --command="SELECT checksum FROM \"$MIGRATIONS_TABLE\" WHERE filename = $filename_sql;" \
           | tr -d '[:space:]'
       )"
 
@@ -59,13 +69,10 @@ find "$MIGRATIONS_DIR" -maxdepth 1 -type f -name '*.sql' -print0 \
       echo "Applying migration: $filename"
       tmp_file="$(mktemp)"
       printf '\\i %s\n' "$migration_file" > "$tmp_file"
-      printf 'INSERT INTO :"migrations_table" (filename, checksum) VALUES (:'\''filename'\'', :'\''checksum'\'');\n' >> "$tmp_file"
+      printf 'INSERT INTO "%s" (filename, checksum) VALUES (%s, %s);\n' "$MIGRATIONS_TABLE" "$filename_sql" "$checksum_sql" >> "$tmp_file"
 
       psql "$DATABASE_URL" \
         --set=ON_ERROR_STOP=1 \
-        --set=migrations_table="$MIGRATIONS_TABLE" \
-        --set=filename="$filename" \
-        --set=checksum="$checksum" \
         --single-transaction \
         --file="$tmp_file"
 
