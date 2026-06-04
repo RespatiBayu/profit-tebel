@@ -37,11 +37,13 @@ function ItemLinkPicker({
   linkedItemId,
   linkedItemName,
   onLinked,
+  onError,
 }: {
   productId: string
   linkedItemId?: string | null
   linkedItemName?: string | null
-  onLinked: (itemId: string | null, itemName: string | null) => void
+  onLinked: (itemId: string | null, itemName: string | null, hpp: number | null) => void
+  onError: (message: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -74,12 +76,19 @@ function ItemLinkPicker({
   async function saveLink(itemId: string | null, itemName: string | null) {
     setSaving(true)
     try {
-      await fetch(`/api/master-products/${productId}`, {
+      const res = await fetch(`/api/master-products/${productId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linked_item_id: itemId }),
       })
-      onLinked(itemId, itemName)
+      const json = await res.json().catch(() => null) as { hpp?: number | null; error?: string } | null
+      if (!res.ok) {
+        onError(json?.error ?? 'Gagal menghubungkan item. Coba lagi.')
+        return
+      }
+      onLinked(itemId, itemName, json?.hpp ?? null)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Gagal menghubungkan item. Coba lagi.')
     } finally {
       setSaving(false)
       setOpen(false)
@@ -187,11 +196,12 @@ export default function ProductsPage() {
   const [bulkUploading, setBulkUploading] = useState(false)
   const bulkInputRef = useRef<HTMLInputElement>(null)
 
-  function handleLinked(productId: string, itemId: string | null, itemName: string | null) {
+  function handleLinked(productId: string, itemId: string | null, itemName: string | null, hpp: number | null) {
     setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
-    // Linking pulls the item's HPP into the product server-side; refresh to show it.
-    if (itemId) {
-      loadProducts()
+    setError(null)
+    // Linking pulls the item's HPP into the product server-side; reflect it locally.
+    if (itemId && hpp != null) {
+      setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, hpp } : p)))
     }
   }
 
@@ -590,7 +600,8 @@ export default function ProductsPage() {
                             productId={product.id}
                             linkedItemId={linkedOverrides[product.id]?.id ?? product.linked_item_id}
                             linkedItemName={linkedOverrides[product.id]?.name ?? product.linked_item_name}
-                            onLinked={(itemId, itemName) => handleLinked(product.id, itemId, itemName)}
+                            onLinked={(itemId, itemName, hpp) => handleLinked(product.id, itemId, itemName, hpp)}
+                            onError={(message) => setError(message)}
                           />
                         </TableCell>
                         <TableCell>

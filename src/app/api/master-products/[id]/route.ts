@@ -72,16 +72,11 @@ export async function PATCH(
         .eq('id', params.id)
       if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
-      // Recalculate order HPP if the linked item's HPP was applied.
-      if ('hpp' in updatePayload) {
-        try {
-          await recalculateEstimatedHppForStore(supabase, (product.store_id as string | null) ?? null)
-        } catch (backfillErr) {
-          console.error('HPP backfill after link error:', backfillErr)
-        }
-      }
-
-      return NextResponse.json({ success: true, hpp: updatePayload.hpp })
+      // NOTE: Order estimated_hpp is intentionally NOT recalculated here to keep
+      // linking instant/reliable (a full-store recalc can exceed the serverless
+      // timeout). Order HPP refreshes when the item's cost is edited in Master Item
+      // or via the "Recalculate HPP" button on the upload page.
+      return NextResponse.json({ success: true, hpp: updatePayload.hpp ?? null })
     }
 
     const hpp = parseNonNegativeNumber(body?.hpp)
