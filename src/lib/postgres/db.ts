@@ -4,6 +4,7 @@ const { Pool } = pg
 
 const databaseUrl = process.env.DATABASE_URL
 const databaseRequiresSsl = databaseUrl?.includes('sslmode=require') ?? false
+const poolConnectionString = databaseUrl && databaseRequiresSsl ? removeSslMode(databaseUrl) : databaseUrl
 
 if (!databaseUrl && process.env.NODE_ENV !== 'test') {
   console.warn('DATABASE_URL is not set. Local Postgres queries will fail until it is configured.')
@@ -17,9 +18,15 @@ declare global {
 export const pool =
   globalThis.profitTebelPgPool ??
   new Pool({
-    connectionString: databaseUrl,
+    connectionString: poolConnectionString,
     ssl: databaseRequiresSsl ? { rejectUnauthorized: false } : undefined,
   })
+
+function removeSslMode(connectionString: string) {
+  const url = new URL(connectionString)
+  url.searchParams.delete('sslmode')
+  return url.toString()
+}
 
 if (process.env.NODE_ENV !== 'production') {
   globalThis.profitTebelPgPool = pool
