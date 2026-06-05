@@ -1,6 +1,6 @@
 # Development Environment
 
-This project uses a dedicated `development` branch, Vercel Preview deployments, and a separate Supabase PostgreSQL database for development.
+This project uses a dedicated `development` branch, a dedicated Vercel development project, and a separate Supabase PostgreSQL database for development.
 
 ## Branch
 
@@ -15,11 +15,17 @@ git push -u origin development
 
 After the first push, use `development` for staging/dev changes before promoting to `production`.
 
-## Vercel Preview
+## Vercel Development Deployment
 
 The development Vercel project is `profit-tebel-development`. Because Vercel's GitHub App must be installed by a repository admin to connect directly to `RespatiBayu/profit-tebel`, development deployments are automated through GitHub Actions and Vercel CLI instead of direct Vercel Git integration.
 
-The workflow is defined in `.github/workflows/development-vercel.yml`. It runs on every push to `development`, pulls the Vercel Preview environment, builds the app, and deploys a prebuilt preview artifact.
+The workflow is defined in `.github/workflows/development-vercel.yml`. It runs on every push to `development`, pulls the Vercel Production environment for the dedicated development project, builds the app with `--prod`, and deploys a prebuilt production artifact to the development project.
+
+This still does not deploy to the real production app. The production target is only used inside the separate `profit-tebel-development` Vercel project so the development environment has a stable URL:
+
+```text
+https://profit-tebel-development.vercel.app
+```
 
 Use these settings:
 
@@ -36,14 +42,14 @@ VERCEL_ORG_ID=<vercel-team-id>
 VERCEL_PROJECT_ID=<vercel-project-id>
 ```
 
-Set these environment variables in the Vercel Preview environment. They do not need branch scoping when using the CLI workflow, because the workflow itself only runs from `development`:
+Set these environment variables in the Vercel Production environment of the dedicated development project. They do not need branch scoping when using the CLI workflow, because the workflow itself only runs from `development`:
 
 ```env
 DATABASE_URL=<supabase-development-postgres-url>
 SESSION_COOKIE_NAME=pt_session_dev
 SESSION_TTL_DAYS=14
 SUPERADMIN_EMAIL=<dev-superadmin-email>
-NEXT_PUBLIC_APP_URL=<vercel-development-preview-url>
+NEXT_PUBLIC_APP_URL=https://profit-tebel-development.vercel.app
 IPAYMU_VA=
 IPAYMU_API_KEY=
 IPAYMU_IS_PRODUCTION=false
@@ -89,5 +95,5 @@ npm run build
 After pushing to `development`:
 
 1. Confirm the GitHub Actions migration workflow succeeds.
-2. Confirm Vercel creates a preview deployment.
-3. Open the preview URL and verify the app connects to the Supabase development database.
+2. Confirm Vercel updates `https://profit-tebel-development.vercel.app`.
+3. Open the development URL and verify the app connects to the Supabase development database.

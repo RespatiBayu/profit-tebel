@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy development preview to Vercel
+    name: Deploy development to Vercel
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -47,16 +47,16 @@ jobs:
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 
-      - name: Pull Vercel preview environment
-        run: vercel pull --yes --environment=preview --token="${{ secrets.VERCEL_TOKEN }}"
+      - name: Pull Vercel production environment
+        run: vercel pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
 
       - name: Build Vercel artifact
-        run: vercel build --token="${{ secrets.VERCEL_TOKEN }}"
+        run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
 
-      - name: Deploy Vercel preview
+      - name: Deploy Vercel production artifact
         id: deploy
         run: |
-          deployment_url="$(vercel deploy --prebuilt --token="${{ secrets.VERCEL_TOKEN }}")"
+          deployment_url="$(vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}")"
           echo "deployment_url=${deployment_url}" >> "$GITHUB_OUTPUT"
-          echo "### Vercel Preview Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Vercel Development Deployment" >> "$GITHUB_STEP_SUMMARY"
           echo "${deployment_url}" >> "$GITHUB_STEP_SUMMARY"
