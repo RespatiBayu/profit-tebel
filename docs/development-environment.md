@@ -17,7 +17,9 @@ After the first push, use `development` for staging/dev changes before promoting
 
 ## Vercel Preview
 
-Import `RespatiBayu/profit-tebel` into Vercel and keep `production` as the production branch. Vercel will create preview deployments for pushes to `development`.
+The development Vercel project is `profit-tebel-development`. Because Vercel's GitHub App must be installed by a repository admin to connect directly to `RespatiBayu/profit-tebel`, development deployments are automated through GitHub Actions and Vercel CLI instead of direct Vercel Git integration.
+
+The workflow is defined in `.github/workflows/development-vercel.yml`. It runs on every push to `development`, pulls the Vercel Preview environment, builds the app, and deploys a prebuilt preview artifact.
 
 Use these settings:
 
@@ -26,7 +28,15 @@ Use these settings:
 - Build command: `npm run build`
 - Output directory: Next.js default
 
-Set these environment variables for the Preview environment, scoped to the `development` branch where possible:
+Set these GitHub Actions secrets:
+
+```text
+VERCEL_TOKEN=<vercel-access-token>
+VERCEL_ORG_ID=<vercel-team-id>
+VERCEL_PROJECT_ID=<vercel-project-id>
+```
+
+Set these environment variables in the Vercel Preview environment. They do not need branch scoping when using the CLI workflow, because the workflow itself only runs from `development`:
 
 ```env
 DATABASE_URL=<supabase-development-postgres-url>
