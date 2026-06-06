@@ -1,8 +1,8 @@
 import type { AvailablePeriods } from '@/types'
 
 interface PeriodRangeLike {
-  period_start?: string | null
-  period_end?: string | null
+  period_start?: string | Date | null
+  period_end?: string | Date | null
 }
 
 function isYear(value: string): boolean {
@@ -43,9 +43,24 @@ function nextMonthStart(period: string): string {
   return `${shiftYearMonth(period, 1)}-01`
 }
 
-function expandRangeToPeriods(start: string | null | undefined, end: string | null | undefined): string[] {
-  const startIso = start ?? end
-  const endIso = end ?? start
+function toIsoDate(value: string | Date | null | undefined): string | null {
+  if (!value) return null
+  if (typeof value === 'string') return value
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  return null
+}
+
+function expandRangeToPeriods(
+  start: string | Date | null | undefined,
+  end: string | Date | null | undefined
+): string[] {
+  const startIso = toIsoDate(start ?? end)
+  const endIso = toIsoDate(end ?? start)
   if (!startIso || !endIso) return []
 
   const startPeriod = startIso.slice(0, 7)

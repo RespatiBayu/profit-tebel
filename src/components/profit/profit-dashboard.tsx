@@ -117,8 +117,22 @@ function formatRpFull(n: number) {
     .replace('\u00a0', ' ')
 }
 
-function formatDate(d: string) {
-  return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+function toIsoDate(value: string | Date | null | undefined): string | null {
+  if (!value) return null
+  if (typeof value === 'string') return value
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  return null
+}
+
+function formatDate(d: string | Date) {
+  const isoDate = toIsoDate(d)
+  if (!isoDate) return '-'
+  return new Date(isoDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
 }
 
 /** Geser YYYY-MM sebanyak N bulan (boleh negatif). Lebar bulan konstan, tahan
@@ -516,13 +530,15 @@ export default function ProfitDashboard({
     }
     const currentMonths = new Set<string>()
     for (const o of filteredOrders) {
-      const ref = o.order_date
+      const ref = toIsoDate(o.order_date)
       if (ref) currentMonths.add(ref.slice(0, 7))
     }
     const prevMonths = new Set<string>()
     for (const m of Array.from(currentMonths)) prevMonths.add(shiftMonth(m, -1))
-    const inPrev = (iso: string | null | undefined) =>
-      !!iso && prevMonths.has(iso.slice(0, 7))
+    const inPrev = (value: string | Date | null | undefined) => {
+      const iso = toIsoDate(value)
+      return !!iso && prevMonths.has(iso.slice(0, 7))
+    }
     return {
       orders: orders.filter((o) => inPrev(o.order_date)),
       ads: adsData.filter((a) => inPrev(a.report_period_start ?? a.report_period_end)),

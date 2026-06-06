@@ -44,8 +44,33 @@ function parseSelectColumns(select: string | undefined) {
   return columns.length > 0 ? columns.join(', ') : '*'
 }
 
+function formatLocalDate(value: Date) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function normalizeValue(value: unknown): unknown {
+  if (value instanceof Date) {
+    const isDateOnly =
+      value.getHours() === 0 &&
+      value.getMinutes() === 0 &&
+      value.getSeconds() === 0 &&
+      value.getMilliseconds() === 0
+    return isDateOnly ? formatLocalDate(value) : value.toISOString()
+  }
+  if (Array.isArray(value)) return value.map(normalizeValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [key, normalizeValue(nestedValue)])
+    )
+  }
+  return value
+}
+
 function normalizeRow<T>(row: T): T {
-  return row
+  return normalizeValue(row) as T
 }
 
 function errorResult(error: unknown): QueryResult {
@@ -356,7 +381,7 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
         `insert into ${qid(this.table)} (${keys.map(qid).join(', ')}) values (${params.join(', ')})${returning}`,
         values.splice(0)
       )
-      inserted.push(...result.rows)
+      inserted.push(...result.rows.map(normalizeRow))
     }
     return this.formatRows(inserted as T[])
   }
@@ -385,7 +410,7 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
         `insert into ${qid(this.table)} (${keys.map(qid).join(', ')}) values (${params.join(', ')}) on conflict (${conflict}) ${action}${returning}`,
         values
       )
-      saved.push(...result.rows)
+      saved.push(...result.rows.map(normalizeRow))
     }
 
     return this.formatRows(saved as T[])
@@ -398,7 +423,7 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
     const where = await this.whereSql(values)
     const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
     const result = await query(`update ${qid(this.table)} set ${set.join(', ')}${where}${returning}`, values)
-    return this.formatRows(result.rows as T[], result.rowCount ?? 0)
+    return this.formatRows(result.rows.map(normalizeRow) as T[], result.rowCount ?? 0)
   }
 
   private async executeDelete(): Promise<QueryResult<T>> {
