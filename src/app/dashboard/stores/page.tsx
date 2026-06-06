@@ -33,7 +33,7 @@ import {
 } from 'lucide-react'
 import type { Store } from '@/types'
 import { trackEvent } from '@/lib/analytics'
-import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
+import { VISIBLE_MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 
 type DialogMode = 'create' | 'edit' | null
 type UserRole = 'superadmin' | 'admin' | 'member'
@@ -343,7 +343,7 @@ export default function StoresPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {MARKETPLACE_OPTIONS.map((opt) => (
+                  {VISIBLE_MARKETPLACE_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
                       {opt.label}
                     </SelectItem>

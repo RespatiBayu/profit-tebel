@@ -27,7 +27,7 @@ import {
   Plus,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
-import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
+import { VISIBLE_MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import { trackEvent } from '@/lib/analytics'
 import { ResetDataDialog } from '@/components/upload/reset-data-dialog'
 import { RecalculateHppButton } from '@/components/upload/recalculate-hpp-button'
@@ -683,7 +683,7 @@ export default function UploadPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {MARKETPLACE_OPTIONS.map((opt) => (
+                      {VISIBLE_MARKETPLACE_OPTIONS.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {opt.label}
                         </SelectItem>
