@@ -27,7 +27,7 @@ import {
   Plus,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
-import { VISIBLE_MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
+import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import { trackEvent } from '@/lib/analytics'
 import { ResetDataDialog } from '@/components/upload/reset-data-dialog'
 import { RecalculateHppButton } from '@/components/upload/recalculate-hpp-button'
@@ -80,6 +80,7 @@ function sleep(ms: number) {
 function DropZone({
   type,
   accept,
+  marketplace,
   state,
   onChange,
   onRemove,
@@ -88,6 +89,7 @@ function DropZone({
 }: {
   type: UploadType
   accept: string
+  marketplace: string
   state: UploadState
   onChange: (file: File) => void
   onRemove: () => void
@@ -98,15 +100,20 @@ function DropZone({
   const [isDragging, setIsDragging] = useState(false)
 
   const Icon = type === 'income' || type === 'orders_all' ? FileSpreadsheet : FileText
+  const isTiktok = marketplace === 'tiktok'
   const label = type === 'income'
     ? 'Data Penghasilan'
     : type === 'ads'
     ? 'Data Iklan (Summary)'
     : type === 'ads_product'
     ? 'Data per Produk (GMV Max Auto)'
+    : isTiktok
+    ? 'Semua Pesanan (TikTok, Opsional)'
     : 'Semua Pesanan (Order.all, Opsional)'
   const desc = type === 'income'
-    ? 'File .xlsx dari Shopee Income + Seller Fee'
+    ? isTiktok
+      ? 'File .xlsx dari Keuangan TikTok Shop'
+      : 'File .xlsx dari Shopee Income + Seller Fee'
     : type === 'ads'
     ? 'File .csv dari Shopee Ads'
     : type === 'ads_product'
@@ -598,10 +605,12 @@ export default function UploadPage() {
     }
   }
 
+  const isTiktok = marketplace === 'tiktok'
+  const marketplaceName = isTiktok ? 'TikTok Shop' : 'Shopee'
   const hasFiles = incomeState.file || adsState.file || adsProductState.file || ordersAllState.file
   const canUploadIncome = incomeState.file && incomeState.status === 'idle'
-  const canUploadAds = adsState.file && adsState.status === 'idle'
-  const canUploadAdsProduct = adsProductState.file && adsProductState.status === 'idle'
+  const canUploadAds = !isTiktok && adsState.file && adsState.status === 'idle'
+  const canUploadAdsProduct = !isTiktok && adsProductState.file && adsProductState.status === 'idle'
   const canUploadOrdersAll = ordersAllState.file && ordersAllState.status === 'idle'
   const canUploadAny = canUploadIncome || canUploadAds || canUploadAdsProduct || canUploadOrdersAll
 
@@ -612,7 +621,7 @@ export default function UploadPage() {
         <div>
           <h1 className="text-2xl font-bold">Upload Data</h1>
           <p className="text-muted-foreground mt-1">
-            Upload laporan dari Shopee Seller Center untuk mulai analisis.
+            Upload laporan dari {marketplaceName} Seller Center untuk mulai analisis.
           </p>
         </div>
         <div className="flex flex-col sm:items-end gap-2">
@@ -683,7 +692,7 @@ export default function UploadPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {VISIBLE_MARKETPLACE_OPTIONS.map((opt) => (
+                      {MARKETPLACE_OPTIONS.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {opt.label}
                         </SelectItem>
@@ -747,6 +756,7 @@ export default function UploadPage() {
               <DropZone
                 type="orders_all"
                 accept=".xlsx"
+                marketplace={marketplace}
                 state={ordersAllState}
                 onChange={(f) => setFile('orders_all', f)}
                 onRemove={() => removeFile('orders_all')}
@@ -754,6 +764,7 @@ export default function UploadPage() {
               <DropZone
                 type="income"
                 accept=".xlsx"
+                marketplace={marketplace}
                 state={incomeState}
                 onChange={(f) => setFile('income', f)}
                 onRemove={() => removeFile('income')}
@@ -761,16 +772,22 @@ export default function UploadPage() {
               <DropZone
                 type="ads"
                 accept=".csv"
+                marketplace={marketplace}
                 state={adsState}
                 onChange={(f) => setFile('ads', f)}
                 onRemove={() => removeFile('ads')}
+                disabled={isTiktok}
+                disabledReason="Parser iklan TikTok Shop belum tersedia."
               />
               <DropZone
                 type="ads_product"
                 accept=".csv"
+                marketplace={marketplace}
                 state={adsProductState}
                 onChange={(f) => setFile('ads_product', f)}
                 onRemove={() => removeFile('ads_product')}
+                disabled={isTiktok}
+                disabledReason="Parser GMV Max TikTok Shop belum tersedia."
               />
             </div>
 
@@ -890,24 +907,36 @@ export default function UploadPage() {
       {hasSelectedStore && (
         <Card className="bg-muted/30">
           <CardContent className="p-4 space-y-3">
-            <p className="font-medium text-sm">Urutan upload &amp; cara download dari Shopee:</p>
+            <p className="font-medium text-sm">Urutan upload &amp; cara download dari {marketplaceName}:</p>
             <div className="space-y-2 text-sm text-muted-foreground">
               <div>
                 <span className="font-medium text-foreground">1. Data Penghasilan / Income (.xlsx)</span> <span className="text-emerald-700 text-xs">— REKOMENDASI MULAI DARI SINI</span>
-                <div className="text-xs ml-4 mt-0.5">Seller Center → Keuangan → Penghasilan Saya → Download. Sheet Seller Fee dipakai untuk auto-create master produk dari product ID Shopee.</div>
+                <div className="text-xs ml-4 mt-0.5">
+                  {isTiktok
+                    ? 'TikTok Shop Seller Center -> Keuangan -> unduh laporan income. Kolom Detail produk terjual dipakai untuk auto-create master produk dari SKU ID TikTok.'
+                    : 'Seller Center -> Keuangan -> Penghasilan Saya -> Download. Sheet Seller Fee dipakai untuk auto-create master produk dari product ID Shopee.'}
+                </div>
               </div>
               <div>
-                <span className="font-medium text-foreground">2. Order.all / Semua Pesanan (.xlsx)</span> <span className="text-xs text-muted-foreground">— opsional, untuk akurasi lebih tinggi</span>
-                <div className="text-xs ml-4 mt-0.5">Seller Center → Pesanan Saya → Export Pesanan (pilih semua status). Dipakai untuk pending order, rekonsiliasi, seller SKU, dan quantity yang lebih akurat.</div>
+                <span className="font-medium text-foreground">2. Semua Pesanan (.xlsx)</span> <span className="text-xs text-muted-foreground">— opsional, untuk akurasi lebih tinggi</span>
+                <div className="text-xs ml-4 mt-0.5">
+                  {isTiktok
+                    ? 'TikTok Shop Seller Center -> Pesanan -> ekspor semua pesanan. Dipakai untuk pending order, rekonsiliasi, SKU ID, dan quantity yang lebih akurat.'
+                    : 'Seller Center -> Pesanan Saya -> Export Pesanan (pilih semua status). Dipakai untuk pending order, rekonsiliasi, seller SKU, dan quantity yang lebih akurat.'}
+                </div>
               </div>
-              <div className="pt-1 border-t">
-                <span className="font-medium text-foreground">Data Iklan (.csv)</span> <span className="text-xs text-muted-foreground">— independent, boleh kapan saja</span>
-                <div className="text-xs ml-4 mt-0.5">Shopee Ads → Laporan → Download Laporan Produk</div>
-              </div>
-              <div>
-                <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv)</span> <span className="text-xs text-muted-foreground">— independent</span>
-                <div className="text-xs ml-4 mt-0.5">Shopee Ads → Shop GMV Max → Laporan → Download Detail Produk</div>
-              </div>
+              {!isTiktok && (
+                <>
+                  <div className="pt-1 border-t">
+                    <span className="font-medium text-foreground">Data Iklan (.csv)</span> <span className="text-xs text-muted-foreground">— independent, boleh kapan saja</span>
+                    <div className="text-xs ml-4 mt-0.5">Shopee Ads -&gt; Laporan -&gt; Download Laporan Produk</div>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Data per Produk GMV Max Auto (.csv)</span> <span className="text-xs text-muted-foreground">— independent</span>
+                    <div className="text-xs ml-4 mt-0.5">Shopee Ads -&gt; Shop GMV Max -&gt; Laporan -&gt; Download Detail Produk</div>
+                  </div>
+                </>
+              )}
             </div>
           </CardContent>
         </Card>

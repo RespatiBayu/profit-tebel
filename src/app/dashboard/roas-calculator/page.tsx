@@ -22,8 +22,6 @@ import {
 } from '@/lib/constants/shopee-fees-2026'
 import { calculateRoasBudget } from '@/lib/calculations/roas-budget'
 
-const VISIBLE_PLATFORMS: Platform[] = ['shopee']
-
 // ---------------------------------------------------------------------------
 // Types & helpers
 // ---------------------------------------------------------------------------
@@ -244,7 +242,7 @@ export default function RoasCalculatorPage() {
         </CardHeader>
         <CardContent>
           <div className="flex gap-2 flex-wrap">
-            {VISIBLE_PLATFORMS.map((p) => {
+            {(Object.keys(PLATFORMS) as Platform[]).map((p) => {
               const active = platform === p
               return (
                 <button

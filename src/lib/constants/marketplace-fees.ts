@@ -30,7 +30,3 @@ export const MARKETPLACE_OPTIONS = [
   { value: 'shopee', label: 'Shopee' },
   { value: 'tiktok', label: 'TikTok Shop' },
 ] as const
-
-export const VISIBLE_MARKETPLACE_OPTIONS = MARKETPLACE_OPTIONS.filter(
-  (option) => option.value !== 'tiktok'
-)
