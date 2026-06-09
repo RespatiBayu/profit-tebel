@@ -156,7 +156,9 @@ export default function DashboardShell({
 
   // Halaman yang tidak perlu filter marketplace / toko / periode
   const hideGlobalFilters = pathname.startsWith('/dashboard/roas-calculator') ||
-    pathname.startsWith('/dashboard/inventory')
+    pathname.startsWith('/dashboard/inventory') ||
+    pathname.startsWith('/dashboard/upload') ||
+    pathname.startsWith('/dashboard/admin')
 
   const supabase = createClient()
 
