@@ -26,7 +26,7 @@ type UploadJobRow = {
   updated_at: string
 }
 
-const STALE_JOB_MINUTES = 15
+const STALE_JOB_TIMEOUT_MS = 2 * 60_000
 const workerId = `upload-worker-${Math.random().toString(36).slice(2, 10)}`
 let drainPromise: Promise<void> | null = null
 
@@ -64,7 +64,7 @@ async function updateJobProgress(id: string, progress: number, label: string) {
 
 async function requeueStaleJobs() {
   const supabase = createAdminClient()
-  const staleBefore = new Date(Date.now() - STALE_JOB_MINUTES * 60_000).toISOString()
+  const staleBefore = new Date(Date.now() - STALE_JOB_TIMEOUT_MS).toISOString()
   const { error } = await supabase
     .from('upload_jobs')
     .update({
@@ -80,6 +80,51 @@ async function requeueStaleJobs() {
   if (error) {
     console.error('Failed to requeue stale upload jobs:', error)
   }
+}
+
+async function claimUploadJobByIdForUser(jobId: string, userId: string) {
+  const supabase = createAdminClient()
+  const { data: candidate, error } = await supabase
+    .from('upload_jobs')
+    .select('*')
+    .eq('id', jobId)
+    .eq('user_id', userId)
+    .eq('status', 'queued')
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  if (!candidate) {
+    return null
+  }
+
+  const typedCandidate = candidate as UploadJobRow
+  const attempts = (typedCandidate.attempts ?? 0) + 1
+  const { data: claimed, error: claimError } = await supabase
+    .from('upload_jobs')
+    .update({
+      status: 'processing',
+      progress: Math.max(typedCandidate.progress ?? 0, 5),
+      progress_label: 'Memulai proses upload',
+      worker_id: workerId,
+      attempts,
+      started_at: typedCandidate.started_at ?? nowIso(),
+      error_message: null,
+      updated_at: nowIso(),
+    })
+    .eq('id', typedCandidate.id)
+    .eq('user_id', userId)
+    .eq('status', 'queued')
+    .select('*')
+    .maybeSingle()
+
+  if (claimError) {
+    throw claimError
+  }
+
+  return claimed as UploadJobRow | null
 }
 
 async function claimNextUploadJob() {
@@ -227,11 +272,25 @@ export async function enqueueUploadJob(params: {
     throw new Error(`Gagal membuat job upload: ${error?.message ?? 'unknown error'}`)
   }
 
-  kickUploadWorker()
   return serializeJob(data as UploadJobRow)
 }
 
-export async function getUploadJobForUser(jobId: string, userId: string) {
+export async function processUploadJobForUser(jobId: string, userId: string) {
+  await requeueStaleJobs()
+
+  const claimed = await claimUploadJobByIdForUser(jobId, userId)
+  if (claimed) {
+    await processClaimedUploadJob(claimed)
+  }
+
+  return getUploadJobForUser(jobId, userId, { kickQueuedWorker: false })
+}
+
+export async function getUploadJobForUser(
+  jobId: string,
+  userId: string,
+  options: { kickQueuedWorker?: boolean } = {},
+) {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('upload_jobs')
@@ -248,7 +307,7 @@ export async function getUploadJobForUser(jobId: string, userId: string) {
     return null
   }
 
-  if (data.status === 'queued') {
+  if (data.status === 'queued' && options.kickQueuedWorker !== false) {
     kickUploadWorker()
   }
 

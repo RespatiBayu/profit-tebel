@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getUploadJobForUser } from '@/lib/upload/queue'
+import { processUploadJobForUser } from '@/lib/upload/queue'
+
+export const maxDuration = 60
 
 export async function GET(
   _request: NextRequest,
@@ -16,7 +18,7 @@ export async function GET(
   }
 
   const { id } = await params
-  const job = await getUploadJobForUser(id, user.id)
+  const job = await processUploadJobForUser(id, user.id)
 
   if (!job) {
     return NextResponse.json({ error: 'Job tidak ditemukan' }, { status: 404 })

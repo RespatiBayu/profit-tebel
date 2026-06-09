@@ -10,10 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  MARKETPLACE_OPTIONS,
-  VISIBLE_MARKETPLACE_OPTIONS,
-} from '@/lib/constants/marketplace-fees'
+import { MARKETPLACE_OPTIONS } from '@/lib/constants/marketplace-fees'
 import {
   MARKETPLACE_STORAGE_KEY,
   normalizeMarketplaceFilter,
@@ -86,7 +83,7 @@ export function MarketplaceSwitcher() {
 
         <DropdownMenuSeparator />
 
-        {VISIBLE_MARKETPLACE_OPTIONS.map((option) => (
+        {MARKETPLACE_OPTIONS.map((option) => (
           <DropdownMenuItem
             key={option.value}
             onClick={() => selectMarketplace(option.value)}

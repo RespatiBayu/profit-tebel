@@ -6,6 +6,8 @@ import { parseShopeeAds } from '@/lib/parsers/shopee-ads'
 import { parseShopeeAdsProduct } from '@/lib/parsers/shopee-ads-product'
 import { parseShopeeIncome } from '@/lib/parsers/shopee-income'
 import { parseShopeeOrdersAll } from '@/lib/parsers/shopee-orders-all'
+import { parseTiktokIncome } from '@/lib/parsers/tiktok-income'
+import { parseTiktokOrdersAll } from '@/lib/parsers/tiktok-orders-all'
 import { classifyIncomingRows } from '@/lib/upload/dedupe'
 import type { MasterProductSourceTag, UploadFileType, UploadJobResult } from '@/types'
 import { ensureProfileRow, resolveUploadStore } from './shared'
@@ -835,7 +837,9 @@ export async function processAdsProductUpload(ctx: UploadProcessorContext): Prom
 export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<UploadJobResult> {
   await setProgress(ctx, 10, 'Membaca file income')
 
-  const parseResult = parseShopeeIncome(ctx.buffer)
+  const parseResult = ctx.marketplace === 'tiktok'
+    ? parseTiktokIncome(ctx.buffer)
+    : parseShopeeIncome(ctx.buffer)
   const { orders, orderProducts: opfRows } = parseResult
   const periodStart = ensureValidDate(parseResult.periodStart)
   const periodEnd = ensureValidDate(parseResult.periodEnd)
@@ -846,7 +850,7 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
   }
 
   if (orders.length === 0) {
-    throw new Error('Tidak ada data order ditemukan dalam file. Pastikan file income Shopee yang kamu upload.')
+    throw new Error(`Tidak ada data order ditemukan dalam file. Pastikan file income ${ctx.marketplace === 'tiktok' ? 'TikTok Shop' : 'Shopee'} yang kamu upload.`)
   }
 
   await ensureProfileRow(ctx.supabase, ctx.userId, ctx.userEmail)
@@ -983,7 +987,11 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
   let opUpsertSuccess = 0
 
   if (migratedMasters > 0) {
-    warnings.push(`${migratedMasters} master produk lama disambungkan ke Product ID Shopee dari Seller Fee`)
+    warnings.push(
+      ctx.marketplace === 'tiktok'
+        ? `${migratedMasters} master produk lama disambungkan ke SKU ID TikTok dari Detail produk terjual`
+        : `${migratedMasters} master produk lama disambungkan ke Product ID Shopee dari Seller Fee`
+    )
   }
 
   if (opfRows.length > 0) {
@@ -1284,15 +1292,17 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
 
   if (opfRowsTotal === 0) {
     warnings.push(
-      '⚠️ Sheet "Order Processing Fee" di file income kosong / tidak ditemukan. HPP tidak bisa dihitung tanpa data OPF. Pastikan kamu download file dari Keuangan → Penghasilan Saya (bukan Income Summary saja).'
+      ctx.marketplace === 'tiktok'
+        ? 'Kolom "Detail produk terjual" di file income TikTok kosong / tidak ditemukan. HPP income lebih akurat jika upload file Semua Pesanan TikTok juga.'
+        : '⚠️ Sheet "Order Processing Fee" di file income kosong / tidak ditemukan. HPP tidak bisa dihitung tanpa data OPF. Pastikan kamu download file dari Keuangan → Penghasilan Saya (bukan Income Summary saja).'
     )
   } else if (opfUnmatchedTotal > 0) {
     const pct = Math.round((opfUnmatchedTotal / opfRowsTotal) * 100)
     warnings.push(
-      `OPF: ${opfMatchedTotal}/${opfRowsTotal} baris match master (${pct}% gagal match). Sample produk gagal match: ${opfUnmatchedSamples
+      `${ctx.marketplace === 'tiktok' ? 'Detail produk terjual' : 'OPF'}: ${opfMatchedTotal}/${opfRowsTotal} baris match master (${pct}% gagal match). Sample produk gagal match: ${opfUnmatchedSamples
         .slice(0, 3)
         .map((sample) => sample.name ?? sample.id ?? '?')
-        .join(' · ')}. Review nama produk / product ID di Seller Fee dan cek Master Produk untuk item yang belum terhubung.`
+        .join(' · ')}. Review nama produk / product ID dan cek Master Produk untuk item yang belum terhubung.`
     )
   }
 
@@ -1317,9 +1327,11 @@ export async function processIncomeUpload(ctx: UploadProcessorContext): Promise<
 }
 
 export async function processOrdersAllUpload(ctx: UploadProcessorContext): Promise<UploadJobResult> {
-  await setProgress(ctx, 10, 'Membaca file Order.all')
+  await setProgress(ctx, 10, `Membaca file ${ctx.marketplace === 'tiktok' ? 'semua pesanan TikTok' : 'Order.all'}`)
 
-  const parseResult = parseShopeeOrdersAll(ctx.buffer)
+  const parseResult = ctx.marketplace === 'tiktok'
+    ? parseTiktokOrdersAll(ctx.buffer)
+    : parseShopeeOrdersAll(ctx.buffer)
   const { orders } = parseResult
   const periodStart = ensureValidDate(parseResult.periodStart)
   const periodEnd = ensureValidDate(parseResult.periodEnd)

@@ -25,6 +25,9 @@ const STORE_SCOPED_TABLES = new Set([
 
 const USER_SCOPED_TABLES = new Set(['profiles', 'upload_jobs', 'roas_scenarios', 'store_memberships'])
 const IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+const JSON_COLUMNS_BY_TABLE: Record<string, Set<string>> = {
+  orders_all: new Set(['products_json']),
+}
 
 function qid(identifier: string) {
   if (!IDENTIFIER_RE.test(identifier)) {
@@ -71,6 +74,14 @@ function normalizeValue(value: unknown): unknown {
 
 function normalizeRow<T>(row: T): T {
   return normalizeValue(row) as T
+}
+
+function prepareDbValue(table: string, column: string, value: unknown) {
+  if (value === undefined) return null
+  if (JSON_COLUMNS_BY_TABLE[table]?.has(column)) {
+    return value === null || typeof value === 'string' ? value : JSON.stringify(value)
+  }
+  return value
 }
 
 function errorResult(error: unknown): QueryResult {
@@ -371,19 +382,20 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
     const rows = Array.isArray(this.payload) ? this.payload : [this.payload]
     if (rows.length === 0) return { data: [] as T, error: null }
 
+    const typedRows = rows as Record<string, unknown>[]
+    const keys = Array.from(new Set(typedRows.flatMap((row) => Object.keys(row))))
     const values: unknown[] = []
-    const inserted: unknown[] = []
-    for (const row of rows as Record<string, unknown>[]) {
-      const keys = Object.keys(row)
-      const params = keys.map((key) => this.param(values, row[key]))
-      const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
-      const result = await query(
-        `insert into ${qid(this.table)} (${keys.map(qid).join(', ')}) values (${params.join(', ')})${returning}`,
-        values.splice(0)
-      )
-      inserted.push(...result.rows.map(normalizeRow))
-    }
-    return this.formatRows(inserted as T[])
+    const rowSql = typedRows.map((row) => {
+      const params = keys.map((key) => this.param(values, prepareDbValue(this.table, key, row[key])))
+      return `(${params.join(', ')})`
+    })
+    const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
+    const result = await query(
+      `insert into ${qid(this.table)} (${keys.map(qid).join(', ')}) values ${rowSql.join(', ')}${returning}`,
+      values
+    )
+
+    return this.formatRows(result.rows.map(normalizeRow) as T[], result.rowCount ?? 0)
   }
 
   private async executeUpsert(): Promise<QueryResult<T>> {
@@ -394,32 +406,34 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
       .map((col) => qid(col.trim()))
       .join(', ')
     const ignore = Boolean(this.options.ignoreDuplicates)
-    const saved: unknown[] = []
+    const conflictColumns = String(this.options.onConflict ?? 'id')
+      .split(',')
+      .map((col) => col.trim())
+    const typedRows = rows as Record<string, unknown>[]
+    const keys = Array.from(new Set(typedRows.flatMap((row) => Object.keys(row))))
+    const values: unknown[] = []
+    const rowSql = typedRows.map((row) => {
+      const params = keys.map((key) => this.param(values, prepareDbValue(this.table, key, row[key])))
+      return `(${params.join(', ')})`
+    })
+    const updateSet = keys
+      .filter((key) => !conflictColumns.includes(key))
+      .map((key) => `${qid(key)} = excluded.${qid(key)}`)
+      .join(', ')
+    const action = ignore ? 'do nothing' : `do update set ${updateSet || `${qid(keys[0])} = excluded.${qid(keys[0])}`}`
+    const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
+    const result = await query(
+      `insert into ${qid(this.table)} (${keys.map(qid).join(', ')}) values ${rowSql.join(', ')} on conflict (${conflict}) ${action}${returning}`,
+      values
+    )
 
-    for (const row of rows as Record<string, unknown>[]) {
-      const values: unknown[] = []
-      const keys = Object.keys(row)
-      const params = keys.map((key) => this.param(values, row[key]))
-      const updateSet = keys
-        .filter((key) => !String(this.options.onConflict ?? 'id').split(',').map((c) => c.trim()).includes(key))
-        .map((key) => `${qid(key)} = excluded.${qid(key)}`)
-        .join(', ')
-      const action = ignore ? 'do nothing' : `do update set ${updateSet || `${qid(keys[0])} = excluded.${qid(keys[0])}`}`
-      const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
-      const result = await query(
-        `insert into ${qid(this.table)} (${keys.map(qid).join(', ')}) values (${params.join(', ')}) on conflict (${conflict}) ${action}${returning}`,
-        values
-      )
-      saved.push(...result.rows.map(normalizeRow))
-    }
-
-    return this.formatRows(saved as T[])
+    return this.formatRows(result.rows.map(normalizeRow) as T[], result.rowCount ?? 0)
   }
 
   private async executeUpdate(): Promise<QueryResult<T>> {
     const row = this.payload as Record<string, unknown>
     const values: unknown[] = []
-    const set = Object.keys(row).map((key) => `${qid(key)} = ${this.param(values, row[key])}`)
+    const set = Object.keys(row).map((key) => `${qid(key)} = ${this.param(values, prepareDbValue(this.table, key, row[key]))}`)
     const where = await this.whereSql(values)
     const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
     const result = await query(`update ${qid(this.table)} set ${set.join(', ')}${where}${returning}`, values)
