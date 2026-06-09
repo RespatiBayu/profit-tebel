@@ -25,6 +25,9 @@ const STORE_SCOPED_TABLES = new Set([
 
 const USER_SCOPED_TABLES = new Set(['profiles', 'upload_jobs', 'roas_scenarios', 'store_memberships'])
 const IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+const JSON_COLUMNS_BY_TABLE: Record<string, Set<string>> = {
+  orders_all: new Set(['products_json']),
+}
 
 function qid(identifier: string) {
   if (!IDENTIFIER_RE.test(identifier)) {
@@ -71,6 +74,14 @@ function normalizeValue(value: unknown): unknown {
 
 function normalizeRow<T>(row: T): T {
   return normalizeValue(row) as T
+}
+
+function prepareDbValue(table: string, column: string, value: unknown) {
+  if (value === undefined) return null
+  if (JSON_COLUMNS_BY_TABLE[table]?.has(column)) {
+    return value === null || typeof value === 'string' ? value : JSON.stringify(value)
+  }
+  return value
 }
 
 function errorResult(error: unknown): QueryResult {
@@ -375,7 +386,7 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
     const keys = Array.from(new Set(typedRows.flatMap((row) => Object.keys(row))))
     const values: unknown[] = []
     const rowSql = typedRows.map((row) => {
-      const params = keys.map((key) => this.param(values, row[key] ?? null))
+      const params = keys.map((key) => this.param(values, prepareDbValue(this.table, key, row[key])))
       return `(${params.join(', ')})`
     })
     const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
@@ -402,7 +413,7 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
     const keys = Array.from(new Set(typedRows.flatMap((row) => Object.keys(row))))
     const values: unknown[] = []
     const rowSql = typedRows.map((row) => {
-      const params = keys.map((key) => this.param(values, row[key] ?? null))
+      const params = keys.map((key) => this.param(values, prepareDbValue(this.table, key, row[key])))
       return `(${params.join(', ')})`
     })
     const updateSet = keys
@@ -422,7 +433,7 @@ export class LocalQueryBuilder<T = DbRow[]> implements PromiseLike<QueryResult<T
   private async executeUpdate(): Promise<QueryResult<T>> {
     const row = this.payload as Record<string, unknown>
     const values: unknown[] = []
-    const set = Object.keys(row).map((key) => `${qid(key)} = ${this.param(values, row[key])}`)
+    const set = Object.keys(row).map((key) => `${qid(key)} = ${this.param(values, prepareDbValue(this.table, key, row[key]))}`)
     const where = await this.whereSql(values)
     const returning = this.selectWasCalled ? ` returning ${this.selectClause}` : ''
     const result = await query(`update ${qid(this.table)} set ${set.join(', ')}${where}${returning}`, values)
