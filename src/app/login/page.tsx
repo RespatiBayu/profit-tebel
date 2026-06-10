@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BarChart3, CheckCircle, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react'
+import { CheckCircle, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { Logo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -149,11 +150,8 @@ export default function LoginPage() {
           </div>
 
           <div className="mb-6 text-center">
-            <Link href="/" className="mb-3 inline-flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-[0_16px_34px_-24px_hsl(var(--primary)/0.95)]">
-                <BarChart3 className="h-6 w-6" />
-              </span>
-              <span className="font-heading text-xl font-semibold">Profit Tebel</span>
+            <Link href="/" className="mb-3 inline-flex">
+              <Logo size={40} />
             </Link>
             <p className="text-sm text-muted-foreground">
               Masuk untuk buka dashboard profit, iklan, dan ROAS kamu.
