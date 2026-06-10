@@ -95,6 +95,16 @@ const SIGNAL_CONFIG = {
   neutral:  { color: 'bg-gray-300' },
 } as const
 
+// Label sinyal untuk ditampilkan ke user. Istilah dibuat lebih membumi —
+// sekadar sinyal kondisi, bukan instruksi keputusan. Kunci internal
+// (scale/optimize/kill) tetap dipakai di logika perhitungan.
+const SIGNAL_LABELS = {
+  scale:    'Untung',
+  optimize: 'Waspada',
+  kill:     'Rugi',
+  neutral:  'Netral',
+} as const
+
 function SignalBadge({ signal }: { signal: keyof typeof SIGNAL_CONFIG }) {
   const { color } = SIGNAL_CONFIG[signal]
   return (
@@ -485,8 +495,8 @@ function RoasBarChart({ data }: { data: ReturnType<typeof buildRoasChartData> })
             <Cell key={`cell-${index}`} fill={ROAS_COLORS[entry.signal]} />
           ))}
         </Bar>
-        <ReferenceLine x={ROAS_THRESHOLDS.scale} stroke="#16a34a" strokeDasharray="4 2" label={{ value: 'SCALE', position: 'top', fontSize: 10 }} />
-        <ReferenceLine x={ROAS_THRESHOLDS.kill} stroke="#dc2626" strokeDasharray="4 2" label={{ value: 'KILL', position: 'top', fontSize: 10 }} />
+        <ReferenceLine x={ROAS_THRESHOLDS.scale} stroke="#16a34a" strokeDasharray="4 2" label={{ value: SIGNAL_LABELS.scale, position: 'top', fontSize: 10 }} />
+        <ReferenceLine x={ROAS_THRESHOLDS.kill} stroke="#dc2626" strokeDasharray="4 2" label={{ value: SIGNAL_LABELS.kill, position: 'top', fontSize: 10 }} />
       </BarChart>
     </ResponsiveContainer>
   )
@@ -878,7 +888,7 @@ export default function AdsDashboard({
       } else if (cvr < 0.04) {
         leak = { stage: 'Klik → Beli', tone: 'warn', msg: `Konversi ${(cvr * 100).toFixed(1)}% cukup, tapi masih ada ruang. Perkuat halaman produk & ulasan.` }
       } else {
-        leak = { stage: 'Funnel sehat', tone: 'good', msg: `CTR ${(ctr * 100).toFixed(2)}% & konversi ${(cvr * 100).toFixed(1)}% sudah bagus. Fokus naikin budget di iklan SCALE.` }
+        leak = { stage: 'Funnel sehat', tone: 'good', msg: `CTR ${(ctr * 100).toFixed(2)}% & konversi ${(cvr * 100).toFixed(1)}% sudah bagus. Fokus naikin budget di iklan bersinyal ${SIGNAL_LABELS.scale}.` }
       }
     }
     return { impressions, clicks, conversions, adSpend, gmv, ctr, cvr, cpc, cpm, cpa, leak, hasData: impressions > 0 }
@@ -916,7 +926,7 @@ export default function AdsDashboard({
     if (wastedSpend.hasData) {
       out.push({
         tone: 'bad',
-        text: `${wastedSpend.count} iklan kena sinyal KILL, menghabiskan ${formatRpFull(wastedSpend.total)}${wastedSpend.sharePct > 0 ? ` (${wastedSpend.sharePct.toFixed(0)}% dari total ad spend)` : ''}. Sinyal buat dicek — bisa kamu pertimbangkan untuk jeda atau perbaiki.`,
+        text: `${wastedSpend.count} iklan kena sinyal ${SIGNAL_LABELS.kill}, menghabiskan ${formatRpFull(wastedSpend.total)}${wastedSpend.sharePct > 0 ? ` (${wastedSpend.sharePct.toFixed(0)}% dari total ad spend)` : ''}. Sinyal buat dicek — bisa kamu pertimbangkan untuk jeda atau perbaiki.`,
       })
     }
     if (funnelDiag.leak && funnelDiag.leak.tone !== 'good') {
@@ -931,7 +941,7 @@ export default function AdsDashboard({
     if (kpis.scaleCount > 0) {
       out.push({
         tone: 'good',
-        text: `${kpis.scaleCount} iklan kena sinyal SCALE (ROAS di atas target). Kalau mau, budget bisa dinaikkan bertahap ~20% biar efisiensi tetap terjaga.`,
+        text: `${kpis.scaleCount} iklan kena sinyal ${SIGNAL_LABELS.scale} (ROAS di atas target). Kalau mau, budget bisa dinaikkan bertahap ~20% biar efisiensi tetap terjaga.`,
       })
     }
     if (funnelDiag.leak && funnelDiag.leak.tone === 'good' && kpis.scaleCount === 0) {
@@ -940,7 +950,7 @@ export default function AdsDashboard({
     if (!hasHppData) {
       out.push({
         tone: 'info',
-        text: 'Isi HPP di Mapping Produk biar sinyal SCALE/OPTIMIZE/KILL dan Target ROAS akurat — sekarang sebagian iklan belum bisa dinilai untung/ruginya.',
+        text: `Isi HPP di Mapping Produk biar sinyal ${SIGNAL_LABELS.scale}/${SIGNAL_LABELS.optimize}/${SIGNAL_LABELS.kill} dan Target ROAS akurat — sekarang sebagian iklan belum bisa dinilai untung/ruginya.`,
       })
     }
     if (kpis.overallRoas > 0) {
@@ -1028,21 +1038,21 @@ export default function AdsDashboard({
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2">
           <span className="text-xl">🟢</span>
           <div>
-            <p className="text-xs text-muted-foreground">SCALE</p>
+            <p className="text-xs text-muted-foreground">{SIGNAL_LABELS.scale}</p>
             <p className="text-lg font-bold text-green-700">{kpis.scaleCount}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2">
           <span className="text-xl">🟡</span>
           <div>
-            <p className="text-xs text-muted-foreground">OPTIMIZE</p>
+            <p className="text-xs text-muted-foreground">{SIGNAL_LABELS.optimize}</p>
             <p className="text-lg font-bold text-yellow-700">{kpis.optimizeCount}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
           <span className="text-xl">🔴</span>
           <div>
-            <p className="text-xs text-muted-foreground">KILL</p>
+            <p className="text-xs text-muted-foreground">{SIGNAL_LABELS.kill}</p>
             <p className="text-lg font-bold text-red-700">{kpis.killCount}</p>
           </div>
         </div>
@@ -1084,9 +1094,9 @@ export default function AdsDashboard({
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-base">Sinyal per Iklan</CardTitle>
             <div className="text-xs text-muted-foreground space-y-0.5 text-right">
-              <p>🟢 SCALE: ROAS ≥ {ROAS_TARGET_MULTIPLIERS.konservatif.toFixed(1)}× BEP (konservatif)</p>
-              <p>🟡 OPTIMIZE: ROAS ≥ BEP × {BEP_PPN_MULTIPLIER.toFixed(2)} (BEP + PPN 11%)</p>
-              <p>🔴 KILL: ROAS &lt; BEP × {BEP_PPN_MULTIPLIER.toFixed(2)}</p>
+              <p>🟢 {SIGNAL_LABELS.scale}: ROAS ≥ {ROAS_TARGET_MULTIPLIERS.konservatif.toFixed(1)}× BEP (konservatif)</p>
+              <p>🟡 {SIGNAL_LABELS.optimize}: ROAS ≥ BEP × {BEP_PPN_MULTIPLIER.toFixed(2)} (BEP + PPN 11%)</p>
+              <p>🔴 {SIGNAL_LABELS.kill}: ROAS &lt; BEP × {BEP_PPN_MULTIPLIER.toFixed(2)}</p>
             </div>
           </div>
         </CardHeader>
@@ -1111,7 +1121,7 @@ export default function AdsDashboard({
               </span>
             </CardTitle>
             <p className="text-xs text-muted-foreground">
-              Ad spend di iklan yang kena sinyal KILL periode ini. Sebagai bahan pertimbangan buat dijeda/diperbaiki — keputusan tetap di kamu.
+              Ad spend di iklan yang kena sinyal {SIGNAL_LABELS.kill} periode ini. Sebagai bahan pertimbangan buat dijeda/diperbaiki — keputusan tetap di kamu.
             </p>
           </CardHeader>
           <CardContent className="pt-0">
@@ -1168,9 +1178,9 @@ export default function AdsDashboard({
         <CardContent>
           <RoasBarChart data={roasChartData} />
           <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.scale }} /> SCALE</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.optimize }} /> OPTIMIZE</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.kill }} /> KILL</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.scale }} /> {SIGNAL_LABELS.scale}</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.optimize }} /> {SIGNAL_LABELS.optimize}</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.kill }} /> {SIGNAL_LABELS.kill}</span>
           </div>
         </CardContent>
       </Card>
