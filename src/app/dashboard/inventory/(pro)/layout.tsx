@@ -14,7 +14,11 @@ export default async function InventoryProLayout({
   const access = await getCurrentUserAccess(supabase)
 
   if (!access) redirect('/login')
-  if (!access.hasInventoryAccess) return <InventoryUpgradeGate />
+  if (!access.hasInventoryAccess) {
+    const s = access.subscription
+    const isPaidBasic = s.tier === 'basic' && !s.isTrial && s.isActive
+    return <InventoryUpgradeGate isPaidBasic={isPaidBasic} />
+  }
 
   return <>{children}</>
 }

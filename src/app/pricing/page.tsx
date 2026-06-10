@@ -4,6 +4,10 @@ import { Check, X, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Logo } from '@/components/brand/logo'
+import { LaunchCountdown } from '@/components/pricing/launch-countdown'
+import { createClient } from '@/lib/supabase/server'
+import { getCurrentUserAccess } from '@/lib/roles'
+import { PRICING, formatRp, hematPct, proUpgradeCost } from '@/lib/pricing'
 
 export const metadata: Metadata = {
   title: 'Harga & Paket',
@@ -21,58 +25,13 @@ const BASIC_FEATURES = [
   'Master Item (setup HPP)',
 ]
 
-const PRO_LOCKED_IN_BASIC = [
+const PRO_EXTRA = [
   'Formula (Resep Produksi)',
   'Pembelian (PO)',
   'Produksi',
   'Laporan Stok',
   'Stock Opname',
 ]
-
-function formatRp(n: number) {
-  return 'Rp ' + n.toLocaleString('id-ID')
-}
-
-function PlanCard({
-  name, normal, launch, highlight, children, ctaLabel,
-}: {
-  name: string
-  normal: number
-  launch: number
-  highlight?: boolean
-  children: React.ReactNode
-  ctaLabel: string
-}) {
-  const hematPct = Math.round((1 - launch / normal) * 100)
-  return (
-    <div className={`relative rounded-2xl border bg-card p-6 shadow-sm ${highlight ? 'border-primary ring-2 ring-primary/30' : ''}`}>
-      {highlight && (
-        <Badge className="absolute -top-3 left-6 bg-primary text-primary-foreground">Paling Lengkap</Badge>
-      )}
-      <h3 className="text-lg font-bold">{name}</h3>
-      <div className="mt-3 flex items-end gap-2">
-        <span className="text-3xl font-extrabold tracking-tight">{formatRp(launch)}</span>
-        <span className="pb-1 text-sm text-muted-foreground">/tahun</span>
-      </div>
-      <div className="mt-1 flex items-center gap-2 text-sm">
-        <span className="text-muted-foreground line-through">{formatRp(normal)}</span>
-        <Badge variant="secondary" className="text-green-700">Hemat {hematPct}%</Badge>
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground">Harga launching · perpanjangan manual, tanpa auto-charge.</p>
-
-      <div className="mt-5 space-y-2">{children}</div>
-
-      <a
-        href={`mailto:${ADMIN_EMAIL}?subject=Aktivasi%20Profit%20Tebel%20${encodeURIComponent(name)}`}
-        className="mt-6 block"
-      >
-        <Button className="w-full" variant={highlight ? 'default' : 'outline'}>
-          {ctaLabel}
-        </Button>
-      </a>
-    </div>
-  )
-}
 
 function FeatureRow({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
@@ -85,7 +44,20 @@ function FeatureRow({ ok, children }: { ok: boolean; children: React.ReactNode }
   )
 }
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  // Deteksi user yang sedang login & paket-nya untuk harga upgrade (bayar selisih).
+  let isPaidBasic = false
+  try {
+    const supabase = await createClient()
+    const access = await getCurrentUserAccess(supabase)
+    if (access && !access.isPrivileged) {
+      const s = access.subscription
+      isPaidBasic = s.tier === 'basic' && !s.isTrial && s.isActive
+    }
+  } catch { /* halaman tetap tampil untuk publik */ }
+
+  const upgradeCost = proUpgradeCost(true)
+
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b">
@@ -104,27 +76,82 @@ export default function PricingPage() {
             Lisensi tahunan. Akses aktif 365 hari sejak pembelian. Tanpa langganan bulanan,
             tanpa auto-charge, tanpa kartu kredit disimpan.
           </p>
+          <div className="mt-5 flex justify-center">
+            <LaunchCountdown />
+          </div>
         </div>
 
         <div className="mt-10 grid gap-6 md:grid-cols-2">
-          <PlanCard name="Basic" normal={149000} launch={97000} ctaLabel="Pilih Basic">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Termasuk</p>
-            {BASIC_FEATURES.map((f) => <FeatureRow key={f} ok>{f}</FeatureRow>)}
-            <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Belum termasuk</p>
-            {PRO_LOCKED_IN_BASIC.map((f) => <FeatureRow key={f} ok={false}>{f}</FeatureRow>)}
-          </PlanCard>
-
-          <PlanCard name="Pro" normal={297000} launch={197000} highlight ctaLabel="Pilih Pro">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Semua fitur Basic, plus</p>
-            {PRO_LOCKED_IN_BASIC.map((f) => <FeatureRow key={f} ok>{f}</FeatureRow>)}
-            <div className="pt-2">
-              <FeatureRow ok>Inventori &amp; Produksi full unlock</FeatureRow>
+          {/* BASIC */}
+          <div className="relative rounded-2xl border bg-card p-6 shadow-sm">
+            <h3 className="text-lg font-bold">Basic</h3>
+            <div className="mt-3 flex items-end gap-2">
+              <span className="text-3xl font-extrabold tracking-tight">{formatRp(PRICING.basic.launch)}</span>
+              <span className="pb-1 text-sm text-muted-foreground">/tahun</span>
             </div>
-          </PlanCard>
+            <div className="mt-1 flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground line-through">{formatRp(PRICING.basic.normal)}</span>
+              <Badge variant="secondary" className="text-green-700">Hemat {hematPct('basic')}%</Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Harga launching · perpanjangan manual, tanpa auto-charge.</p>
+            <div className="mt-5 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Termasuk</p>
+              {BASIC_FEATURES.map((f) => <FeatureRow key={f} ok>{f}</FeatureRow>)}
+              <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Belum termasuk</p>
+              {PRO_EXTRA.map((f) => <FeatureRow key={f} ok={false}>{f}</FeatureRow>)}
+            </div>
+            <a href={`mailto:${ADMIN_EMAIL}?subject=Aktivasi%20Profit%20Tebel%20Basic`} className="mt-6 block">
+              <Button className="w-full" variant="outline">Pilih Basic</Button>
+            </a>
+          </div>
+
+          {/* PRO */}
+          <div className="relative rounded-2xl border border-primary p-6 shadow-sm ring-2 ring-primary/30 bg-card">
+            <Badge className="absolute -top-3 left-6 bg-primary text-primary-foreground">Paling Lengkap</Badge>
+            <h3 className="text-lg font-bold">Pro</h3>
+
+            {isPaidBasic ? (
+              <>
+                <div className="mt-3 flex items-end gap-2">
+                  <span className="text-3xl font-extrabold tracking-tight">{formatRp(upgradeCost)}</span>
+                  <span className="pb-1 text-sm text-muted-foreground">upgrade dari Basic</span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Kamu sudah punya Basic — cukup bayar <strong>selisihnya</strong> ({formatRp(PRICING.pro.launch)} − {formatRp(PRICING.basic.launch)}).
+                  Masa aktif Pro <strong>melanjutkan periode Basic</strong> kamu (tidak reset 365 hari).
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="mt-3 flex items-end gap-2">
+                  <span className="text-3xl font-extrabold tracking-tight">{formatRp(PRICING.pro.launch)}</span>
+                  <span className="pb-1 text-sm text-muted-foreground">/tahun</span>
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground line-through">{formatRp(PRICING.pro.normal)}</span>
+                  <Badge variant="secondary" className="text-green-700">Hemat {hematPct('pro')}%</Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">Harga launching · perpanjangan manual, tanpa auto-charge.</p>
+              </>
+            )}
+
+            <div className="mt-5 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Semua fitur Basic, plus</p>
+              {PRO_EXTRA.map((f) => <FeatureRow key={f} ok>{f}</FeatureRow>)}
+              <div className="pt-2"><FeatureRow ok>Inventori &amp; Produksi full unlock</FeatureRow></div>
+            </div>
+
+            <a
+              href={`mailto:${ADMIN_EMAIL}?subject=${encodeURIComponent(isPaidBasic ? 'Upgrade ke Pro (bayar selisih)' : 'Aktivasi Profit Tebel Pro')}`}
+              className="mt-6 block"
+            >
+              <Button className="w-full">{isPaidBasic ? `Upgrade ke Pro — ${formatRp(upgradeCost)}` : 'Pilih Pro'}</Button>
+            </a>
+          </div>
         </div>
 
         <p className="mt-8 text-center text-sm text-muted-foreground">
-          Checkout otomatis &amp; harga launching terbatas segera aktif. Sementara,{' '}
+          Checkout otomatis segera aktif. Sementara,{' '}
           <a href={`mailto:${ADMIN_EMAIL}`} className="text-primary hover:underline">hubungi admin</a>{' '}
           untuk aktivasi.
         </p>
