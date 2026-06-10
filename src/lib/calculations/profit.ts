@@ -122,6 +122,17 @@ function orderHppCost(
 // 1. KPIs
 // ---------------------------------------------------------------------------
 
+/**
+ * Omzet "real" = harga jual sebenarnya = Harga Asli − Diskon Produk (harga coret).
+ * "Harga Asli Produk" di Shopee adalah harga sebelum dicoret (di-markup lalu
+ * "didiskon") — itu cuma gimmick, bukan uang yang pernah nyata. Maka omzet yang
+ * sesungguhnya adalah harga setelah coret. Diskon/promo yang BENAR-BENAR ditanggung
+ * penjual (voucher, cashback, refund, gratis ongkir) dihitung terpisah.
+ */
+export function orderRealOmzet(o: DbOrder): number {
+  return o.original_price - Math.abs(o.product_discount)
+}
+
 export function calculateKpis(
   orders: DbOrder[],
   orderProductMap: Map<string, string[]>,
@@ -132,6 +143,7 @@ export function calculateKpis(
   ordersAllHppMap?: Map<string, number>
 ): ProfitKpis {
   let totalOmzet = 0
+  let totalProductDiscount = 0
   let totalNetIncome = 0
   let totalFees = 0
   let totalHppCost = 0
@@ -143,7 +155,9 @@ export function calculateKpis(
     hppMap.size > 0 && Array.from(hppMap.values()).some((h) => h.hpp > 0 || h.packaging_cost > 0)
 
   for (const o of orders) {
-    totalOmzet += o.original_price
+    // Omzet pakai harga real (setelah harga coret); harga coret dicatat terpisah.
+    totalOmzet += orderRealOmzet(o)
+    totalProductDiscount += Math.abs(o.product_discount)
     totalNetIncome += o.total_income
 
     // "Total Biaya" KPI = biaya marketplace murni saja (admin, layanan, komisi,
@@ -176,13 +190,13 @@ export function calculateKpis(
     totalAdSpend += ad.ad_spend ?? 0
   }
 
-  // Calculate total discount & promo that seller bears
-  // = sum of: product_discount + seller_voucher + seller_voucher_cofund + 
-  //   seller_cashback + seller_free_shipping_promo + refund_amount
+  // Diskon & promo yang BENAR-BENAR ditanggung penjual (di luar harga coret):
+  // = seller_voucher + voucher_cofund + cashback + free_shipping_promo + refund.
+  // Harga coret (product_discount) TIDAK dihitung di sini — sudah dikeluarkan dari
+  // omzet real di atas (omzet = Harga Asli − Diskon Produk).
   let totalDiskonPromo = 0
   for (const o of orders) {
     totalDiskonPromo +=
-      Math.abs(o.product_discount) +
       Math.abs(o.seller_voucher) +
       Math.abs(o.seller_voucher_cofund) +
       Math.abs(o.seller_cashback) +
@@ -190,8 +204,8 @@ export function calculateKpis(
       Math.abs(o.refund_amount)
   }
 
-  // Gross income = Total Omzet - Total Diskon & Promo
-  // (amount received after seller-borne discounts but before marketplace fees)
+  // Gross income = Omzet real − Diskon & Promo real
+  // (sama dengan Harga Asli − coret − promo; nilai gross tidak berubah)
   const grossIncome = totalOmzet - totalDiskonPromo
 
   // If no HPP found in this period but there's global HPP data, still mark as having HPP data
@@ -206,6 +220,7 @@ export function calculateKpis(
 
   return {
     totalOmzet,
+    totalProductDiscount,
     totalDiskonPromo,
     grossIncome,
     totalNetIncome,
@@ -291,7 +306,6 @@ export function calculateFeeBreakdown(orders: DbOrder[]): FeeBreakdownItem[] {
 export function calculateOmzetToNetIncomeBreakdown(
   orders: DbOrder[]
 ): OmzetDeductionItem[] {
-  let productDiscount = 0
   let refundAmount = 0
   let sellerVoucher = 0
   let sellerCashback = 0
@@ -308,7 +322,6 @@ export function calculateOmzetToNetIncomeBreakdown(
   let campaignFee = 0
 
   for (const o of orders) {
-    productDiscount += Math.abs(o.product_discount)
     refundAmount += Math.abs(o.refund_amount)
     sellerVoucher += Math.abs(o.seller_voucher) + Math.abs(o.seller_voucher_cofund)
     sellerCashback += Math.abs(o.seller_cashback)
@@ -329,8 +342,8 @@ export function calculateOmzetToNetIncomeBreakdown(
   }
 
   const items: OmzetDeductionItem[] = [
-    // Diskon / pengembalian / promo penjual
-    { name: 'Diskon Produk', value: productDiscount, color: '#fb923c', group: 'discount', hint: 'Diskon harga yang kamu kasih ke pembeli' },
+    // Diskon / pengembalian / promo penjual (harga coret TIDAK termasuk — sudah
+    // dikeluarkan dari omzet real)
     { name: 'Voucher Seller', value: sellerVoucher, color: '#f43f5e', group: 'discount', hint: 'Voucher sponsor + co-fund penjual' },
     { name: 'Cashback Koin', value: sellerCashback, color: '#ec4899', group: 'discount', hint: 'Cashback koin yang kamu sponsori' },
     { name: 'Promo Gratis Ongkir Penjual', value: sellerFreeShippingPromo, color: '#e11d48', group: 'discount', hint: 'Gratis ongkir yang kamu tanggung' },
@@ -401,7 +414,7 @@ export function calculateTrend(
     const key = groupBy === 'week' ? weekKey(o.order_date) : o.order_date
     const existing = grouped.get(key) ?? { omzet: 0, netIncome: 0, hpp: 0, adSpend: 0, hasHpp: false }
     const hpp = orderHppCost(o, orderProductMap, hppMap, ordersAllHppMap)
-    existing.omzet += o.original_price
+    existing.omzet += orderRealOmzet(o)
     existing.netIncome += o.total_income
     existing.hpp += hpp
     if (hpp > 0) existing.hasHpp = true

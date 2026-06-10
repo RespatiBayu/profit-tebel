@@ -428,6 +428,7 @@ export interface DbOrderProduct {
 // Calculated profit results
 export interface ProfitKpis {
   totalOmzet: number
+  totalProductDiscount: number  // "harga coret" (Diskon Produk) — gimmick, info saja
   totalDiskonPromo: number
   grossIncome: number
   totalNetIncome: number

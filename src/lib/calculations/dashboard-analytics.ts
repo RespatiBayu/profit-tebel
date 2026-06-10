@@ -1,5 +1,6 @@
 import type { DbOrder, DbOrderProduct, MasterProduct } from '@/types'
 import { buildMasterProductMap } from '@/lib/master-product-map'
+import { orderRealOmzet } from '@/lib/calculations/profit'
 
 // ---------------------------------------------------------------------------
 // Dashboard extras: busy-days, top products, top buyers, daily detail.
@@ -28,7 +29,7 @@ export function calculateBusyDays(orders: DbOrder[]): BusyDayRow[] {
     const idx = d.getDay()
     const b = buckets.get(idx) ?? { count: 0, omzet: 0, net: 0 }
     b.count += 1
-    b.omzet += o.original_price
+    b.omzet += orderRealOmzet(o)
     b.net += o.total_income
     buckets.set(idx, b)
   }
@@ -94,7 +95,7 @@ export function calculateTopProducts(
     const order = orderByNumber.get(orderNumber)
     if (!order) continue
     const share = 1 / ops.length
-    const proratedOmzet = order.original_price * share
+    const proratedOmzet = orderRealOmzet(order) * share
     const proratedNet = order.total_income * share
 
     for (const op of ops) {
@@ -169,7 +170,7 @@ export function calculateTopBuyers(
       omzet: 0,
     }
     existing.count += 1
-    existing.omzet += o.original_price
+    existing.omzet += orderRealOmzet(o)
     // Keep the latest non-null buyer_name seen
     if (!existing.name && o.buyer_name) existing.name = o.buyer_name
     byBuyer.set(key, existing)
@@ -221,13 +222,14 @@ export function calculateDailyDetail(orders: DbOrder[]): DailyDetailRow[] {
       isBusy: false,
     }
     existing.orderCount += 1
-    existing.omzet += o.original_price
+    existing.omzet += orderRealOmzet(o)
+    // Diskon real (di luar harga coret yang sudah dikeluarkan dari omzet)
     existing.discount +=
       Math.abs(o.seller_voucher) +
       Math.abs(o.seller_voucher_cofund) +
       Math.abs(o.seller_cashback) +
       Math.abs(o.seller_free_shipping_promo) +
-      Math.abs(o.product_discount)
+      Math.abs(o.refund_amount)
     existing.netIncome += o.total_income
     existing.adminFee +=
       Math.abs(o.admin_fee) + Math.abs(o.transaction_fee)

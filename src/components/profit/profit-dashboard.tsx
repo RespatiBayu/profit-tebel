@@ -56,6 +56,7 @@ import {
   buildHppMap,
   buildOrderProductMap,
   calculateKpis,
+  orderRealOmzet,
   calculateFeeBreakdown,
   calculateOmzetToNetIncomeBreakdown,
   calculateTrend,
@@ -669,22 +670,23 @@ export default function ProfitDashboard({
       (o) => o.status_pesanan !== 'Batal' && !incomeOrderNumbers.has(o.order_number)
     )
 
-    let totalOmzet    = 0   // SUM(harga_awal × qty)
-    let totalDiskon   = 0   // product discount + seller voucher
+    let totalOmzet    = 0   // SUM(harga real setelah coret × qty)
+    let totalProductDiscount = 0 // harga coret (info)
+    let totalDiskon   = 0   // promo real (voucher penjual dll)
     let totalHpp      = 0   // pre-computed estimated_hpp from DB
     let ordersNoHpp   = 0
 
     for (const order of pending) {
       const products = order.products_json ?? []
 
-      // Omzet & diskon from per-SKU price data
+      // Omzet real = harga setelah coret; harga coret dicatat terpisah.
       for (const prod of products) {
         const ha = prod.harga_awal           ?? 0
         const hd = prod.harga_setelah_diskon ?? 0
-        totalOmzet  += ha * prod.quantity
-        totalDiskon += (ha - hd) * prod.quantity
+        totalOmzet           += hd * prod.quantity
+        totalProductDiscount += Math.max(0, ha - hd) * prod.quantity
       }
-      // Seller-borne voucher/bundle discount at order level
+      // Promo real yang ditanggung penjual di level order
       totalDiskon += order.seller_voucher ?? 0
 
       // HPP: use pre-computed value from DB (computed server-side at upload time)
@@ -718,6 +720,7 @@ export default function ProfitDashboard({
 
     return {
       totalOmzet,
+      totalProductDiscount,
       totalDiskon,
       grossIncome,
       totalFees,
@@ -848,7 +851,7 @@ export default function ProfitDashboard({
       if (!key) continue
       const e = byBuyer.get(key) ?? { count: 0, omzet: 0 }
       e.count += 1
-      e.omzet += o.original_price
+      e.omzet += orderRealOmzet(o)
       byBuyer.set(key, e)
     }
     const buyers = Array.from(byBuyer.values())
@@ -996,6 +999,8 @@ export default function ProfitDashboard({
         const p = pendingKpis.hasPendingData
         const omzet    = kpis.totalOmzet      + (p ? pendingKpis.totalOmzet    : 0)
         const diskon   = kpis.totalDiskonPromo + (p ? pendingKpis.totalDiskon   : 0)
+        // Harga coret (Diskon Produk) — gimmick, hanya info.
+        const coret    = kpis.totalProductDiscount + (p ? pendingKpis.totalProductDiscount : 0)
         const fees     = kpis.totalFees        + (p ? pendingKpis.totalFees     : 0)
         // Net income = "Total Penghasilan" dari file pendapatan yang sudah dilepas
         // (sudah dipotong fee marketplace) = uang yang benar-benar diterima dari
@@ -1020,20 +1025,20 @@ export default function ProfitDashboard({
             <KpiCard
               label="Total Omzet"
               value={formatRp(omzet)}
-              sub={`${orders.toLocaleString('id-ID')} order${pendingLabel}`}
+              sub={`${orders.toLocaleString('id-ID')} order · harga jual real${pendingLabel}`}
               accent="blue"
               icon={ShoppingBag}
-              tooltip={`Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee).${p ? ' Termasuk estimasi dari pesanan yang belum dilepas dananya.' : ''}`}
+              tooltip={`Omzet real = harga jual sebenarnya (Harga Asli − harga coret). Harga coret Shopee cuma gimmick (harga di-markup lalu "didiskon"), jadi tidak dihitung sebagai omzet.${coret > 0 ? ` Harga coret periode ini: ${formatRp(coret)} (tidak termasuk).` : ''}${p ? ' Termasuk estimasi pesanan yang belum dilepas.' : ''}`}
               pctOmzet={omzet > 0 ? 100 : null}
               delta={{ current: kpis.totalOmzet, prev: prevKpis.totalOmzet, context: 'income' }}
             />
             <KpiCard
               label="Total Diskon & Promo"
               value={formatRp(diskon)}
-              sub={`Diskon produk + voucher${pendingNote}`}
+              sub={`Voucher, cashback, refund${pendingNote}`}
               accent="orange"
               icon={Tag}
-              tooltip={`Total pengurang yang kamu tanggung sendiri: diskon produk, voucher seller, cashback koin, promo gratis ongkir, dan pengembalian dana.${p ? ' Pending: diskon produk + voucher penjual.' : ''}`}
+              tooltip={`Pengurang yang BENAR-BENAR kamu tanggung: voucher seller, cashback koin, promo gratis ongkir, dan pengembalian dana. Harga coret (Diskon Produk) TIDAK termasuk di sini karena sudah dikeluarkan dari omzet real.${p ? ' Pending: voucher penjual.' : ''}`}
               pctOmzet={pct(diskon)}
               delta={{
                 current: avg(kpis.totalDiskonPromo, curCount),
@@ -1305,7 +1310,7 @@ export default function ProfitDashboard({
               const rows: Row[] = []
               rows.push({
                 kind: 'total',
-                label: 'Total Omzet (Harga Asli Produk)',
+                label: 'Total Omzet (harga jual real, setelah coret)',
                 value: omzet,
                 prev: prevKpis.totalOmzet,
                 context: 'income',
@@ -1319,7 +1324,7 @@ export default function ProfitDashboard({
                 // For discount and marketplace_fee groups, we may inject pending items
                 const pendingItem: Row | null =
                   hasPending && g.id === 'discount' && pendingKpis.totalDiskon > 0
-                    ? { kind: 'cost', label: 'Diskon Belum Dilepas (Est.)', value: pendingKpis.totalDiskon, prev: 0, color: '#f59e0b', hint: 'Diskon produk + voucher penjual dari order yang belum dilepas dananya' }
+                    ? { kind: 'cost', label: 'Promo Belum Dilepas (Est.)', value: pendingKpis.totalDiskon, prev: 0, color: '#f59e0b', hint: 'Voucher penjual dari order yang belum dilepas dananya (di luar harga coret)' }
                     : hasPending && g.id === 'marketplace_fee' && pendingKpis.totalFees > 0
                     ? { kind: 'cost', label: 'Biaya Marketplace Belum Dilepas (Est.)', value: pendingKpis.totalFees, prev: 0, color: '#a78bfa', hint: 'Estimasi berdasarkan rata-rata fee rate dari order yang sudah dilepas' }
                     : null
