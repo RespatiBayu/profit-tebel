@@ -1,10 +1,14 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Boxes, ClipboardList, ShoppingCart, Sparkles, CheckCircle2, Crown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+
+const PRO_NORMAL = 297000
+const PRO_LAUNCH = 197000
+const HEMAT_PCT = Math.round((1 - PRO_LAUNCH / PRO_NORMAL) * 100)
+const formatRp = (n: number) => 'Rp ' + n.toLocaleString('id-ID')
 
 const FEATURES = [
   {
@@ -30,31 +34,6 @@ const FEATURES = [
 ]
 
 export function InventoryUpgradeGate() {
-  const [loading, setLoading] = useState(false)
-  const router = useRouter()
-
-  async function handleSubscribe() {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/payment/subscribe', { method: 'POST' })
-      const data = await res.json() as {
-        redirectUrl?: string
-        alreadyActive?: boolean
-        isLifetime?: boolean
-        error?: string
-      }
-      if (data.redirectUrl) {
-        window.location.href = data.redirectUrl
-      } else if (data.alreadyActive || data.isLifetime) {
-        router.refresh()
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
     <div className="flex items-center justify-center min-h-[calc(100vh-8rem)] p-6">
       <div className="max-w-lg w-full space-y-6">
@@ -100,29 +79,28 @@ export function InventoryUpgradeGate() {
         {/* Pricing + CTA */}
         <div className="text-center space-y-3">
           <div>
-            <span className="text-4xl font-bold">Rp 49.000</span>
-            <span className="text-muted-foreground text-sm"> / bulan</span>
+            <span className="text-4xl font-bold">{formatRp(PRO_LAUNCH)}</span>
+            <span className="text-muted-foreground text-sm"> / tahun</span>
           </div>
-          <p className="text-xs text-muted-foreground">Aktif 30 hari · Bisa diperpanjang kapan saja</p>
+          <div className="flex items-center justify-center gap-2 text-sm">
+            <span className="text-muted-foreground line-through">{formatRp(PRO_NORMAL)}</span>
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Hemat {HEMAT_PCT}% (harga launching)</span>
+          </div>
+          <p className="text-xs text-muted-foreground">Aktif 365 hari · Perpanjangan manual, tanpa auto-charge</p>
           <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Batalkan kapan saja</span>
+            <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Tanpa auto-charge</span>
             <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> QRIS, VA & e-wallet via iPaymu</span>
             <span className="flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Akses langsung setelah bayar</span>
           </div>
-          <Button
-            size="lg"
-            className="w-full gap-2 bg-amber-500 hover:bg-amber-600 text-white"
-            onClick={handleSubscribe}
-            disabled={loading}
-          >
-            <Crown className="h-4 w-4" />
-            {loading ? 'Memproses...' : 'Aktifkan Paket Pro — Rp 49.000'}
-          </Button>
+          <Link href="/pricing" className="block">
+            <Button size="lg" className="w-full gap-2 bg-amber-500 hover:bg-amber-600 text-white">
+              <Crown className="h-4 w-4" />
+              Aktifkan Paket Pro — {formatRp(PRO_LAUNCH)}
+            </Button>
+          </Link>
           <p className="text-xs text-muted-foreground">
-            Sudah berlangganan tapi belum aktif?{' '}
-            <button className="underline hover:text-foreground transition-colors" onClick={() => router.refresh()}>
-              Refresh halaman
-            </button>
+            Bandingkan paket Basic vs Pro di{' '}
+            <Link href="/pricing" className="underline hover:text-foreground transition-colors">halaman harga</Link>.
           </p>
         </div>
       </div>
