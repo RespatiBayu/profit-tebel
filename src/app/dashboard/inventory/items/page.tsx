@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Plus, Search, Pencil, Trash2, Loader2, Package,
   FlaskConical, Boxes, ShoppingBag, Filter, PackageSearch,
+  Download, FileUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -63,6 +64,9 @@ export default function ItemsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Item | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const bulkInputRef = useRef<HTMLInputElement>(null)
 
   const fetchItems = useCallback(async () => {
     setLoading(true)
@@ -110,6 +114,49 @@ export default function ItemsPage() {
     }
   }
 
+  function downloadTemplate() {
+    const a = document.createElement('a')
+    a.href = '/api/inventory/items/template'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
+  async function handleBulkFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = '' // reset agar file yang sama bisa diupload lagi
+    if (!file) return
+
+    setBulkUploading(true)
+    setNotice(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/inventory/items/bulk', { method: 'POST', body: formData })
+      const json = await res.json() as {
+        updated?: number; created?: number; unchanged?: number
+        updateFailedCount?: number; createFailedCount?: number; invalidRows?: number
+        error?: string
+      }
+      if (!res.ok) { setNotice({ type: 'error', text: json.error ?? 'Gagal memproses file Excel' }); return }
+
+      const parts: string[] = []
+      if (json.created) parts.push(`${json.created} item baru`)
+      if (json.updated) parts.push(`${json.updated} item diperbarui`)
+      if (json.unchanged) parts.push(`${json.unchanged} tidak berubah`)
+      if (json.createFailedCount) parts.push(`${json.createFailedCount} gagal dibuat`)
+      if (json.updateFailedCount) parts.push(`${json.updateFailedCount} gagal diupdate`)
+      if (json.invalidRows) parts.push(`${json.invalidRows} baris angka tidak valid`)
+      setNotice({ type: 'success', text: parts.length ? parts.join(' · ') : 'Tidak ada perubahan.' })
+      await fetchItems()
+    } catch {
+      setNotice({ type: 'error', text: 'Gagal upload. Cek koneksi internet.' })
+    } finally {
+      setBulkUploading(false)
+    }
+  }
+
   const activeFilterLabel = FILTER_OPTIONS.find((o) => o.value === typeFilter)?.label ?? 'Semua'
 
   return (
@@ -125,7 +172,27 @@ export default function ItemsPage() {
             Kelola bahan mentah, barang setengah jadi, dan barang jadi.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          <input
+            ref={bulkInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleBulkFile}
+          />
+          <Button variant="outline" onClick={downloadTemplate} className="gap-2">
+            <Download className="h-4 w-4" />
+            Template Excel
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => bulkInputRef.current?.click()}
+            disabled={bulkUploading}
+            className="gap-2"
+          >
+            {bulkUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+            {bulkUploading ? 'Mengunggah...' : 'Bulk Upload'}
+          </Button>
           <Button variant="outline" onClick={() => setImportOpen(true)} className="gap-2">
             <PackageSearch className="h-4 w-4" />
             Import dari Mapping Produk
@@ -136,6 +203,19 @@ export default function ItemsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Notice hasil bulk upload */}
+      {notice && (
+        <div
+          className={`rounded-lg border px-4 py-2.5 text-sm ${
+            notice.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-800'
+              : 'border-red-200 bg-red-50 text-red-700'
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
 
       {/* Filter bar */}
       <div className="flex gap-2 flex-wrap">

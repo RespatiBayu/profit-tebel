@@ -319,14 +319,6 @@ export default function ProductsPage() {
             )}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <DashboardLink href="/dashboard/upload">
-            <Button variant="outline" size="sm" className="gap-2">
-              <Upload className="h-4 w-4" />
-              Upload Data
-            </Button>
-          </DashboardLink>
-        </div>
       </div>
 
       {/* HPP alert */}
