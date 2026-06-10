@@ -68,15 +68,17 @@ export async function createAuthUser(params: {
     [id, email, passwordHash, fullName]
   )
 
+  // User baru dapat free trial Basic 14 hari sejak pendaftaran.
   await query(
     `
-      insert into profiles (id, email, full_name, is_paid, role, created_by_id)
-      values ($1, $2, $3, false, $4, $5)
+      insert into profiles (id, email, full_name, is_paid, role, created_by_id, trial_ends_at)
+      values ($1, $2, $3, false, $4, $5, now() + interval '14 days')
       on conflict (id) do update
       set email = excluded.email,
           full_name = coalesce(profiles.full_name, excluded.full_name),
           role = coalesce(profiles.role, excluded.role),
-          created_by_id = coalesce(profiles.created_by_id, excluded.created_by_id)
+          created_by_id = coalesce(profiles.created_by_id, excluded.created_by_id),
+          trial_ends_at = coalesce(profiles.trial_ends_at, excluded.trial_ends_at)
     `,
     [id, email, fullName, params.role ?? 'member', params.createdById ?? null]
   )

@@ -1,5 +1,5 @@
 import type { LocalUser } from '@/lib/postgres/auth'
-import type { AppUserRole, SubscriptionPlan, SubscriptionStatus } from '@/types'
+import type { AppUserRole, SubscriptionPlan, SubscriptionStatus, SubscriptionTier } from '@/types'
 
 const SUPERADMIN_EMAIL = (
   process.env.SUPERADMIN_EMAIL ?? 'profittebel.admin@gmail.com'
@@ -14,6 +14,13 @@ type ProfileRoleRow = {
   created_by_id: string | null
   subscription_plan: string | null
   subscription_expires_at: string | null
+  trial_ends_at: string | null
+}
+
+const DAY_MS = 1000 * 60 * 60 * 24
+function daysFromNow(iso: string | null): number | null {
+  if (!iso) return null
+  return Math.floor((new Date(iso).getTime() - Date.now()) / DAY_MS)
 }
 
 export type CurrentUserAccess = {
@@ -25,37 +32,57 @@ export type CurrentUserAccess = {
   isManagedAccount: boolean
   isPaid: boolean
   subscription: SubscriptionStatus
-  hasInventoryAccess: boolean  // true jika boleh akses fitur pembelian/inventori/produksi
+  hasInventoryAccess: boolean  // true jika boleh akses modul Pro (pembelian/produksi/stok)
+  canUpload: boolean           // true jika boleh upload data baru (akun aktif)
+  isReadOnly: boolean          // true jika akses habis → analitik read-only
 }
 
 export function resolveSubscription(profile: ProfileRoleRow | null, isPrivileged: boolean): SubscriptionStatus {
   if (isPrivileged) {
-    // superadmin & admin selalu punya akses penuh
-    return { plan: 'lifetime', isActive: true, expiresAt: null, daysRemaining: null }
+    // superadmin selalu punya akses penuh (Pro, tanpa expiry)
+    return {
+      plan: 'lifetime', tier: 'pro', isActive: true, isTrial: false, isReadOnly: false,
+      hasProInventory: true, expiresAt: null, daysRemaining: null,
+      trialEndsAt: null, trialDaysRemaining: null,
+    }
   }
 
   const plan = (profile?.subscription_plan ?? null) as SubscriptionPlan
   const expiresAt = profile?.subscription_expires_at ?? null
+  const trialEndsAt = profile?.trial_ends_at ?? null
+  const now = Date.now()
 
-  if (plan === 'lifetime') {
-    return { plan, isActive: true, expiresAt: null, daysRemaining: null }
+  // Tier efektif dari plan (legacy lifetime/monthly dianggap Pro).
+  const tier: SubscriptionTier =
+    plan === 'pro' || plan === 'monthly' || plan === 'lifetime' ? 'pro'
+    : plan === 'basic' ? 'basic'
+    : null
+
+  // Berlangganan berbayar aktif?
+  const paidActive =
+    plan === 'lifetime' ? true
+    : tier !== null && !!expiresAt ? new Date(expiresAt).getTime() > now
+    : false
+
+  // Trial aktif (hanya kalau belum/tidak ada paket berbayar aktif).
+  const trialActive = !paidActive && !!trialEndsAt && new Date(trialEndsAt).getTime() > now
+
+  const isActive = paidActive || trialActive
+  // Akses modul Pro hanya untuk paket Pro berbayar yang aktif (trial = Basic).
+  const hasProInventory = tier === 'pro' && paidActive
+
+  return {
+    plan: plan ?? 'free',
+    tier: paidActive ? tier : trialActive ? 'basic' : tier,
+    isActive,
+    isTrial: trialActive,
+    isReadOnly: !isActive,
+    hasProInventory,
+    expiresAt: paidActive ? expiresAt : null,
+    daysRemaining: paidActive ? daysFromNow(expiresAt) : null,
+    trialEndsAt: trialActive ? trialEndsAt : null,
+    trialDaysRemaining: trialActive ? daysFromNow(trialEndsAt) : null,
   }
-
-  if (plan === 'monthly') {
-    if (!expiresAt) return { plan, isActive: false, expiresAt: null, daysRemaining: null }
-    const now = new Date()
-    const expiry = new Date(expiresAt)
-    const msRemaining = expiry.getTime() - now.getTime()
-    const daysRemaining = Math.floor(msRemaining / (1000 * 60 * 60 * 24))
-    return {
-      plan,
-      isActive: msRemaining > 0,
-      expiresAt,
-      daysRemaining,
-    }
-  }
-
-  return { plan: plan ?? 'free', isActive: false, expiresAt: null, daysRemaining: null }
 }
 
 export function normalizeEmail(email: string | null | undefined) {
@@ -129,7 +156,7 @@ export async function getCurrentUserAccess(
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id,email,full_name,is_paid,role,created_by_id,subscription_plan,subscription_expires_at')
+    .select('id,email,full_name,is_paid,role,created_by_id,subscription_plan,subscription_expires_at,trial_ends_at')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -146,9 +173,12 @@ export async function getCurrentUserAccess(
     isPrivileged,
     isSuperadmin: role === 'superadmin',
     isManagedAccount,
-    // Semua user terotentikasi dapat akses Basic (dashboard). Pro = subscription aktif.
+    // Basic/Pro & trial dapat akses dashboard. isPaid dipertahankan true agar
+    // gating lama (yang berbasis is_paid) tidak menutup fitur Basic.
     isPaid: true,
     subscription,
-    hasInventoryAccess: isPrivileged || subscription.isActive,
+    hasInventoryAccess: isPrivileged || subscription.hasProInventory,
+    canUpload: isPrivileged || subscription.isActive,
+    isReadOnly: !isPrivileged && subscription.isReadOnly,
   }
 }

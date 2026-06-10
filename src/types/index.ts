@@ -132,13 +132,22 @@ export type AppUserRole = 'superadmin' | 'member'
 // ============================================================
 // SUBSCRIPTION
 // ============================================================
-export type SubscriptionPlan = 'free' | 'monthly' | 'lifetime' | null
+export type SubscriptionPlan = 'free' | 'basic' | 'pro' | 'monthly' | 'lifetime' | null
+
+// Tier efektif: 'basic' (analitik + Master Item) atau 'pro' (full inventory).
+export type SubscriptionTier = 'basic' | 'pro' | null
 
 export interface SubscriptionStatus {
   plan: SubscriptionPlan
-  isActive: boolean          // true jika inventory features boleh diakses
-  expiresAt: string | null   // ISO string
-  daysRemaining: number | null  // null jika bukan monthly; negatif = expired
+  tier: SubscriptionTier
+  isActive: boolean          // akun aktif (boleh upload data) — basic/pro/trial aktif
+  isTrial: boolean           // sedang masa free trial Basic
+  isReadOnly: boolean        // akses habis → analitik read-only, upload diblokir
+  hasProInventory: boolean   // akses modul Pro (Formula/PO/Produksi/Stok/Opname)
+  expiresAt: string | null   // ISO string masa aktif berbayar
+  daysRemaining: number | null  // sisa hari berbayar; negatif = expired
+  trialEndsAt: string | null
+  trialDaysRemaining: number | null
 }
 
 export type StoreAccessRole = 'owner' | 'member'

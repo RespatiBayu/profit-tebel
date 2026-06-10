@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { enqueueUploadJob } from '@/lib/upload/queue'
+import { checkUploadAccess } from '@/lib/upload/access'
 
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const gate = await checkUploadAccess(supabase)
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error }, { status: gate.status })
     }
+    const user = gate.user
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
