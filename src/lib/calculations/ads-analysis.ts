@@ -3,6 +3,8 @@ import { PLATFORMS, ROAS_TARGET_MULTIPLIERS } from '@/lib/constants/shopee-fees-
 import { buildMasterProductMap } from '@/lib/master-product-map'
 import type {
   DbAdsRow,
+  DbOrder,
+  DbOrderProduct,
   MasterProduct,
   ProductProfitRow,
   AdsKpis,
@@ -26,17 +28,103 @@ const DEFAULT_ONGKIR_RATE = PLATFORMS.shopee.defaults.ongkirExtraRate
 const DEFAULT_PROMO_RATE = PLATFORMS.shopee.defaults.promoExtraRate
 const DEFAULT_BIAYA_PER_PESANAN = PLATFORMS.shopee.defaults.biayaPerPesanan
 
-/** Hitung BEP ROAS per-unit dari avg harga jual + HPP + fee preset. */
+/**
+ * Hitung BEP ROAS per-unit dari avg harga jual + HPP + fee.
+ * @param feeRate Opsional: fee rate ASLI (total biaya marketplace ÷ omzet real)
+ *   hasil kalibrasi dari file pendapatan. Kalau diberikan, dipakai langsung
+ *   (sudah termasuk admin, layanan, proses pesanan, dll). Kalau tidak, fallback
+ *   ke preset Shopee Star (admin + ongkir xtra + promo xtra + biaya per pesanan).
+ */
 export function calculateBepRoas(
   avgSellingPrice: number,
   hppPerUnit: number,
+  feeRate?: number,
 ): number | null {
   if (avgSellingPrice <= 0 || hppPerUnit <= 0) return null
-  const totalFeePct = DEFAULT_ADMIN_RATE + DEFAULT_ONGKIR_RATE + DEFAULT_PROMO_RATE
-  const totalPajak = avgSellingPrice * totalFeePct + DEFAULT_BIAYA_PER_PESANAN
+  const totalPajak =
+    feeRate !== undefined && feeRate > 0
+      ? avgSellingPrice * feeRate
+      : avgSellingPrice * (DEFAULT_ADMIN_RATE + DEFAULT_ONGKIR_RATE + DEFAULT_PROMO_RATE) + DEFAULT_BIAYA_PER_PESANAN
   const grossProfit = avgSellingPrice - hppPerUnit - totalPajak
   if (grossProfit <= 0) return null
   return avgSellingPrice / grossProfit
+}
+
+/**
+ * Map harga jual REAL per produk dari data income (order_products + orders),
+ * bukan dari GMV iklan. Harga jual = omzet real per order (Harga Asli − harga
+ * coret) diprorata ke produk berdasarkan kuantitas. Untuk order 1-produk ini
+ * eksak; multi-produk memakai harga rata-rata per unit order tsb. Hasil = harga
+ * jual rata-rata tertimbang per produk dari SEMUA transaksi (lebih real daripada
+ * hanya penjualan dari iklan).
+ */
+export function buildIncomeSellingPriceMap(
+  orders: DbOrder[],
+  orderProducts: DbOrderProduct[],
+): Map<string, number> {
+  const omzetByOrder = new Map<string, number>()
+  for (const o of orders) {
+    omzetByOrder.set(o.order_number, o.original_price - Math.abs(o.product_discount))
+  }
+  const prodByOrder = new Map<string, { id: string; qty: number }[]>()
+  for (const op of orderProducts) {
+    const id = op.marketplace_product_id
+    if (!id || id === '-') continue
+    const list = prodByOrder.get(op.order_number) ?? []
+    list.push({ id, qty: op.quantity ?? 1 })
+    prodByOrder.set(op.order_number, list)
+  }
+  const acc = new Map<string, { rev: number; units: number }>()
+  for (const [orderNo, prods] of Array.from(prodByOrder.entries())) {
+    const omzet = omzetByOrder.get(orderNo)
+    if (omzet === undefined || omzet <= 0) continue
+    const totalQty = prods.reduce((s, p) => s + p.qty, 0)
+    if (totalQty <= 0) continue
+    const unitPrice = omzet / totalQty
+    for (const p of prods) {
+      const e = acc.get(p.id) ?? { rev: 0, units: 0 }
+      e.rev += unitPrice * p.qty
+      e.units += p.qty
+      acc.set(p.id, e)
+    }
+  }
+  const map = new Map<string, number>()
+  for (const [id, { rev, units }] of Array.from(acc.entries())) {
+    if (units > 0) map.set(id, rev / units)
+  }
+  return map
+}
+
+/** Pilih harga jual: utamakan dari income (priceMap), fallback ke GMV iklan/units. */
+function pickAvgPrice(code: string, gmv: number, units: number, priceMap?: Map<string, number>): number {
+  const fromIncome = priceMap?.get(code)
+  if (fromIncome && fromIncome > 0) return fromIncome
+  return units > 0 ? gmv / units : 0
+}
+
+/**
+ * Fee rate marketplace ASLI = total biaya marketplace ÷ omzet real (Harga Asli −
+ * harga coret), dihitung dari order income terkonfirmasi. Dipakai untuk kalibrasi
+ * BEP ROAS supaya sesuai struktur biaya toko, bukan preset generik.
+ * Return undefined kalau data belum cukup (fallback ke preset).
+ */
+export function calculateMarketplaceFeeRate(orders: DbOrder[]): number | undefined {
+  let omzet = 0
+  let fees = 0
+  for (const o of orders) {
+    omzet += o.original_price - Math.abs(o.product_discount)
+    fees +=
+      Math.abs(o.ams_commission) +
+      Math.abs(o.admin_fee) +
+      Math.abs(o.service_fee) +
+      Math.abs(o.processing_fee) +
+      Math.abs(o.premium_fee) +
+      Math.abs(o.shipping_program_fee) +
+      Math.abs(o.transaction_fee) +
+      Math.abs(o.campaign_fee)
+  }
+  if (omzet <= 0 || fees <= 0) return undefined
+  return fees / omzet
 }
 
 /** Signal berdasarkan BEP ROAS:
@@ -85,6 +173,8 @@ export function classifyProduct(roas: number, conversions: number): TrafficLight
 export function calculateAdsOverview(
   rows: DbAdsRow[],
   masterProducts: MasterProduct[] = [],
+  feeRate?: number,
+  sellingPriceMap?: Map<string, number>,
 ): AdsKpis {
   // Only count products that have actual individual ad spend for KPIs/signals
   const productRows = rows.filter((r) => !isAggregate(r) && r.ad_spend > 0)
@@ -119,8 +209,8 @@ export function calculateAdsOverview(
     const mp = hppMap.get(r.product_code)
     const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
     const units = r.units_sold || 0
-    const avgPrice = units > 0 ? r.gmv / units : 0
-    const bep = calculateBepRoas(avgPrice, hppTotal)
+    const avgPrice = pickAvgPrice(r.product_code, r.gmv, units, sellingPriceMap)
+    const bep = calculateBepRoas(avgPrice, hppTotal, feeRate)
     return classifyByBepRoas(r.roas, bep)
   })
   const scaleCount = signals.filter((s) => s === 'scale').length
@@ -174,6 +264,8 @@ export function buildTrafficLightRows(
    *  untuk hitung True ROAS kalau Format 1 campaign product_code nggak ada di
    *  master_products — lookup via parent_iklan → children → aggregate HPP. */
   adsProductData: DbAdsRow[] = [],
+  feeRate?: number,
+  sellingPriceMap?: Map<string, number>,
 ): TrafficLightRow[] {
   const hppMap = buildMasterProductMap(masterProducts)
 
@@ -215,7 +307,8 @@ export function buildTrafficLightRows(
         trueRoas = r.ad_spend > 0 ? netGmv / r.ad_spend : 0
         // Real ROAS: kurangi juga PPN 11% dari GMV
         realRoas = r.ad_spend > 0 ? (r.gmv * (1 - PPN) - totalHppCost) / r.ad_spend : 0
-        const avgSellingPrice = unitsSold > 0 ? r.gmv / unitsSold : 0
+        // Harga jual untuk BEP: utamakan dari income (semua transaksi), fallback GMV iklan.
+        const avgSellingPrice = pickAvgPrice(r.product_code, r.gmv, unitsSold, sellingPriceMap)
         profitPerUnit = avgSellingPrice - hppTotal
         avgSellingPriceOut = avgSellingPrice
         hppPerUnitOut = hppTotal
@@ -254,7 +347,7 @@ export function buildTrafficLightRows(
       }
 
       // BEP ROAS (mengacu ke Kalkulator ROAS) + signal baru
-      bepRoas = calculateBepRoas(avgSellingPriceOut, hppPerUnitOut)
+      bepRoas = calculateBepRoas(avgSellingPriceOut, hppPerUnitOut, feeRate)
       const signal = classifyByBepRoas(r.roas, bepRoas)
 
       return {
@@ -316,6 +409,8 @@ export function buildQuadrantData(
   rows: DbAdsRow[],
   profitRows: ProductProfitRow[],
   masterProducts: MasterProduct[] = [],
+  feeRate?: number,
+  sellingPriceMap?: Map<string, number>,
 ): QuadrantPoint[] {
   const profitMap = new Map(profitRows.map((p) => [p.productId, p]))
   const hppMap = buildMasterProductMap(masterProducts)
@@ -333,8 +428,8 @@ export function buildQuadrantData(
       const mp = hppMap.get(r.product_code)
       const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
       const units = r.units_sold || 0
-      const avgPrice = units > 0 ? r.gmv / units : 0
-      const bep = calculateBepRoas(avgPrice, hppTotal)
+      const avgPrice = pickAvgPrice(r.product_code, r.gmv, units, sellingPriceMap)
+      const bep = calculateBepRoas(avgPrice, hppTotal, feeRate)
       const s = classifyByBepRoas(r.roas, bep)
       const signal: TrafficLight = s === 'neutral' ? 'optimize' : s
 
@@ -354,7 +449,7 @@ export function buildQuadrantData(
 // 5. ROAS bar chart data (sorted descending)
 // ---------------------------------------------------------------------------
 
-export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProduct[] = []) {
+export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProduct[] = [], feeRate?: number, sellingPriceMap?: Map<string, number>) {
   const hppMap = buildMasterProductMap(masterProducts)
   return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .sort((a, b) => b.roas - a.roas)
@@ -363,8 +458,8 @@ export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProdu
       const mp = hppMap.get(r.product_code)
       const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
       const units = r.units_sold || 0
-      const avgPrice = units > 0 ? r.gmv / units : 0
-      const bep = calculateBepRoas(avgPrice, hppTotal)
+      const avgPrice = pickAvgPrice(r.product_code, r.gmv, units, sellingPriceMap)
+      const bep = calculateBepRoas(avgPrice, hppTotal, feeRate)
       const s = classifyByBepRoas(r.roas, bep)
       const signal: TrafficLight = s === 'neutral' ? 'optimize' : s
       return {

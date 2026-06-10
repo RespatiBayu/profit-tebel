@@ -99,7 +99,7 @@ export function ScaleRecommendationsSection({
             <div>
               <CardTitle className="text-base flex items-center gap-2">
                 <Flame className="h-4 w-4 text-green-600" />
-                Iklan yang Bisa Di-SCALE
+                Iklan Bersinyal Untung
               </CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
                 ROAS di atas target Kompetitif, konversi ≥ 5, ad spend ≥ Rp 100rb.
@@ -114,9 +114,9 @@ export function ScaleRecommendationsSection({
         <CardContent>
           {scalable.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
-              Belum ada campaign yang lolos kriteria scale. Optimize yang{' '}
+              Belum ada campaign bersinyal Untung. Perbaiki yang{' '}
               <Badge variant="outline" className="text-[10px] text-yellow-700">
-                OPTIMIZE
+                Waspada
               </Badge>{' '}
               dulu untuk naikkan ROAS.
             </p>

@@ -56,6 +56,7 @@ import {
   buildHppMap,
   buildOrderProductMap,
   calculateKpis,
+  orderRealOmzet,
   calculateFeeBreakdown,
   calculateOmzetToNetIncomeBreakdown,
   calculateTrend,
@@ -64,7 +65,7 @@ import {
   calculatePaymentDistribution,
   calculateCourierStats,
 } from '@/lib/calculations/profit'
-import { buildTrafficLightRows } from '@/lib/calculations/ads-analysis'
+import { buildTrafficLightRows, buildIncomeSellingPriceMap } from '@/lib/calculations/ads-analysis'
 import {
   buildScaleRecommendations,
   pickScalableCampaigns,
@@ -460,6 +461,8 @@ interface Props {
   comparisonLabel?: string | null
   useServerComparison?: boolean
   noHppCount: number
+  operatingCost?: number
+  prevOperatingCost?: number
 }
 
 export default function ProfitDashboard({
@@ -475,6 +478,7 @@ export default function ProfitDashboard({
   comparisonLabel,
   useServerComparison = false,
   noHppCount,
+  operatingCost = 0,
 }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
   const setAvailable = usePeriodStore((s) => s.setAvailable)
@@ -585,9 +589,18 @@ export default function ProfitDashboard({
   const courierStats = useMemo(() => calculateCourierStats(filteredOrders), [filteredOrders])
 
   // --- New unified-dashboard analytics ---
+  // Kalibrasi BEP pakai fee rate asli toko (biar konsisten dengan Detail Iklan).
+  const adsFeeRate = useMemo(
+    () => (kpis.totalOmzet > 0 && kpis.totalFees > 0 ? kpis.totalFees / kpis.totalOmzet : undefined),
+    [kpis.totalOmzet, kpis.totalFees]
+  )
+  const adsSellingPriceMap = useMemo(
+    () => buildIncomeSellingPriceMap(filteredOrders, orderProducts),
+    [filteredOrders, orderProducts]
+  )
   const trafficRows = useMemo(
-    () => buildTrafficLightRows(filteredAdsData, masterProducts),
-    [filteredAdsData, masterProducts]
+    () => buildTrafficLightRows(filteredAdsData, masterProducts, [], adsFeeRate, adsSellingPriceMap),
+    [filteredAdsData, masterProducts, adsFeeRate, adsSellingPriceMap]
   )
   const scaleRecs = useMemo(
     () => buildScaleRecommendations(trafficRows, masterProducts),
@@ -669,22 +682,23 @@ export default function ProfitDashboard({
       (o) => o.status_pesanan !== 'Batal' && !incomeOrderNumbers.has(o.order_number)
     )
 
-    let totalOmzet    = 0   // SUM(harga_awal × qty)
-    let totalDiskon   = 0   // product discount + seller voucher
+    let totalOmzet    = 0   // SUM(harga real setelah coret × qty)
+    let totalProductDiscount = 0 // harga coret (info)
+    let totalDiskon   = 0   // promo real (voucher penjual dll)
     let totalHpp      = 0   // pre-computed estimated_hpp from DB
     let ordersNoHpp   = 0
 
     for (const order of pending) {
       const products = order.products_json ?? []
 
-      // Omzet & diskon from per-SKU price data
+      // Omzet real = harga setelah coret; harga coret dicatat terpisah.
       for (const prod of products) {
         const ha = prod.harga_awal           ?? 0
         const hd = prod.harga_setelah_diskon ?? 0
-        totalOmzet  += ha * prod.quantity
-        totalDiskon += (ha - hd) * prod.quantity
+        totalOmzet           += hd * prod.quantity
+        totalProductDiscount += Math.max(0, ha - hd) * prod.quantity
       }
-      // Seller-borne voucher/bundle discount at order level
+      // Promo real yang ditanggung penjual di level order
       totalDiskon += order.seller_voucher ?? 0
 
       // HPP: use pre-computed value from DB (computed server-side at upload time)
@@ -718,6 +732,7 @@ export default function ProfitDashboard({
 
     return {
       totalOmzet,
+      totalProductDiscount,
       totalDiskon,
       grossIncome,
       totalFees,
@@ -848,7 +863,7 @@ export default function ProfitDashboard({
       if (!key) continue
       const e = byBuyer.get(key) ?? { count: 0, omzet: 0 }
       e.count += 1
-      e.omzet += o.original_price
+      e.omzet += orderRealOmzet(o)
       byBuyer.set(key, e)
     }
     const buyers = Array.from(byBuyer.values())
@@ -996,8 +1011,13 @@ export default function ProfitDashboard({
         const p = pendingKpis.hasPendingData
         const omzet    = kpis.totalOmzet      + (p ? pendingKpis.totalOmzet    : 0)
         const diskon   = kpis.totalDiskonPromo + (p ? pendingKpis.totalDiskon   : 0)
-        const gross    = kpis.grossIncome      + (p ? pendingKpis.grossIncome   : 0)
+        // Harga coret (Diskon Produk) — gimmick, hanya info.
+        const coret    = kpis.totalProductDiscount + (p ? pendingKpis.totalProductDiscount : 0)
         const fees     = kpis.totalFees        + (p ? pendingKpis.totalFees     : 0)
+        // Net income = "Total Penghasilan" dari file pendapatan yang sudah dilepas
+        // (sudah dipotong fee marketplace) = uang yang benar-benar diterima dari
+        // marketplace. Inilah nilai "Income dari Marketplace" yang valid.
+        const net      = kpis.totalNetIncome   + (p ? pendingKpis.totalNetIncome : 0)
         const hpp      = kpis.totalHppCost     + (p ? pendingKpis.totalHpp      : 0)
         const adSpend  = kpis.totalAdSpend     // Ads tidak dialokasikan ke pending
         const profit   = kpis.realProfit       + (p ? pendingKpis.realProfit    : 0)
@@ -1017,20 +1037,20 @@ export default function ProfitDashboard({
             <KpiCard
               label="Total Omzet"
               value={formatRp(omzet)}
-              sub={`${orders.toLocaleString('id-ID')} order${pendingLabel}`}
+              sub={`${orders.toLocaleString('id-ID')} order · harga jual real${pendingLabel}`}
               accent="blue"
               icon={ShoppingBag}
-              tooltip={`Total harga asli semua produk yang terjual (sebelum diskon, voucher, atau fee).${p ? ' Termasuk estimasi dari pesanan yang belum dilepas dananya.' : ''}`}
+              tooltip={`Omzet real = harga jual sebenarnya (Harga Asli − harga coret). Harga coret Shopee cuma gimmick (harga di-markup lalu "didiskon"), jadi tidak dihitung sebagai omzet.${coret > 0 ? ` Harga coret periode ini: ${formatRp(coret)} (tidak termasuk).` : ''}${p ? ' Termasuk estimasi pesanan yang belum dilepas.' : ''}`}
               pctOmzet={omzet > 0 ? 100 : null}
               delta={{ current: kpis.totalOmzet, prev: prevKpis.totalOmzet, context: 'income' }}
             />
             <KpiCard
               label="Total Diskon & Promo"
               value={formatRp(diskon)}
-              sub={`Diskon produk + voucher${pendingNote}`}
+              sub={`Voucher, cashback, refund${pendingNote}`}
               accent="orange"
               icon={Tag}
-              tooltip={`Total pengurang yang kamu tanggung sendiri: diskon produk, voucher seller, cashback koin, promo gratis ongkir, dan pengembalian dana.${p ? ' Pending: diskon produk + voucher penjual.' : ''}`}
+              tooltip={`Pengurang yang BENAR-BENAR kamu tanggung: voucher seller, cashback koin, promo gratis ongkir, dan pengembalian dana. Harga coret (Diskon Produk) TIDAK termasuk di sini karena sudah dikeluarkan dari omzet real.${p ? ' Pending: voucher penjual.' : ''}`}
               pctOmzet={pct(diskon)}
               delta={{
                 current: avg(kpis.totalDiskonPromo, curCount),
@@ -1038,16 +1058,6 @@ export default function ProfitDashboard({
                 context: 'cost',
                 perUnit: true,
               }}
-            />
-            <KpiCard
-              label="Pendapatan Kotor"
-              value={formatRp(gross)}
-              sub={`Setelah diskon & promo${pendingNote}`}
-              accent="green"
-              icon={Banknote}
-              tooltip={`Pendapatan setelah dikurangi diskon dan promo yang kamu tanggung, sebelum biaya marketplace dan iklan.${p ? ' Pending dihitung dari harga jual setelah diskon.' : ''}`}
-              pctOmzet={pct(gross)}
-              delta={{ current: kpis.grossIncome, prev: prevKpis.grossIncome, context: 'income' }}
             />
             <KpiCard
               label="Total Biaya"
@@ -1063,6 +1073,16 @@ export default function ProfitDashboard({
                 context: 'cost',
                 perUnit: true,
               }}
+            />
+            <KpiCard
+              label="Income dari Marketplace"
+              value={formatRp(net)}
+              sub={`Total Penghasilan diterima dari Shopee${pendingNote}`}
+              accent="green"
+              icon={Banknote}
+              tooltip={`Income yang benar-benar diterima dari marketplace (Total Penghasilan pada file pendapatan yang sudah dilepas) — yaitu omzet setelah dikurangi diskon, promo, dan biaya marketplace.${p ? ' Pending diestimasi dari rata-rata order yang sudah dilepas.' : ''}`}
+              pctOmzet={pct(net)}
+              delta={{ current: kpis.totalNetIncome, prev: prevKpis.totalNetIncome, context: 'income' }}
             />
             <KpiCard
               label="HPP + Packaging"
@@ -1122,6 +1142,49 @@ export default function ProfitDashboard({
               cta={!hasHpp ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
             />
           </div>
+        )
+      })()}
+
+      {/* === SECTION: Profit Bersih (Real Profit − Biaya Operasional) === */}
+      {kpis.totalOmzet > 0 && (() => {
+        const combinedRealProfit = kpis.realProfit + (pendingKpis.hasPendingData ? pendingKpis.realProfit : 0)
+        const hasHpp = kpis.hasHppData || (pendingKpis.hasPendingData && pendingKpis.hasHppData)
+        const netProfit = combinedRealProfit - operatingCost
+        return (
+          <Card className="border-primary/20 bg-gradient-to-br from-muted/40 to-transparent">
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Real Profit (operasional)</p>
+                    <p className="font-semibold tabular-nums">{hasHpp ? formatRp(combinedRealProfit) : '—'}</p>
+                  </div>
+                  <span className="text-muted-foreground">−</span>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Biaya Operasional</p>
+                    <DashboardLink href="/dashboard/operating-costs" className="font-semibold tabular-nums text-red-600 hover:underline">
+                      {formatRp(operatingCost)}
+                    </DashboardLink>
+                  </div>
+                  <span className="text-muted-foreground">=</span>
+                </div>
+                <div className="sm:text-right">
+                  <p className="text-xs text-muted-foreground">Profit Bersih</p>
+                  <p className={`text-2xl font-bold tabular-nums ${!hasHpp ? 'text-muted-foreground' : netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {hasHpp ? formatRp(netProfit) : '—'}
+                  </p>
+                </div>
+              </div>
+              {operatingCost === 0 && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Belum ada biaya operasional di periode ini.{' '}
+                  <DashboardLink href="/dashboard/operating-costs" className="text-primary hover:underline">
+                    Tambah biaya (listrik, sewa, gaji, dll) →
+                  </DashboardLink>
+                </p>
+              )}
+            </CardContent>
+          </Card>
         )
       })()}
 
@@ -1302,7 +1365,7 @@ export default function ProfitDashboard({
               const rows: Row[] = []
               rows.push({
                 kind: 'total',
-                label: 'Total Omzet (Harga Asli Produk)',
+                label: 'Total Omzet (harga jual real, setelah coret)',
                 value: omzet,
                 prev: prevKpis.totalOmzet,
                 context: 'income',
@@ -1316,7 +1379,7 @@ export default function ProfitDashboard({
                 // For discount and marketplace_fee groups, we may inject pending items
                 const pendingItem: Row | null =
                   hasPending && g.id === 'discount' && pendingKpis.totalDiskon > 0
-                    ? { kind: 'cost', label: 'Diskon Belum Dilepas (Est.)', value: pendingKpis.totalDiskon, prev: 0, color: '#f59e0b', hint: 'Diskon produk + voucher penjual dari order yang belum dilepas dananya' }
+                    ? { kind: 'cost', label: 'Promo Belum Dilepas (Est.)', value: pendingKpis.totalDiskon, prev: 0, color: '#f59e0b', hint: 'Voucher penjual dari order yang belum dilepas dananya (di luar harga coret)' }
                     : hasPending && g.id === 'marketplace_fee' && pendingKpis.totalFees > 0
                     ? { kind: 'cost', label: 'Biaya Marketplace Belum Dilepas (Est.)', value: pendingKpis.totalFees, prev: 0, color: '#a78bfa', hint: 'Estimasi berdasarkan rata-rata fee rate dari order yang sudah dilepas' }
                     : null
@@ -1343,17 +1406,17 @@ export default function ProfitDashboard({
                 }
                 if (pendingItem) rows.push(pendingItem)
 
-                // Gross Income row after discount group
+                // Subtotal setelah diskon (sebelum biaya marketplace)
                 if (g.id === 'discount') {
                   rows.push({ kind: 'divider' })
                   rows.push({
                     kind: 'total',
-                    label: 'Pendapatan Kotor (Gross Income)',
+                    label: 'Subtotal setelah Diskon',
                     value: combinedGross,
                     prev: prevKpis.grossIncome,
                     context: 'income',
                     tone: 'neutral',
-                    sub: hasPending ? 'Setelah diskon & promo (confirmed + pending)' : 'Setelah diskon & promo yang kamu tanggung',
+                    sub: 'Omzet setelah diskon & promo, sebelum biaya marketplace',
                   })
                 }
               }
@@ -1376,12 +1439,12 @@ export default function ProfitDashboard({
               rows.push({ kind: 'divider' })
               rows.push({
                 kind: 'total',
-                label: 'Net Income',
+                label: 'Income dari Marketplace',
                 value: combinedNet,
                 prev: prevKpis.totalNetIncome,
                 context: 'income',
                 tone: 'neutral',
-                sub: hasPending ? 'Penghasilan cair + estimasi pendapatan pending' : 'Total Penghasilan dari Shopee',
+                sub: hasPending ? 'Total Penghasilan diterima (cair + estimasi pending)' : 'Total Penghasilan diterima dari Shopee',
               })
 
               if (hasHpp) {
@@ -1433,12 +1496,12 @@ export default function ProfitDashboard({
                 let isGrossIncomeRow = false
                 for (let j = 0; j < i; j++) {
                   const prevRow = rows[j]
-                  if (prevRow.kind === 'total' && prevRow.label === 'Pendapatan Kotor (Gross Income)') {
+                  if (prevRow.kind === 'total' && prevRow.label === 'Subtotal setelah Diskon') {
                     hasPassedGrossIncome = true
                     break
                   }
                 }
-                if (r.kind === 'total' && r.label === 'Pendapatan Kotor (Gross Income)') {
+                if (r.kind === 'total' && r.label === 'Subtotal setelah Diskon') {
                   isGrossIncomeRow = true
                 }
 

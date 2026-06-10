@@ -33,6 +33,8 @@ import {
   buildQuadrantData,
   buildRoasChartData,
   calculateBepRoas,
+  calculateMarketplaceFeeRate,
+  buildIncomeSellingPriceMap,
   classifyByBepRoas,
   BEP_PPN_MULTIPLIER,
 } from '@/lib/calculations/ads-analysis'
@@ -93,6 +95,16 @@ const SIGNAL_CONFIG = {
   optimize: { color: 'bg-yellow-400' },
   kill:     { color: 'bg-red-500' },
   neutral:  { color: 'bg-gray-300' },
+} as const
+
+// Label sinyal untuk ditampilkan ke user. Istilah dibuat lebih membumi —
+// sekadar sinyal kondisi, bukan instruksi keputusan. Kunci internal
+// (scale/optimize/kill) tetap dipakai di logika perhitungan.
+const SIGNAL_LABELS = {
+  scale:    'Untung',
+  optimize: 'Waspada',
+  kill:     'Rugi',
+  neutral:  'Netral',
 } as const
 
 function SignalBadge({ signal }: { signal: keyof typeof SIGNAL_CONFIG }) {
@@ -187,10 +199,14 @@ function TrafficLightTable({
   rows,
   adsProductData,
   masterProducts,
+  feeRate,
+  sellingPriceMap,
 }: {
   rows: TrafficLightRow[]
   adsProductData: DbAdsRow[]
   masterProducts: MasterProduct[]
+  feeRate?: number
+  sellingPriceMap?: Map<string, number>
 }) {
   const hppMap = useMemo(
     () => buildMasterProductMap(masterProducts),
@@ -404,12 +420,13 @@ function TrafficLightTable({
                 .sort((a, b) => b.ad_spend - a.ad_spend)
                 .map((p) => {
                   const pRoas = p.roas
-                  // BEP ROAS per-child: avg harga jual (gmv / units) × HPP per unit dari master.
+                  // BEP ROAS per-child: harga jual dari income (fallback GMV iklan) × HPP master.
                   const mp = hppMap.get(p.product_code)
                   const pHppTotal = mp ? mp.hpp + mp.packaging_cost : 0
                   const pUnits = p.units_sold || 0
-                  const pAvgPrice = pUnits > 0 ? p.gmv / pUnits : 0
-                  const pBepRoas = calculateBepRoas(pAvgPrice, pHppTotal)
+                  const pIncomePrice = sellingPriceMap?.get(p.product_code)
+                  const pAvgPrice = pIncomePrice && pIncomePrice > 0 ? pIncomePrice : (pUnits > 0 ? p.gmv / pUnits : 0)
+                  const pBepRoas = calculateBepRoas(pAvgPrice, pHppTotal, feeRate)
                   const pSignal = classifyByBepRoas(pRoas, pBepRoas)
                   return (
                     <TableRow key={p.id} className="bg-purple-50/50">
@@ -485,8 +502,8 @@ function RoasBarChart({ data }: { data: ReturnType<typeof buildRoasChartData> })
             <Cell key={`cell-${index}`} fill={ROAS_COLORS[entry.signal]} />
           ))}
         </Bar>
-        <ReferenceLine x={ROAS_THRESHOLDS.scale} stroke="#16a34a" strokeDasharray="4 2" label={{ value: 'SCALE', position: 'top', fontSize: 10 }} />
-        <ReferenceLine x={ROAS_THRESHOLDS.kill} stroke="#dc2626" strokeDasharray="4 2" label={{ value: 'KILL', position: 'top', fontSize: 10 }} />
+        <ReferenceLine x={ROAS_THRESHOLDS.scale} stroke="#16a34a" strokeDasharray="4 2" label={{ value: SIGNAL_LABELS.scale, position: 'top', fontSize: 10 }} />
+        <ReferenceLine x={ROAS_THRESHOLDS.kill} stroke="#dc2626" strokeDasharray="4 2" label={{ value: SIGNAL_LABELS.kill, position: 'top', fontSize: 10 }} />
       </BarChart>
     </ResponsiveContainer>
   )
@@ -801,11 +818,31 @@ export default function AdsDashboard({
     [filteredAds, filteredAdsProduct]
   )
 
-  const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts), [filteredAds, masterProducts])
+  // Fee rate ASLI toko (total biaya marketplace ÷ omzet real) untuk kalibrasi
+  // BEP ROAS. Kalau data income belum cukup, undefined → BEP pakai preset.
+  const feeRate = useMemo(() => calculateMarketplaceFeeRate(orders), [orders])
+
+  // Harga jual real per produk dari INCOME (semua transaksi), bukan dari GMV iklan.
+  // Fallback ke harga dari iklan (gmv/units) untuk produk yang belum ada di income.
+  const sellingPriceMap = useMemo(() => {
+    const m = buildIncomeSellingPriceMap(orders, orderProducts)
+    const agg = new Map<string, { gmv: number; units: number }>()
+    for (const a of filteredAds) {
+      if (!a.product_code || a.product_code === '-') continue
+      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
+      e.gmv += a.gmv; e.units += a.units_sold; agg.set(a.product_code, e)
+    }
+    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
+      if (!m.has(code) && units > 0) m.set(code, gmv / units)
+    }
+    return m
+  }, [orders, orderProducts, filteredAds])
+
+  const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts, feeRate, sellingPriceMap), [filteredAds, masterProducts, feeRate, sellingPriceMap])
 
   const trafficLightRows = useMemo(
-    () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct),
-    [filteredAds, masterProducts, filteredAdsProduct]
+    () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct, feeRate, sellingPriceMap),
+    [filteredAds, masterProducts, filteredAdsProduct, feeRate, sellingPriceMap]
   )
 
   // Per-product rows untuk funnel/quadrant/bar chart. Prefer Format 1 (Summary per Iklan)
@@ -820,7 +857,7 @@ export default function AdsDashboard({
 
   const funnelData = useMemo(() => buildFunnelData(perProductAdRows), [perProductAdRows])
 
-  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows, masterProducts), [perProductAdRows, masterProducts])
+  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows, masterProducts, feeRate, sellingPriceMap), [perProductAdRows, masterProducts, feeRate, sellingPriceMap])
 
   // For quadrant + True ROAS, we need profit data from income
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
@@ -830,26 +867,11 @@ export default function AdsDashboard({
   )
 
   const quadrantData = useMemo(
-    () => buildQuadrantData(perProductAdRows, profitRows, masterProducts),
-    [perProductAdRows, profitRows, masterProducts]
+    () => buildQuadrantData(perProductAdRows, profitRows, masterProducts, feeRate, sellingPriceMap),
+    [perProductAdRows, profitRows, masterProducts, feeRate, sellingPriceMap]
   )
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
-
-  // Avg realized selling price per product (GMV / units sold) from ads data — feeds Target ROAS.
-  const sellingPriceMap = useMemo(() => {
-    const m = new Map<string, number>()
-    const agg = new Map<string, { gmv: number; units: number }>()
-    for (const a of filteredAds) {
-      if (!a.product_code || a.product_code === '-') continue
-      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
-      e.gmv += a.gmv; e.units += a.units_sold; agg.set(a.product_code, e)
-    }
-    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
-      if (units > 0) m.set(code, gmv / units)
-    }
-    return m
-  }, [filteredAds])
 
   // === Diagnosa Funnel: agregat tayang→klik→beli untuk cari titik bocor ===
   const funnelDiag = useMemo(() => {
@@ -878,7 +900,7 @@ export default function AdsDashboard({
       } else if (cvr < 0.04) {
         leak = { stage: 'Klik → Beli', tone: 'warn', msg: `Konversi ${(cvr * 100).toFixed(1)}% cukup, tapi masih ada ruang. Perkuat halaman produk & ulasan.` }
       } else {
-        leak = { stage: 'Funnel sehat', tone: 'good', msg: `CTR ${(ctr * 100).toFixed(2)}% & konversi ${(cvr * 100).toFixed(1)}% sudah bagus. Fokus naikin budget di iklan SCALE.` }
+        leak = { stage: 'Funnel sehat', tone: 'good', msg: `CTR ${(ctr * 100).toFixed(2)}% & konversi ${(cvr * 100).toFixed(1)}% sudah bagus. Fokus naikin budget di iklan bersinyal ${SIGNAL_LABELS.scale}.` }
       }
     }
     return { impressions, clicks, conversions, adSpend, gmv, ctr, cvr, cpc, cpm, cpa, leak, hasData: impressions > 0 }
@@ -908,7 +930,7 @@ export default function AdsDashboard({
     return { voucherCost, voucheredSales, gmv, sharePct, hasData: voucherCost > 0 || voucheredSales > 0 }
   }, [perProductAdRows])
 
-  // === Insight & Aksi Otomatis: ranking bad → warn → good → info ===
+  // === Insight & Sinyal: ranking bad → warn → good → info ===
   const autoInsights = useMemo(() => {
     type Insight = { tone: 'bad' | 'warn' | 'good' | 'info'; text: string }
     const out: Insight[] = []
@@ -916,7 +938,7 @@ export default function AdsDashboard({
     if (wastedSpend.hasData) {
       out.push({
         tone: 'bad',
-        text: `${wastedSpend.count} iklan rugi (KILL) menghabiskan ${formatRpFull(wastedSpend.total)}${wastedSpend.sharePct > 0 ? ` (${wastedSpend.sharePct.toFixed(0)}% dari total ad spend)` : ''}. Jeda atau perbaiki dulu sebelum makin boros.`,
+        text: `${wastedSpend.count} iklan kena sinyal ${SIGNAL_LABELS.kill}, menghabiskan ${formatRpFull(wastedSpend.total)}${wastedSpend.sharePct > 0 ? ` (${wastedSpend.sharePct.toFixed(0)}% dari total ad spend)` : ''}. Sinyal buat dicek — bisa kamu pertimbangkan untuk jeda atau perbaiki.`,
       })
     }
     if (funnelDiag.leak && funnelDiag.leak.tone !== 'good') {
@@ -931,7 +953,7 @@ export default function AdsDashboard({
     if (kpis.scaleCount > 0) {
       out.push({
         tone: 'good',
-        text: `${kpis.scaleCount} iklan layak SCALE (ROAS di atas target). Naikkan budget bertahap ~20% biar nggak ganggu efisiensi.`,
+        text: `${kpis.scaleCount} iklan kena sinyal ${SIGNAL_LABELS.scale} (ROAS di atas target). Kalau mau, budget bisa dinaikkan bertahap ~20% biar efisiensi tetap terjaga.`,
       })
     }
     if (funnelDiag.leak && funnelDiag.leak.tone === 'good' && kpis.scaleCount === 0) {
@@ -940,14 +962,14 @@ export default function AdsDashboard({
     if (!hasHppData) {
       out.push({
         tone: 'info',
-        text: 'Isi HPP di Mapping Produk biar sinyal SCALE/OPTIMIZE/KILL dan Target ROAS akurat — sekarang sebagian iklan belum bisa dinilai untung/ruginya.',
+        text: `Isi HPP di Mapping Produk biar sinyal ${SIGNAL_LABELS.scale}/${SIGNAL_LABELS.optimize}/${SIGNAL_LABELS.kill} dan Target ROAS akurat — sekarang sebagian iklan belum bisa dinilai untung/ruginya.`,
       })
     }
     if (kpis.overallRoas > 0) {
       if (kpis.overallRoas >= ROAS_THRESHOLDS.scale) {
-        out.push({ tone: 'good', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× — iklan kamu secara keseluruhan sehat. Pertahankan & scale yang menang.` })
+        out.push({ tone: 'good', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× — iklan kamu secara keseluruhan sehat. Sinyalnya positif buat lanjut & scale yang menang.` })
       } else if (kpis.overallRoas < ROAS_THRESHOLDS.kill) {
-        out.push({ tone: 'bad', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× masih rendah. Pangkas iklan rugi & alihkan budget ke produk yang menang.` })
+        out.push({ tone: 'bad', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× masih rendah. Sinyal buat ditinjau — pertimbangkan pangkas iklan rugi & alihkan budget ke produk yang menang.` })
       }
     }
 
@@ -1028,36 +1050,36 @@ export default function AdsDashboard({
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2">
           <span className="text-xl">🟢</span>
           <div>
-            <p className="text-xs text-muted-foreground">SCALE</p>
+            <p className="text-xs text-muted-foreground">{SIGNAL_LABELS.scale}</p>
             <p className="text-lg font-bold text-green-700">{kpis.scaleCount}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2">
           <span className="text-xl">🟡</span>
           <div>
-            <p className="text-xs text-muted-foreground">OPTIMIZE</p>
+            <p className="text-xs text-muted-foreground">{SIGNAL_LABELS.optimize}</p>
             <p className="text-lg font-bold text-yellow-700">{kpis.optimizeCount}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
           <span className="text-xl">🔴</span>
           <div>
-            <p className="text-xs text-muted-foreground">KILL</p>
+            <p className="text-xs text-muted-foreground">{SIGNAL_LABELS.kill}</p>
             <p className="text-lg font-bold text-red-700">{kpis.killCount}</p>
           </div>
         </div>
       </div>
       )}
 
-      {/* === SECTION: Insight & Aksi Otomatis === */}
+      {/* === SECTION: Insight & Sinyal === */}
       {autoInsights.length > 0 && (
         <Card className="border-primary/20">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Lightbulb className="h-4 w-4 text-primary" />
-              Insight & Aksi Otomatis
+              Insight & Sinyal
             </CardTitle>
-            <p className="text-xs text-muted-foreground">Temuan penting dari data iklan periode ini, lengkap dengan saran aksinya.</p>
+            <p className="text-xs text-muted-foreground">Sinyal dari data iklan periode ini sebagai bahan pertimbangan. Keputusan akhir tetap di tangan kamu.</p>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="space-y-2">
@@ -1082,11 +1104,11 @@ export default function AdsDashboard({
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <CardTitle className="text-base">Rekomendasi per Iklan</CardTitle>
+            <CardTitle className="text-base">Sinyal per Iklan</CardTitle>
             <div className="text-xs text-muted-foreground space-y-0.5 text-right">
-              <p>🟢 SCALE: ROAS ≥ {ROAS_TARGET_MULTIPLIERS.konservatif.toFixed(1)}× BEP (konservatif)</p>
-              <p>🟡 OPTIMIZE: ROAS ≥ BEP × {BEP_PPN_MULTIPLIER.toFixed(2)} (BEP + PPN 11%)</p>
-              <p>🔴 KILL: ROAS &lt; BEP × {BEP_PPN_MULTIPLIER.toFixed(2)}</p>
+              <p>🟢 {SIGNAL_LABELS.scale}: ROAS ≥ {ROAS_TARGET_MULTIPLIERS.konservatif.toFixed(1)}× BEP (konservatif)</p>
+              <p>🟡 {SIGNAL_LABELS.optimize}: ROAS ≥ BEP × {BEP_PPN_MULTIPLIER.toFixed(2)} (BEP + PPN 11%)</p>
+              <p>🔴 {SIGNAL_LABELS.kill}: ROAS &lt; BEP × {BEP_PPN_MULTIPLIER.toFixed(2)}</p>
             </div>
           </div>
         </CardHeader>
@@ -1095,6 +1117,8 @@ export default function AdsDashboard({
             rows={trafficLightRows}
             adsProductData={adsProductData}
             masterProducts={masterProducts}
+            feeRate={feeRate}
+            sellingPriceMap={sellingPriceMap}
           />
         </CardContent>
       </Card>
@@ -1111,7 +1135,7 @@ export default function AdsDashboard({
               </span>
             </CardTitle>
             <p className="text-xs text-muted-foreground">
-              Ad spend yang kebakar di iklan rugi (sinyal KILL) periode ini. Jeda/perbaiki dulu biar nggak makin boros.
+              Ad spend di iklan yang kena sinyal {SIGNAL_LABELS.kill} periode ini. Sebagai bahan pertimbangan buat dijeda/diperbaiki — keputusan tetap di kamu.
             </p>
           </CardHeader>
           <CardContent className="pt-0">
@@ -1153,7 +1177,7 @@ export default function AdsDashboard({
             </div>
             {wastedSpend.killRows.length > 6 && (
               <p className="mt-2 text-center text-xs text-muted-foreground">
-                +{wastedSpend.killRows.length - 6} iklan rugi lainnya — lihat tabel “Rekomendasi per Iklan” di atas.
+                +{wastedSpend.killRows.length - 6} iklan rugi lainnya — lihat tabel “Sinyal per Iklan” di atas.
               </p>
             )}
           </CardContent>
@@ -1168,9 +1192,9 @@ export default function AdsDashboard({
         <CardContent>
           <RoasBarChart data={roasChartData} />
           <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.scale }} /> SCALE</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.optimize }} /> OPTIMIZE</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.kill }} /> KILL</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.scale }} /> {SIGNAL_LABELS.scale}</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.optimize }} /> {SIGNAL_LABELS.optimize}</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-2 rounded" style={{ background: ROAS_COLORS.kill }} /> {SIGNAL_LABELS.kill}</span>
           </div>
         </CardContent>
       </Card>

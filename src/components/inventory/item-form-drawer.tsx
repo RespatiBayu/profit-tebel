@@ -23,6 +23,25 @@ const ITEM_TYPES: { value: ItemType; label: string; desc: string; icon: React.El
 
 const COMMON_UNITS = ['pcs', 'kg', 'gram', 'liter', 'ml', 'lusin', 'karton', 'roll', 'lembar', 'botol', 'sachet']
 
+// Format angka dengan pemisah ribuan ala Indonesia ("." ribuan, "," desimal).
+// Menerima input mentah dari user (mis. "22500" / "22.500" / "22500,5") dan
+// mengembalikan tampilan terkelompok ("22.500"). Saat submit, titik di-strip
+// dan koma diubah ke titik desimal sebelum parseFloat.
+function formatThousands(raw: string): string {
+  const cleaned = raw.replace(/[^0-9,]/g, '')
+  if (cleaned === '') return ''
+  const [intPart, ...rest] = cleaned.split(',')
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  // Hanya koma pertama yang dianggap pemisah desimal.
+  return rest.length > 0 ? `${grouped},${rest.join('')}` : grouped
+}
+
+// Ubah nilai number dari DB jadi string ber-separator untuk ditampilkan di input.
+function toDisplayNumber(value: number): string {
+  if (!value || value <= 0) return ''
+  return formatThousands(String(value).replace('.', ','))
+}
+
 interface ItemFormDrawerProps {
   open: boolean
   item?: Item | null
@@ -56,8 +75,8 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
         const isCommon = COMMON_UNITS.includes(item.unit)
         setUnit(isCommon ? item.unit : 'custom')
         setCustomUnit(isCommon ? '' : item.unit)
-        setCostPerUnit(item.cost_per_unit > 0 ? String(item.cost_per_unit) : '')
-        setPackagingCost((item.packaging_cost ?? 0) > 0 ? String(item.packaging_cost) : '')
+        setCostPerUnit(toDisplayNumber(item.cost_per_unit))
+        setPackagingCost(toDisplayNumber(item.packaging_cost ?? 0))
         // Infer mode: bahan mentah selalu manual; lainnya manual jika sudah ada HPP terisi
         setHppMode(item.type === 'raw_material' || item.cost_per_unit > 0 ? 'manual' : 'auto')
         setMinStockQty(item.min_stock_qty > 0 ? String(item.min_stock_qty) : '')
@@ -261,8 +280,9 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
                   id="item-cost"
                   className="pl-9 h-10"
                   placeholder="0"
+                  inputMode="numeric"
                   value={costPerUnit}
-                  onChange={(e) => setCostPerUnit(e.target.value.replace(/[^0-9.,]/g, ''))}
+                  onChange={(e) => setCostPerUnit(formatThousands(e.target.value))}
                 />
               </div>
               <p className="text-[11px] text-muted-foreground leading-snug">
@@ -312,8 +332,9 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
                       id="item-cost"
                       className="pl-9 h-10"
                       placeholder="0"
+                      inputMode="numeric"
                       value={costPerUnit}
-                      onChange={(e) => setCostPerUnit(e.target.value.replace(/[^0-9.,]/g, ''))}
+                      onChange={(e) => setCostPerUnit(formatThousands(e.target.value))}
                     />
                   </div>
                   <p className="text-[11px] text-muted-foreground leading-snug">
@@ -334,8 +355,9 @@ export function ItemFormDrawer({ open, item, onClose, onSaved }: ItemFormDrawerP
                           id="item-packaging"
                           className="pl-9 h-10"
                           placeholder="0"
+                          inputMode="numeric"
                           value={packagingCost}
-                          onChange={(e) => setPackagingCost(e.target.value.replace(/[^0-9.,]/g, ''))}
+                          onChange={(e) => setPackagingCost(formatThousands(e.target.value))}
                         />
                       </div>
                       <p className="text-[11px] text-muted-foreground leading-snug">

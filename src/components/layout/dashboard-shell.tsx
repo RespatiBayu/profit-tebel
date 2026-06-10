@@ -32,12 +32,14 @@ import {
   ShieldCheck,
   Boxes,
   Sparkles,
+  Wallet,
 } from 'lucide-react'
 import { StoreSwitcher } from './store-switcher'
 import { PeriodSwitcher } from './period-switcher'
 import { MarketplaceSwitcher } from './marketplace-switcher'
 import { DashboardLink } from './dashboard-link'
 import { SubscriptionBanner } from './subscription-banner'
+import { Logo } from '@/components/brand/logo'
 import type { SubscriptionStatus } from '@/types'
 
 const baseNavItems = [
@@ -46,6 +48,7 @@ const baseNavItems = [
   { href: '/dashboard/ads', label: 'Detail Iklan', icon: BarChart3, pro: false },
   { href: '/dashboard/roas-calculator', label: 'Kalkulator ROAS', icon: Calculator, pro: false },
   { href: '/dashboard/products', label: 'Mapping Produk', icon: Package, pro: false },
+  { href: '/dashboard/operating-costs', label: 'Biaya Operasional', icon: Wallet, pro: false },
   { href: '/dashboard/stores', label: 'Toko Saya', icon: Store, pro: false },
   { href: '/dashboard/upload', label: 'Upload Data', icon: Upload, pro: false },
   { href: '/dashboard/inventory', label: 'Inventori & Produksi', icon: Boxes, pro: false },
@@ -112,14 +115,8 @@ function Sidebar({
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-border shrink-0">
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-[0_12px_28px_-22px_hsl(var(--primary)/0.9)]">
-          <BarChart3 className="h-5 w-5" />
-        </div>
-        <div>
-          <span className="block font-heading text-base font-semibold">Profit Tebel</span>
-          <span className="block text-[11px] text-muted-foreground">Seller analytics</span>
-        </div>
+      <div className="flex items-center px-4 h-16 border-b border-sidebar-border shrink-0">
+        <Logo size={36} subtitle="Seller analytics" />
       </div>
 
       {/* Nav */}

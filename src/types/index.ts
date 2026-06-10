@@ -425,9 +425,36 @@ export interface DbOrderProduct {
   quantity: number
 }
 
+// Biaya Operasional (listrik, sewa, gaji, dll) — per periode bulanan
+export type OperatingCostCategory =
+  | 'utilities'   // Listrik, air
+  | 'rent'        // Sewa tempat
+  | 'salary'      // Gaji karyawan
+  | 'internet'    // Internet, pulsa
+  | 'marketing'   // Marketing di luar iklan marketplace
+  | 'transport'   // Transport, bensin
+  | 'supplies'    // Perlengkapan, ATK
+  | 'other'       // Lainnya
+
+export interface OperatingCost {
+  id: string
+  user_id: string
+  store_id: string | null
+  name: string
+  category: OperatingCostCategory
+  amount: number
+  cost_date: string | null   // tanggal biaya dikeluarkan (YYYY-MM-DD)
+  period_year: number
+  period_month: number
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
 // Calculated profit results
 export interface ProfitKpis {
   totalOmzet: number
+  totalProductDiscount: number  // "harga coret" (Diskon Produk) — gimmick, info saja
   totalDiskonPromo: number
   grossIncome: number
   totalNetIncome: number

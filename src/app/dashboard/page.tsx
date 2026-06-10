@@ -167,7 +167,7 @@ export default async function DashboardPage({
               href: '/dashboard/ads',
               icon: BarChart3,
               label: 'Analisis Iklan',
-              desc: 'SCALE, OPTIMIZE, atau KILL?',
+              desc: 'Untung, Waspada, atau Rugi?',
               color: 'bg-orange-100 text-orange-700',
             },
             {

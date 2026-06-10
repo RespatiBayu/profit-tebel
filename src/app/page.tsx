@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Logo } from "@/components/brand/logo";
 import {
   ArrowRight,
   BarChart3,
@@ -99,15 +100,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background text-foreground">
       <nav className="sticky top-0 z-50 border-b border-[hsl(var(--brand-line)/0.75)] bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-[0_14px_30px_-22px_hsl(var(--primary)/0.9)]">
-              <BarChart3 className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="block font-heading text-base font-semibold">Profit Tebel</span>
-              <span className="block text-[11px] text-muted-foreground">Analytics untuk seller</span>
-            </div>
-          </div>
+          <Logo size={38} subtitle="Analytics untuk seller" />
           <div className="flex items-center gap-3">
             <Link href="/login">
               <Button variant="ghost" size="sm">Masuk</Button>
@@ -361,12 +354,7 @@ export default function LandingPage() {
 
       <footer className="border-t py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 sm:flex-row sm:px-6">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <BarChart3 className="h-4 w-4" />
-            </div>
-            <span className="font-semibold">Profit Tebel</span>
-          </div>
+          <Logo size={32} />
           <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
             <Link href="/syarat-ketentuan" className="hover:text-foreground">Syarat &amp; Ketentuan</Link>
             <Link href="/kebijakan-refund" className="hover:text-foreground">Kebijakan Refund</Link>
