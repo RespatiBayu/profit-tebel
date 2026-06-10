@@ -586,9 +586,14 @@ export default function ProfitDashboard({
   const courierStats = useMemo(() => calculateCourierStats(filteredOrders), [filteredOrders])
 
   // --- New unified-dashboard analytics ---
+  // Kalibrasi BEP pakai fee rate asli toko (biar konsisten dengan Detail Iklan).
+  const adsFeeRate = useMemo(
+    () => (kpis.totalOmzet > 0 && kpis.totalFees > 0 ? kpis.totalFees / kpis.totalOmzet : undefined),
+    [kpis.totalOmzet, kpis.totalFees]
+  )
   const trafficRows = useMemo(
-    () => buildTrafficLightRows(filteredAdsData, masterProducts),
-    [filteredAdsData, masterProducts]
+    () => buildTrafficLightRows(filteredAdsData, masterProducts, [], adsFeeRate),
+    [filteredAdsData, masterProducts, adsFeeRate]
   )
   const scaleRecs = useMemo(
     () => buildScaleRecommendations(trafficRows, masterProducts),

@@ -33,6 +33,7 @@ import {
   buildQuadrantData,
   buildRoasChartData,
   calculateBepRoas,
+  calculateMarketplaceFeeRate,
   classifyByBepRoas,
   BEP_PPN_MULTIPLIER,
 } from '@/lib/calculations/ads-analysis'
@@ -197,10 +198,12 @@ function TrafficLightTable({
   rows,
   adsProductData,
   masterProducts,
+  feeRate,
 }: {
   rows: TrafficLightRow[]
   adsProductData: DbAdsRow[]
   masterProducts: MasterProduct[]
+  feeRate?: number
 }) {
   const hppMap = useMemo(
     () => buildMasterProductMap(masterProducts),
@@ -419,7 +422,7 @@ function TrafficLightTable({
                   const pHppTotal = mp ? mp.hpp + mp.packaging_cost : 0
                   const pUnits = p.units_sold || 0
                   const pAvgPrice = pUnits > 0 ? p.gmv / pUnits : 0
-                  const pBepRoas = calculateBepRoas(pAvgPrice, pHppTotal)
+                  const pBepRoas = calculateBepRoas(pAvgPrice, pHppTotal, feeRate)
                   const pSignal = classifyByBepRoas(pRoas, pBepRoas)
                   return (
                     <TableRow key={p.id} className="bg-purple-50/50">
@@ -811,11 +814,15 @@ export default function AdsDashboard({
     [filteredAds, filteredAdsProduct]
   )
 
-  const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts), [filteredAds, masterProducts])
+  // Fee rate ASLI toko (total biaya marketplace ÷ omzet real) untuk kalibrasi
+  // BEP ROAS. Kalau data income belum cukup, undefined → BEP pakai preset.
+  const feeRate = useMemo(() => calculateMarketplaceFeeRate(orders), [orders])
+
+  const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts, feeRate), [filteredAds, masterProducts, feeRate])
 
   const trafficLightRows = useMemo(
-    () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct),
-    [filteredAds, masterProducts, filteredAdsProduct]
+    () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct, feeRate),
+    [filteredAds, masterProducts, filteredAdsProduct, feeRate]
   )
 
   // Per-product rows untuk funnel/quadrant/bar chart. Prefer Format 1 (Summary per Iklan)
@@ -830,7 +837,7 @@ export default function AdsDashboard({
 
   const funnelData = useMemo(() => buildFunnelData(perProductAdRows), [perProductAdRows])
 
-  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows, masterProducts), [perProductAdRows, masterProducts])
+  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows, masterProducts, feeRate), [perProductAdRows, masterProducts, feeRate])
 
   // For quadrant + True ROAS, we need profit data from income
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
@@ -840,8 +847,8 @@ export default function AdsDashboard({
   )
 
   const quadrantData = useMemo(
-    () => buildQuadrantData(perProductAdRows, profitRows, masterProducts),
-    [perProductAdRows, profitRows, masterProducts]
+    () => buildQuadrantData(perProductAdRows, profitRows, masterProducts, feeRate),
+    [perProductAdRows, profitRows, masterProducts, feeRate]
   )
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
@@ -1105,6 +1112,7 @@ export default function AdsDashboard({
             rows={trafficLightRows}
             adsProductData={adsProductData}
             masterProducts={masterProducts}
+            feeRate={feeRate}
           />
         </CardContent>
       </Card>
