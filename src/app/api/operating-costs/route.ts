@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
+import { parseCostDate } from '@/lib/operating-costs'
 
 const VALID_CATEGORIES = [
   'utilities', 'rent', 'salary', 'internet', 'marketing', 'transport', 'supplies', 'other',
@@ -25,10 +26,9 @@ export async function GET(request: NextRequest) {
 
   let query = supabase
     .from('operating_costs')
-    .select('id,user_id,store_id,name,category,amount,period_year,period_month,notes,created_at,updated_at')
+    .select('id,user_id,store_id,name,category,amount,cost_date,period_year,period_month,notes,created_at,updated_at')
     .eq('user_id', access.user.id)
-    .order('period_year', { ascending: false })
-    .order('period_month', { ascending: false })
+    .order('cost_date', { ascending: true })
     .order('created_at', { ascending: true })
 
   if (year) query = query.eq('period_year', Number(year))
@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
     name?: string
     category?: string
     amount?: number
+    cost_date?: string
     period_year?: number
     period_month?: number
     store_id?: string | null
@@ -58,13 +59,22 @@ export async function POST(request: NextRequest) {
   } | null
 
   if (!body?.name?.trim()) return NextResponse.json({ error: 'Nama biaya wajib diisi' }, { status: 400 })
-  const year = Number(body.period_year)
-  const month = Number(body.period_month)
-  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-    return NextResponse.json({ error: 'Tahun tidak valid' }, { status: 400 })
-  }
-  if (!Number.isInteger(month) || month < 1 || month > 12) {
-    return NextResponse.json({ error: 'Bulan tidak valid' }, { status: 400 })
+
+  // Tanggal biaya: kalau ada, periode (tahun/bulan) diturunkan dari tanggal.
+  // Kalau tidak, fallback ke period_year/period_month + tanggal = awal bulan.
+  const parsedDate = parseCostDate(body.cost_date)
+  let year: number, month: number, costDate: string
+  if (parsedDate) {
+    year = parsedDate.year; month = parsedDate.month; costDate = parsedDate.iso
+  } else {
+    year = Number(body.period_year); month = Number(body.period_month)
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return NextResponse.json({ error: 'Tanggal/tahun tidak valid' }, { status: 400 })
+    }
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return NextResponse.json({ error: 'Tanggal/bulan tidak valid' }, { status: 400 })
+    }
+    costDate = `${year}-${String(month).padStart(2, '0')}-01`
   }
   const category = VALID_CATEGORIES.includes(body.category ?? '') ? body.category! : 'other'
 
@@ -76,6 +86,7 @@ export async function POST(request: NextRequest) {
       name: body.name.trim(),
       category,
       amount: parseAmount(body.amount),
+      cost_date: costDate,
       period_year: year,
       period_month: month,
       notes: body.notes?.trim() || null,

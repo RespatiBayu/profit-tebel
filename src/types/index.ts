@@ -443,6 +443,7 @@ export interface OperatingCost {
   name: string
   category: OperatingCostCategory
   amount: number
+  cost_date: string | null   // tanggal biaya dikeluarkan (YYYY-MM-DD)
   period_year: number
   period_month: number
   notes: string | null

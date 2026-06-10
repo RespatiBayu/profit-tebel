@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   const { data: source, error: srcErr } = await supabase
     .from('operating_costs')
-    .select('store_id,name,category,amount,notes')
+    .select('store_id,name,category,amount,cost_date,notes')
     .eq('user_id', access.user.id)
     .eq('period_year', fy)
     .eq('period_month', fm)
@@ -38,16 +38,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Tidak ada biaya di bulan asal untuk disalin' }, { status: 400 })
   }
 
-  const rows = source.map((c) => ({
-    user_id: access.user.id,
-    store_id: c.store_id ?? null,
-    name: c.name,
-    category: c.category,
-    amount: c.amount,
-    period_year: ty,
-    period_month: tm,
-    notes: c.notes ?? null,
-  }))
+  // Berapa hari di bulan tujuan (untuk clamp tanggal mis. 31 -> 30).
+  const daysInTarget = new Date(ty, tm, 0).getDate()
+
+  const rows = source.map((c) => {
+    // Pertahankan tanggal (hari) dari biaya asal, pindahkan ke bulan tujuan.
+    const srcDay = typeof c.cost_date === 'string' ? Number(c.cost_date.slice(8, 10)) || 1 : 1
+    const day = Math.min(srcDay, daysInTarget)
+    const costDate = `${ty}-${String(tm).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    return {
+      user_id: access.user.id,
+      store_id: c.store_id ?? null,
+      name: c.name,
+      category: c.category,
+      amount: c.amount,
+      cost_date: costDate,
+      period_year: ty,
+      period_month: tm,
+      notes: c.notes ?? null,
+    }
+  })
 
   const { error: insErr } = await supabase.from('operating_costs').insert(rows)
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 })

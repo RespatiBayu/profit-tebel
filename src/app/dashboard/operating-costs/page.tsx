@@ -50,11 +50,29 @@ type FormState = {
   name: string
   category: OperatingCostCategory
   amount: string
+  cost_date: string  // YYYY-MM-DD
   store_id: string  // '' = bisnis-wide
   notes: string
 }
 
-const emptyForm: FormState = { id: null, name: '', category: 'other', amount: '', store_id: '', notes: '' }
+const emptyForm: FormState = { id: null, name: '', category: 'other', amount: '', cost_date: '', store_id: '', notes: '' }
+
+function pad2(n: number) { return String(n).padStart(2, '0') }
+// Tanggal default untuk biaya baru: hari ini bila masih di bulan terpilih,
+// kalau tidak pakai tanggal 1 bulan terpilih.
+function defaultCostDate(year: number, month: number) {
+  const now = new Date()
+  if (now.getFullYear() === year && now.getMonth() + 1 === month) {
+    return `${year}-${pad2(month)}-${pad2(now.getDate())}`
+  }
+  return `${year}-${pad2(month)}-01`
+}
+function formatDateID(iso: string | null) {
+  if (!iso) return '—'
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return '—'
+  return `${m[3]}/${m[2]}/${m[1]}`
+}
 
 export default function OperatingCostsPage() {
   const now = new Date()
@@ -93,13 +111,17 @@ export default function OperatingCostsPage() {
   const total = useMemo(() => costs.reduce((s, c) => s + Number(c.amount), 0), [costs])
   const storeName = (id: string | null) => id ? (stores.find((s) => s.id === id)?.name ?? 'Toko') : 'Semua toko'
 
-  function openAdd() { setForm(emptyForm); setShowForm(true); setNotice(null) }
+  function openAdd() {
+    setForm({ ...emptyForm, cost_date: defaultCostDate(year, month) })
+    setShowForm(true); setNotice(null)
+  }
   function openEdit(c: OperatingCost) {
     setForm({
       id: c.id,
       name: c.name,
       category: c.category,
       amount: c.amount > 0 ? formatThousands(String(c.amount)) : '',
+      cost_date: c.cost_date ?? defaultCostDate(c.period_year, c.period_month),
       store_id: c.store_id ?? '',
       notes: c.notes ?? '',
     })
@@ -114,6 +136,7 @@ export default function OperatingCostsPage() {
         name: form.name.trim(),
         category: form.category,
         amount: parseAmount(form.amount),
+        cost_date: form.cost_date || defaultCostDate(year, month),
         period_year: year,
         period_month: month,
         store_id: form.store_id || null,
@@ -229,6 +252,11 @@ export default function OperatingCostsPage() {
               </div>
             </div>
             <div className="space-y-1.5">
+              <Label className="text-sm">Tanggal Dikeluarkan <span className="text-destructive">*</span></Label>
+              <Input type="date" value={form.cost_date} onChange={(e) => setForm({ ...form, cost_date: e.target.value })} className="h-10" />
+              <p className="text-[11px] text-muted-foreground">Bulan biaya otomatis ikut tanggal ini.</p>
+            </div>
+            <div className="space-y-1.5">
               <Label className="text-sm">Berlaku untuk</Label>
               <Select value={form.store_id || 'all'} onValueChange={(v) => setForm({ ...form, store_id: v && v !== 'all' ? v : '' })}>
                 <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
@@ -258,6 +286,7 @@ export default function OperatingCostsPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-24">Tanggal</TableHead>
               <TableHead>Nama</TableHead>
               <TableHead>Kategori</TableHead>
               <TableHead>Berlaku</TableHead>
@@ -267,10 +296,10 @@ export default function OperatingCostsPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={5} className="text-center py-10 text-muted-foreground">Memuat...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">Memuat...</TableCell></TableRow>
             ) : costs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-10">
+                <TableCell colSpan={6} className="text-center py-10">
                   <Receipt className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">Belum ada biaya operasional di {MONTHS[month - 1]} {year}.</p>
                   <p className="text-xs text-muted-foreground mt-1">Klik &quot;Tambah Biaya&quot; atau &quot;Salin dari bulan lalu&quot;.</p>
@@ -279,6 +308,7 @@ export default function OperatingCostsPage() {
             ) : (
               costs.map((c) => (
                 <TableRow key={c.id}>
+                  <TableCell className="text-sm tabular-nums text-muted-foreground">{formatDateID(c.cost_date)}</TableCell>
                   <TableCell className="font-medium">
                     {c.name}
                     {c.notes && <span className="block text-xs text-muted-foreground">{c.notes}</span>}

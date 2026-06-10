@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
+import { parseCostDate } from '@/lib/operating-costs'
 
 type Params = { params: { id: string } }
 
@@ -18,6 +19,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     name?: string
     category?: string
     amount?: number
+    cost_date?: string
     period_year?: number
     period_month?: number
     store_id?: string | null
@@ -34,15 +36,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     patch.category = VALID_CATEGORIES.includes(body.category) ? body.category : 'other'
   }
   if (body.amount !== undefined) patch.amount = Math.max(0, Number(body.amount) || 0)
-  if (body.period_year !== undefined) {
-    const y = Number(body.period_year)
-    if (!Number.isInteger(y) || y < 2000 || y > 2100) return NextResponse.json({ error: 'Tahun tidak valid' }, { status: 400 })
-    patch.period_year = y
-  }
-  if (body.period_month !== undefined) {
-    const m = Number(body.period_month)
-    if (!Number.isInteger(m) || m < 1 || m > 12) return NextResponse.json({ error: 'Bulan tidak valid' }, { status: 400 })
-    patch.period_month = m
+  // Tanggal biaya menentukan periode (bulan/tahun) untuk agregasi dashboard.
+  if (body.cost_date !== undefined) {
+    const d = parseCostDate(body.cost_date)
+    if (!d) return NextResponse.json({ error: 'Tanggal tidak valid' }, { status: 400 })
+    patch.cost_date = d.iso
+    patch.period_year = d.year
+    patch.period_month = d.month
   }
   if (body.store_id !== undefined) patch.store_id = body.store_id ?? null
   if (body.notes !== undefined) patch.notes = body.notes?.trim() || null
