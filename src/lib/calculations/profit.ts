@@ -453,9 +453,17 @@ export function calculateProductProfit(
     { name: string; orderCount: number; attributedIncome: number; hppCost: number; adSpend: number; hasHpp: boolean }
   >()
 
+  // Produk placeholder/agregat (mis. "Shop GMV Max" dengan kode "-") bukan produk
+  // nyata — jangan ikut dihitung di profit per produk.
+  const isBlankProductId = (id: string | null | undefined) => {
+    const v = (id ?? '').trim()
+    return v === '' || v === '-'
+  }
+
   // Build: order_number → [product IDs]
   const opMap = new Map<string, string[]>()
   for (const op of orderProducts) {
+    if (isBlankProductId(op.marketplace_product_id)) continue
     const list = opMap.get(op.order_number) ?? []
     list.push(op.marketplace_product_id)
     opMap.set(op.order_number, list)
@@ -491,27 +499,31 @@ export function calculateProductProfit(
   }
 
   // Assign ad_spend once per product (not per-order — avoid double-counting).
-  // Also ensure products that only appear in ads (no orders yet) still show up.
+  // HANYA untuk produk yang benar-benar ada penjualannya di periode ini. Produk
+  // yang cuma muncul di iklan (tanpa order) TIDAK dibuatkan baris di tabel profit
+  // per produk — kalau dibuat, hasilnya membingungkan (orders 0, income 0, HPP 0,
+  // tapi profit minus karena ad spend yang tidak punya kolom sendiri). Ad waste
+  // semacam ini tetap terlihat di halaman Detail Iklan ("Uang Hangus").
   for (const [pid, adSpend] of Array.from(adSpendMap.entries())) {
+    if (isBlankProductId(pid)) continue
     const hppInfo = hppMap.get(pid)
     const canonicalId = hppInfo?.canonical_id ?? pid
     const existing = productStats.get(canonicalId)
     if (existing) {
       existing.adSpend = adSpend
-    } else {
-      // Product has ads but no orders — include it so user can see ad waste
-      productStats.set(canonicalId, {
-        name: hppInfo?.name ?? pid,
-        orderCount: 0,
-        attributedIncome: 0,
-        hppCost: 0,
-        adSpend,
-        hasHpp: !!hppInfo && (hppInfo.hpp > 0 || hppInfo.packaging_cost > 0),
-      })
     }
+    // else: produk ads-only tanpa penjualan → tidak ditampilkan di sini.
   }
 
-  return Array.from(productStats.entries()).map(([productId, data]) => {
+  return Array.from(productStats.entries())
+    // Buang baris placeholder ("-"/kosong) & baris tanpa aktivitas penjualan.
+    .filter(([productId, data]) =>
+      !isBlankProductId(productId) &&
+      (data.name ?? '').trim() !== '' &&
+      (data.name ?? '').trim() !== '-' &&
+      data.orderCount > 0
+    )
+    .map(([productId, data]) => {
     const profit = data.attributedIncome - data.hppCost - data.adSpend
     const margin =
       data.hasHpp && data.attributedIncome > 0
