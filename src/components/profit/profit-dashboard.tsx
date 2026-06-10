@@ -65,7 +65,7 @@ import {
   calculatePaymentDistribution,
   calculateCourierStats,
 } from '@/lib/calculations/profit'
-import { buildTrafficLightRows } from '@/lib/calculations/ads-analysis'
+import { buildTrafficLightRows, buildIncomeSellingPriceMap } from '@/lib/calculations/ads-analysis'
 import {
   buildScaleRecommendations,
   pickScalableCampaigns,
@@ -591,9 +591,13 @@ export default function ProfitDashboard({
     () => (kpis.totalOmzet > 0 && kpis.totalFees > 0 ? kpis.totalFees / kpis.totalOmzet : undefined),
     [kpis.totalOmzet, kpis.totalFees]
   )
+  const adsSellingPriceMap = useMemo(
+    () => buildIncomeSellingPriceMap(filteredOrders, orderProducts),
+    [filteredOrders, orderProducts]
+  )
   const trafficRows = useMemo(
-    () => buildTrafficLightRows(filteredAdsData, masterProducts, [], adsFeeRate),
-    [filteredAdsData, masterProducts, adsFeeRate]
+    () => buildTrafficLightRows(filteredAdsData, masterProducts, [], adsFeeRate, adsSellingPriceMap),
+    [filteredAdsData, masterProducts, adsFeeRate, adsSellingPriceMap]
   )
   const scaleRecs = useMemo(
     () => buildScaleRecommendations(trafficRows, masterProducts),

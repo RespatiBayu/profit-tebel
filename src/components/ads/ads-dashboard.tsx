@@ -34,6 +34,7 @@ import {
   buildRoasChartData,
   calculateBepRoas,
   calculateMarketplaceFeeRate,
+  buildIncomeSellingPriceMap,
   classifyByBepRoas,
   BEP_PPN_MULTIPLIER,
 } from '@/lib/calculations/ads-analysis'
@@ -199,11 +200,13 @@ function TrafficLightTable({
   adsProductData,
   masterProducts,
   feeRate,
+  sellingPriceMap,
 }: {
   rows: TrafficLightRow[]
   adsProductData: DbAdsRow[]
   masterProducts: MasterProduct[]
   feeRate?: number
+  sellingPriceMap?: Map<string, number>
 }) {
   const hppMap = useMemo(
     () => buildMasterProductMap(masterProducts),
@@ -417,11 +420,12 @@ function TrafficLightTable({
                 .sort((a, b) => b.ad_spend - a.ad_spend)
                 .map((p) => {
                   const pRoas = p.roas
-                  // BEP ROAS per-child: avg harga jual (gmv / units) × HPP per unit dari master.
+                  // BEP ROAS per-child: harga jual dari income (fallback GMV iklan) × HPP master.
                   const mp = hppMap.get(p.product_code)
                   const pHppTotal = mp ? mp.hpp + mp.packaging_cost : 0
                   const pUnits = p.units_sold || 0
-                  const pAvgPrice = pUnits > 0 ? p.gmv / pUnits : 0
+                  const pIncomePrice = sellingPriceMap?.get(p.product_code)
+                  const pAvgPrice = pIncomePrice && pIncomePrice > 0 ? pIncomePrice : (pUnits > 0 ? p.gmv / pUnits : 0)
                   const pBepRoas = calculateBepRoas(pAvgPrice, pHppTotal, feeRate)
                   const pSignal = classifyByBepRoas(pRoas, pBepRoas)
                   return (
@@ -818,11 +822,27 @@ export default function AdsDashboard({
   // BEP ROAS. Kalau data income belum cukup, undefined → BEP pakai preset.
   const feeRate = useMemo(() => calculateMarketplaceFeeRate(orders), [orders])
 
-  const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts, feeRate), [filteredAds, masterProducts, feeRate])
+  // Harga jual real per produk dari INCOME (semua transaksi), bukan dari GMV iklan.
+  // Fallback ke harga dari iklan (gmv/units) untuk produk yang belum ada di income.
+  const sellingPriceMap = useMemo(() => {
+    const m = buildIncomeSellingPriceMap(orders, orderProducts)
+    const agg = new Map<string, { gmv: number; units: number }>()
+    for (const a of filteredAds) {
+      if (!a.product_code || a.product_code === '-') continue
+      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
+      e.gmv += a.gmv; e.units += a.units_sold; agg.set(a.product_code, e)
+    }
+    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
+      if (!m.has(code) && units > 0) m.set(code, gmv / units)
+    }
+    return m
+  }, [orders, orderProducts, filteredAds])
+
+  const kpis = useMemo(() => calculateAdsOverview(filteredAds, masterProducts, feeRate, sellingPriceMap), [filteredAds, masterProducts, feeRate, sellingPriceMap])
 
   const trafficLightRows = useMemo(
-    () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct, feeRate),
-    [filteredAds, masterProducts, filteredAdsProduct, feeRate]
+    () => buildTrafficLightRows(filteredAds, masterProducts, filteredAdsProduct, feeRate, sellingPriceMap),
+    [filteredAds, masterProducts, filteredAdsProduct, feeRate, sellingPriceMap]
   )
 
   // Per-product rows untuk funnel/quadrant/bar chart. Prefer Format 1 (Summary per Iklan)
@@ -837,7 +857,7 @@ export default function AdsDashboard({
 
   const funnelData = useMemo(() => buildFunnelData(perProductAdRows), [perProductAdRows])
 
-  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows, masterProducts, feeRate), [perProductAdRows, masterProducts, feeRate])
+  const roasChartData = useMemo(() => buildRoasChartData(perProductAdRows, masterProducts, feeRate, sellingPriceMap), [perProductAdRows, masterProducts, feeRate, sellingPriceMap])
 
   // For quadrant + True ROAS, we need profit data from income
   const hppMap = useMemo(() => buildHppMap(masterProducts), [masterProducts])
@@ -847,26 +867,11 @@ export default function AdsDashboard({
   )
 
   const quadrantData = useMemo(
-    () => buildQuadrantData(perProductAdRows, profitRows, masterProducts, feeRate),
-    [perProductAdRows, profitRows, masterProducts, feeRate]
+    () => buildQuadrantData(perProductAdRows, profitRows, masterProducts, feeRate, sellingPriceMap),
+    [perProductAdRows, profitRows, masterProducts, feeRate, sellingPriceMap]
   )
 
   const hasHppData = masterProducts.some((p) => p.hpp > 0)
-
-  // Avg realized selling price per product (GMV / units sold) from ads data — feeds Target ROAS.
-  const sellingPriceMap = useMemo(() => {
-    const m = new Map<string, number>()
-    const agg = new Map<string, { gmv: number; units: number }>()
-    for (const a of filteredAds) {
-      if (!a.product_code || a.product_code === '-') continue
-      const e = agg.get(a.product_code) ?? { gmv: 0, units: 0 }
-      e.gmv += a.gmv; e.units += a.units_sold; agg.set(a.product_code, e)
-    }
-    for (const [code, { gmv, units }] of Array.from(agg.entries())) {
-      if (units > 0) m.set(code, gmv / units)
-    }
-    return m
-  }, [filteredAds])
 
   // === Diagnosa Funnel: agregat tayang→klik→beli untuk cari titik bocor ===
   const funnelDiag = useMemo(() => {
@@ -1113,6 +1118,7 @@ export default function AdsDashboard({
             adsProductData={adsProductData}
             masterProducts={masterProducts}
             feeRate={feeRate}
+            sellingPriceMap={sellingPriceMap}
           />
         </CardContent>
       </Card>

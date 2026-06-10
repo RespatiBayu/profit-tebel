@@ -4,6 +4,7 @@ import { buildMasterProductMap } from '@/lib/master-product-map'
 import type {
   DbAdsRow,
   DbOrder,
+  DbOrderProduct,
   MasterProduct,
   ProductProfitRow,
   AdsKpis,
@@ -47,6 +48,58 @@ export function calculateBepRoas(
   const grossProfit = avgSellingPrice - hppPerUnit - totalPajak
   if (grossProfit <= 0) return null
   return avgSellingPrice / grossProfit
+}
+
+/**
+ * Map harga jual REAL per produk dari data income (order_products + orders),
+ * bukan dari GMV iklan. Harga jual = omzet real per order (Harga Asli − harga
+ * coret) diprorata ke produk berdasarkan kuantitas. Untuk order 1-produk ini
+ * eksak; multi-produk memakai harga rata-rata per unit order tsb. Hasil = harga
+ * jual rata-rata tertimbang per produk dari SEMUA transaksi (lebih real daripada
+ * hanya penjualan dari iklan).
+ */
+export function buildIncomeSellingPriceMap(
+  orders: DbOrder[],
+  orderProducts: DbOrderProduct[],
+): Map<string, number> {
+  const omzetByOrder = new Map<string, number>()
+  for (const o of orders) {
+    omzetByOrder.set(o.order_number, o.original_price - Math.abs(o.product_discount))
+  }
+  const prodByOrder = new Map<string, { id: string; qty: number }[]>()
+  for (const op of orderProducts) {
+    const id = op.marketplace_product_id
+    if (!id || id === '-') continue
+    const list = prodByOrder.get(op.order_number) ?? []
+    list.push({ id, qty: op.quantity ?? 1 })
+    prodByOrder.set(op.order_number, list)
+  }
+  const acc = new Map<string, { rev: number; units: number }>()
+  for (const [orderNo, prods] of Array.from(prodByOrder.entries())) {
+    const omzet = omzetByOrder.get(orderNo)
+    if (omzet === undefined || omzet <= 0) continue
+    const totalQty = prods.reduce((s, p) => s + p.qty, 0)
+    if (totalQty <= 0) continue
+    const unitPrice = omzet / totalQty
+    for (const p of prods) {
+      const e = acc.get(p.id) ?? { rev: 0, units: 0 }
+      e.rev += unitPrice * p.qty
+      e.units += p.qty
+      acc.set(p.id, e)
+    }
+  }
+  const map = new Map<string, number>()
+  for (const [id, { rev, units }] of Array.from(acc.entries())) {
+    if (units > 0) map.set(id, rev / units)
+  }
+  return map
+}
+
+/** Pilih harga jual: utamakan dari income (priceMap), fallback ke GMV iklan/units. */
+function pickAvgPrice(code: string, gmv: number, units: number, priceMap?: Map<string, number>): number {
+  const fromIncome = priceMap?.get(code)
+  if (fromIncome && fromIncome > 0) return fromIncome
+  return units > 0 ? gmv / units : 0
 }
 
 /**
@@ -121,6 +174,7 @@ export function calculateAdsOverview(
   rows: DbAdsRow[],
   masterProducts: MasterProduct[] = [],
   feeRate?: number,
+  sellingPriceMap?: Map<string, number>,
 ): AdsKpis {
   // Only count products that have actual individual ad spend for KPIs/signals
   const productRows = rows.filter((r) => !isAggregate(r) && r.ad_spend > 0)
@@ -155,7 +209,7 @@ export function calculateAdsOverview(
     const mp = hppMap.get(r.product_code)
     const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
     const units = r.units_sold || 0
-    const avgPrice = units > 0 ? r.gmv / units : 0
+    const avgPrice = pickAvgPrice(r.product_code, r.gmv, units, sellingPriceMap)
     const bep = calculateBepRoas(avgPrice, hppTotal, feeRate)
     return classifyByBepRoas(r.roas, bep)
   })
@@ -211,6 +265,7 @@ export function buildTrafficLightRows(
    *  master_products — lookup via parent_iklan → children → aggregate HPP. */
   adsProductData: DbAdsRow[] = [],
   feeRate?: number,
+  sellingPriceMap?: Map<string, number>,
 ): TrafficLightRow[] {
   const hppMap = buildMasterProductMap(masterProducts)
 
@@ -252,7 +307,8 @@ export function buildTrafficLightRows(
         trueRoas = r.ad_spend > 0 ? netGmv / r.ad_spend : 0
         // Real ROAS: kurangi juga PPN 11% dari GMV
         realRoas = r.ad_spend > 0 ? (r.gmv * (1 - PPN) - totalHppCost) / r.ad_spend : 0
-        const avgSellingPrice = unitsSold > 0 ? r.gmv / unitsSold : 0
+        // Harga jual untuk BEP: utamakan dari income (semua transaksi), fallback GMV iklan.
+        const avgSellingPrice = pickAvgPrice(r.product_code, r.gmv, unitsSold, sellingPriceMap)
         profitPerUnit = avgSellingPrice - hppTotal
         avgSellingPriceOut = avgSellingPrice
         hppPerUnitOut = hppTotal
@@ -354,6 +410,7 @@ export function buildQuadrantData(
   profitRows: ProductProfitRow[],
   masterProducts: MasterProduct[] = [],
   feeRate?: number,
+  sellingPriceMap?: Map<string, number>,
 ): QuadrantPoint[] {
   const profitMap = new Map(profitRows.map((p) => [p.productId, p]))
   const hppMap = buildMasterProductMap(masterProducts)
@@ -371,7 +428,7 @@ export function buildQuadrantData(
       const mp = hppMap.get(r.product_code)
       const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
       const units = r.units_sold || 0
-      const avgPrice = units > 0 ? r.gmv / units : 0
+      const avgPrice = pickAvgPrice(r.product_code, r.gmv, units, sellingPriceMap)
       const bep = calculateBepRoas(avgPrice, hppTotal, feeRate)
       const s = classifyByBepRoas(r.roas, bep)
       const signal: TrafficLight = s === 'neutral' ? 'optimize' : s
@@ -392,7 +449,7 @@ export function buildQuadrantData(
 // 5. ROAS bar chart data (sorted descending)
 // ---------------------------------------------------------------------------
 
-export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProduct[] = [], feeRate?: number) {
+export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProduct[] = [], feeRate?: number, sellingPriceMap?: Map<string, number>) {
   const hppMap = buildMasterProductMap(masterProducts)
   return dedupeByProductCode(rows.filter((r) => !isAggregate(r) && r.ad_spend > 0))
     .sort((a, b) => b.roas - a.roas)
@@ -401,7 +458,7 @@ export function buildRoasChartData(rows: DbAdsRow[], masterProducts: MasterProdu
       const mp = hppMap.get(r.product_code)
       const hppTotal = mp ? mp.hpp + mp.packaging_cost : 0
       const units = r.units_sold || 0
-      const avgPrice = units > 0 ? r.gmv / units : 0
+      const avgPrice = pickAvgPrice(r.product_code, r.gmv, units, sellingPriceMap)
       const bep = calculateBepRoas(avgPrice, hppTotal, feeRate)
       const s = classifyByBepRoas(r.roas, bep)
       const signal: TrafficLight = s === 'neutral' ? 'optimize' : s
