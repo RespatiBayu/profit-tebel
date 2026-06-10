@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
-import { recalculateEstimatedHppForStore } from '@/lib/recalculate-estimated-hpp'
 
 type Params = { params: { id: string } }
 
@@ -102,33 +101,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   // HPP & packaging dikelola di Master Item — bila cost_per_unit / packaging_cost
   // berubah, dorong nilainya ke semua master_products (Mapping Produk) yang
-  // ter-link ke item ini, lalu hitung ulang estimated_hpp pada order terkait.
+  // ter-link ke item ini. Ini satu UPDATE bulk yang ringan.
+  //
+  // CATATAN: estimated_hpp pada order TIDAK dihitung ulang di sini. Recalc
+  // melakukan UPDATE per-baris untuk SETIAP order & orders_all (bisa ribuan
+  // round-trip ke DB) sehingga membuat proses Simpan terasa sangat lambat.
+  // Order HPP di-refresh lewat tombol "Recalculate HPP" di halaman Upload.
   const costChanged = patch.cost_per_unit !== undefined
   const packagingChanged = patch.packaging_cost !== undefined
   if (costChanged || packagingChanged) {
     try {
-      const { data: linkedProducts } = await supabase
+      const syncPayload: Record<string, unknown> = {}
+      if (costChanged) syncPayload.hpp = patch.cost_per_unit
+      if (packagingChanged) syncPayload.packaging_cost = patch.packaging_cost
+
+      await supabase
         .from('master_products')
-        .select('id,store_id')
+        .update(syncPayload)
         .eq('linked_item_id', params.id)
-
-      if (linkedProducts && linkedProducts.length > 0) {
-        const syncPayload: Record<string, unknown> = {}
-        if (costChanged) syncPayload.hpp = patch.cost_per_unit
-        if (packagingChanged) syncPayload.packaging_cost = patch.packaging_cost
-
-        await supabase
-          .from('master_products')
-          .update(syncPayload)
-          .eq('linked_item_id', params.id)
-
-        const storeIds = Array.from(
-          new Set(linkedProducts.map((p) => (p.store_id as string | null) ?? null))
-        )
-        for (const storeId of storeIds) {
-          await recalculateEstimatedHppForStore(supabase, storeId)
-        }
-      }
     } catch (syncErr) {
       console.error('Sync item HPP/packaging to linked products error:', syncErr)
       // Non-fatal — item tersimpan, sinkronisasi mapping gagal.
