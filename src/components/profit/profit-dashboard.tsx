@@ -996,8 +996,11 @@ export default function ProfitDashboard({
         const p = pendingKpis.hasPendingData
         const omzet    = kpis.totalOmzet      + (p ? pendingKpis.totalOmzet    : 0)
         const diskon   = kpis.totalDiskonPromo + (p ? pendingKpis.totalDiskon   : 0)
-        const gross    = kpis.grossIncome      + (p ? pendingKpis.grossIncome   : 0)
         const fees     = kpis.totalFees        + (p ? pendingKpis.totalFees     : 0)
+        // Net income = "Total Penghasilan" dari file pendapatan yang sudah dilepas
+        // (sudah dipotong fee marketplace) = uang yang benar-benar diterima dari
+        // marketplace. Inilah nilai "Income dari Marketplace" yang valid.
+        const net      = kpis.totalNetIncome   + (p ? pendingKpis.totalNetIncome : 0)
         const hpp      = kpis.totalHppCost     + (p ? pendingKpis.totalHpp      : 0)
         const adSpend  = kpis.totalAdSpend     // Ads tidak dialokasikan ke pending
         const profit   = kpis.realProfit       + (p ? pendingKpis.realProfit    : 0)
@@ -1056,13 +1059,13 @@ export default function ProfitDashboard({
             />
             <KpiCard
               label="Income dari Marketplace"
-              value={formatRp(gross)}
-              sub={`Income yang diterima dari marketplace${pendingNote}`}
+              value={formatRp(net)}
+              sub={`Total Penghasilan diterima dari Shopee${pendingNote}`}
               accent="green"
               icon={Banknote}
-              tooltip={`Income yang diterima dari marketplace setelah dikurangi diskon dan promo yang kamu tanggung.${p ? ' Pending dihitung dari harga jual setelah diskon.' : ''}`}
-              pctOmzet={pct(gross)}
-              delta={{ current: kpis.grossIncome, prev: prevKpis.grossIncome, context: 'income' }}
+              tooltip={`Income yang benar-benar diterima dari marketplace (Total Penghasilan pada file pendapatan yang sudah dilepas) — yaitu omzet setelah dikurangi diskon, promo, dan biaya marketplace.${p ? ' Pending diestimasi dari rata-rata order yang sudah dilepas.' : ''}`}
+              pctOmzet={pct(net)}
+              delta={{ current: kpis.totalNetIncome, prev: prevKpis.totalNetIncome, context: 'income' }}
             />
             <KpiCard
               label="HPP + Packaging"
@@ -1343,17 +1346,17 @@ export default function ProfitDashboard({
                 }
                 if (pendingItem) rows.push(pendingItem)
 
-                // Gross Income row after discount group
+                // Subtotal setelah diskon (sebelum biaya marketplace)
                 if (g.id === 'discount') {
                   rows.push({ kind: 'divider' })
                   rows.push({
                     kind: 'total',
-                    label: 'Income dari Marketplace',
+                    label: 'Subtotal setelah Diskon',
                     value: combinedGross,
                     prev: prevKpis.grossIncome,
                     context: 'income',
                     tone: 'neutral',
-                    sub: hasPending ? 'Income diterima dari marketplace (confirmed + pending)' : 'Income yang diterima dari marketplace setelah diskon & promo',
+                    sub: 'Omzet setelah diskon & promo, sebelum biaya marketplace',
                   })
                 }
               }
@@ -1376,12 +1379,12 @@ export default function ProfitDashboard({
               rows.push({ kind: 'divider' })
               rows.push({
                 kind: 'total',
-                label: 'Net Income',
+                label: 'Income dari Marketplace',
                 value: combinedNet,
                 prev: prevKpis.totalNetIncome,
                 context: 'income',
                 tone: 'neutral',
-                sub: hasPending ? 'Penghasilan cair + estimasi pendapatan pending' : 'Total Penghasilan dari Shopee',
+                sub: hasPending ? 'Total Penghasilan diterima (cair + estimasi pending)' : 'Total Penghasilan diterima dari Shopee',
               })
 
               if (hasHpp) {
@@ -1433,12 +1436,12 @@ export default function ProfitDashboard({
                 let isGrossIncomeRow = false
                 for (let j = 0; j < i; j++) {
                   const prevRow = rows[j]
-                  if (prevRow.kind === 'total' && prevRow.label === 'Income dari Marketplace') {
+                  if (prevRow.kind === 'total' && prevRow.label === 'Subtotal setelah Diskon') {
                     hasPassedGrossIncome = true
                     break
                   }
                 }
-                if (r.kind === 'total' && r.label === 'Income dari Marketplace') {
+                if (r.kind === 'total' && r.label === 'Subtotal setelah Diskon') {
                   isGrossIncomeRow = true
                 }
 
