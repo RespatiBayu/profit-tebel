@@ -908,7 +908,7 @@ export default function AdsDashboard({
     return { voucherCost, voucheredSales, gmv, sharePct, hasData: voucherCost > 0 || voucheredSales > 0 }
   }, [perProductAdRows])
 
-  // === Insight & Aksi Otomatis: ranking bad → warn → good → info ===
+  // === Insight & Sinyal: ranking bad → warn → good → info ===
   const autoInsights = useMemo(() => {
     type Insight = { tone: 'bad' | 'warn' | 'good' | 'info'; text: string }
     const out: Insight[] = []
@@ -916,7 +916,7 @@ export default function AdsDashboard({
     if (wastedSpend.hasData) {
       out.push({
         tone: 'bad',
-        text: `${wastedSpend.count} iklan rugi (KILL) menghabiskan ${formatRpFull(wastedSpend.total)}${wastedSpend.sharePct > 0 ? ` (${wastedSpend.sharePct.toFixed(0)}% dari total ad spend)` : ''}. Jeda atau perbaiki dulu sebelum makin boros.`,
+        text: `${wastedSpend.count} iklan kena sinyal KILL, menghabiskan ${formatRpFull(wastedSpend.total)}${wastedSpend.sharePct > 0 ? ` (${wastedSpend.sharePct.toFixed(0)}% dari total ad spend)` : ''}. Sinyal buat dicek — bisa kamu pertimbangkan untuk jeda atau perbaiki.`,
       })
     }
     if (funnelDiag.leak && funnelDiag.leak.tone !== 'good') {
@@ -931,7 +931,7 @@ export default function AdsDashboard({
     if (kpis.scaleCount > 0) {
       out.push({
         tone: 'good',
-        text: `${kpis.scaleCount} iklan layak SCALE (ROAS di atas target). Naikkan budget bertahap ~20% biar nggak ganggu efisiensi.`,
+        text: `${kpis.scaleCount} iklan kena sinyal SCALE (ROAS di atas target). Kalau mau, budget bisa dinaikkan bertahap ~20% biar efisiensi tetap terjaga.`,
       })
     }
     if (funnelDiag.leak && funnelDiag.leak.tone === 'good' && kpis.scaleCount === 0) {
@@ -945,9 +945,9 @@ export default function AdsDashboard({
     }
     if (kpis.overallRoas > 0) {
       if (kpis.overallRoas >= ROAS_THRESHOLDS.scale) {
-        out.push({ tone: 'good', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× — iklan kamu secara keseluruhan sehat. Pertahankan & scale yang menang.` })
+        out.push({ tone: 'good', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× — iklan kamu secara keseluruhan sehat. Sinyalnya positif buat lanjut & scale yang menang.` })
       } else if (kpis.overallRoas < ROAS_THRESHOLDS.kill) {
-        out.push({ tone: 'bad', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× masih rendah. Pangkas iklan rugi & alihkan budget ke produk yang menang.` })
+        out.push({ tone: 'bad', text: `Overall ROAS ${kpis.overallRoas.toFixed(2)}× masih rendah. Sinyal buat ditinjau — pertimbangkan pangkas iklan rugi & alihkan budget ke produk yang menang.` })
       }
     }
 
@@ -1049,15 +1049,15 @@ export default function AdsDashboard({
       </div>
       )}
 
-      {/* === SECTION: Insight & Aksi Otomatis === */}
+      {/* === SECTION: Insight & Sinyal === */}
       {autoInsights.length > 0 && (
         <Card className="border-primary/20">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Lightbulb className="h-4 w-4 text-primary" />
-              Insight & Aksi Otomatis
+              Insight & Sinyal
             </CardTitle>
-            <p className="text-xs text-muted-foreground">Temuan penting dari data iklan periode ini, lengkap dengan saran aksinya.</p>
+            <p className="text-xs text-muted-foreground">Sinyal dari data iklan periode ini sebagai bahan pertimbangan. Keputusan akhir tetap di tangan kamu.</p>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="space-y-2">
@@ -1082,7 +1082,7 @@ export default function AdsDashboard({
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <CardTitle className="text-base">Rekomendasi per Iklan</CardTitle>
+            <CardTitle className="text-base">Sinyal per Iklan</CardTitle>
             <div className="text-xs text-muted-foreground space-y-0.5 text-right">
               <p>🟢 SCALE: ROAS ≥ {ROAS_TARGET_MULTIPLIERS.konservatif.toFixed(1)}× BEP (konservatif)</p>
               <p>🟡 OPTIMIZE: ROAS ≥ BEP × {BEP_PPN_MULTIPLIER.toFixed(2)} (BEP + PPN 11%)</p>
@@ -1111,7 +1111,7 @@ export default function AdsDashboard({
               </span>
             </CardTitle>
             <p className="text-xs text-muted-foreground">
-              Ad spend yang kebakar di iklan rugi (sinyal KILL) periode ini. Jeda/perbaiki dulu biar nggak makin boros.
+              Ad spend di iklan yang kena sinyal KILL periode ini. Sebagai bahan pertimbangan buat dijeda/diperbaiki — keputusan tetap di kamu.
             </p>
           </CardHeader>
           <CardContent className="pt-0">
@@ -1153,7 +1153,7 @@ export default function AdsDashboard({
             </div>
             {wastedSpend.killRows.length > 6 && (
               <p className="mt-2 text-center text-xs text-muted-foreground">
-                +{wastedSpend.killRows.length - 6} iklan rugi lainnya — lihat tabel “Rekomendasi per Iklan” di atas.
+                +{wastedSpend.killRows.length - 6} iklan rugi lainnya — lihat tabel “Sinyal per Iklan” di atas.
               </p>
             )}
           </CardContent>
