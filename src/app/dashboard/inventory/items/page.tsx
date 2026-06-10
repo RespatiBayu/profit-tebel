@@ -176,7 +176,7 @@ export default function ItemsPage() {
               <TableHead>SKU</TableHead>
               <TableHead>Tipe</TableHead>
               <TableHead>Satuan</TableHead>
-              <TableHead className="text-right">Harga Manual</TableHead>
+              <TableHead className="text-right">Harga</TableHead>
               <TableHead className="text-right">Stok</TableHead>
               <TableHead className="text-right">Avg Cost</TableHead>
               <TableHead className="w-16" />
