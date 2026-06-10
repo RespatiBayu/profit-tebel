@@ -32,6 +32,7 @@ import {
   ShieldCheck,
   Boxes,
   Sparkles,
+  Wallet,
 } from 'lucide-react'
 import { StoreSwitcher } from './store-switcher'
 import { PeriodSwitcher } from './period-switcher'
@@ -46,6 +47,7 @@ const baseNavItems = [
   { href: '/dashboard/ads', label: 'Detail Iklan', icon: BarChart3, pro: false },
   { href: '/dashboard/roas-calculator', label: 'Kalkulator ROAS', icon: Calculator, pro: false },
   { href: '/dashboard/products', label: 'Mapping Produk', icon: Package, pro: false },
+  { href: '/dashboard/operating-costs', label: 'Biaya Operasional', icon: Wallet, pro: false },
   { href: '/dashboard/stores', label: 'Toko Saya', icon: Store, pro: false },
   { href: '/dashboard/upload', label: 'Upload Data', icon: Upload, pro: false },
   { href: '/dashboard/inventory', label: 'Inventori & Produksi', icon: Boxes, pro: false },

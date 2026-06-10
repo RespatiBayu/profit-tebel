@@ -461,6 +461,8 @@ interface Props {
   comparisonLabel?: string | null
   useServerComparison?: boolean
   noHppCount: number
+  operatingCost?: number
+  prevOperatingCost?: number
 }
 
 export default function ProfitDashboard({
@@ -476,6 +478,7 @@ export default function ProfitDashboard({
   comparisonLabel,
   useServerComparison = false,
   noHppCount,
+  operatingCost = 0,
 }: Props) {
   const [trendGroup, setTrendGroup] = useState<'day' | 'week'>('day')
   const setAvailable = usePeriodStore((s) => s.setAvailable)
@@ -1139,6 +1142,49 @@ export default function ProfitDashboard({
               cta={!hasHpp ? { label: 'Isi HPP produk', href: '/dashboard/products' } : undefined}
             />
           </div>
+        )
+      })()}
+
+      {/* === SECTION: Profit Bersih (Real Profit − Biaya Operasional) === */}
+      {kpis.totalOmzet > 0 && (() => {
+        const combinedRealProfit = kpis.realProfit + (pendingKpis.hasPendingData ? pendingKpis.realProfit : 0)
+        const hasHpp = kpis.hasHppData || (pendingKpis.hasPendingData && pendingKpis.hasHppData)
+        const netProfit = combinedRealProfit - operatingCost
+        return (
+          <Card className="border-primary/20 bg-gradient-to-br from-muted/40 to-transparent">
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Real Profit (operasional)</p>
+                    <p className="font-semibold tabular-nums">{hasHpp ? formatRp(combinedRealProfit) : '—'}</p>
+                  </div>
+                  <span className="text-muted-foreground">−</span>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Biaya Operasional</p>
+                    <DashboardLink href="/dashboard/operating-costs" className="font-semibold tabular-nums text-red-600 hover:underline">
+                      {formatRp(operatingCost)}
+                    </DashboardLink>
+                  </div>
+                  <span className="text-muted-foreground">=</span>
+                </div>
+                <div className="sm:text-right">
+                  <p className="text-xs text-muted-foreground">Profit Bersih</p>
+                  <p className={`text-2xl font-bold tabular-nums ${!hasHpp ? 'text-muted-foreground' : netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {hasHpp ? formatRp(netProfit) : '—'}
+                  </p>
+                </div>
+              </div>
+              {operatingCost === 0 && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Belum ada biaya operasional di periode ini.{' '}
+                  <DashboardLink href="/dashboard/operating-costs" className="text-primary hover:underline">
+                    Tambah biaya (listrik, sewa, gaji, dll) →
+                  </DashboardLink>
+                </p>
+              )}
+            </CardContent>
+          </Card>
         )
       })()}
 

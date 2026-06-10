@@ -332,6 +332,32 @@ export default async function ProfitPage({
 
   const noHppCount = typedMasterProducts.filter((product) => !product.hpp || product.hpp === 0).length
 
+  // --- Biaya Operasional untuk periode terpilih ---------------------------
+  // Dijumlahkan server-side. Scope: milik user, biaya bisnis-wide (store_id null)
+  // + biaya toko yang sedang difilter. Periode mengikuti filter dashboard.
+  let operatingCost = 0
+  let prevOperatingCost = 0
+  {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { data: ocRows } = await supabase
+        .from('operating_costs')
+        .select('store_id,amount,period_year,period_month')
+        .eq('user_id', user.id)
+      const typedOc = (ocRows ?? []) as Array<{ store_id: string | null; amount: number; period_year: number; period_month: number }>
+      const inStore = (sid: string | null) => !storeId || sid === null || sid === storeId
+      const periodKey = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}`
+      const curSet = new Set(selectedPeriods)
+      const prevSet = new Set(previousPeriods)
+      for (const r of typedOc) {
+        if (!inStore(r.store_id)) continue
+        const k = periodKey(r.period_year, r.period_month)
+        if (!hasFilter || curSet.has(k)) operatingCost += Number(r.amount)
+        if (hasFilter && prevSet.has(k)) prevOperatingCost += Number(r.amount)
+      }
+    }
+  }
+
   return (
     <ProfitDashboard
       orders={typedOrders}
@@ -346,6 +372,8 @@ export default async function ProfitPage({
       comparisonLabel={hasFilter ? formatPeriodLabel(previousPeriods) : undefined}
       useServerComparison={hasFilter}
       noHppCount={noHppCount}
+      operatingCost={operatingCost}
+      prevOperatingCost={hasFilter ? prevOperatingCost : undefined}
     />
   )
 }
