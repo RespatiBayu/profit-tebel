@@ -1040,16 +1040,6 @@ export default function ProfitDashboard({
               }}
             />
             <KpiCard
-              label="Pendapatan Kotor"
-              value={formatRp(gross)}
-              sub={`Setelah diskon & promo${pendingNote}`}
-              accent="green"
-              icon={Banknote}
-              tooltip={`Pendapatan setelah dikurangi diskon dan promo yang kamu tanggung, sebelum biaya marketplace dan iklan.${p ? ' Pending dihitung dari harga jual setelah diskon.' : ''}`}
-              pctOmzet={pct(gross)}
-              delta={{ current: kpis.grossIncome, prev: prevKpis.grossIncome, context: 'income' }}
-            />
-            <KpiCard
               label="Total Biaya"
               value={formatRp(fees)}
               sub={`Fee marketplace (Shopee)${p ? ' · est. pending' : ''}`}
@@ -1063,6 +1053,16 @@ export default function ProfitDashboard({
                 context: 'cost',
                 perUnit: true,
               }}
+            />
+            <KpiCard
+              label="Income dari Marketplace"
+              value={formatRp(gross)}
+              sub={`Income yang diterima dari marketplace${pendingNote}`}
+              accent="green"
+              icon={Banknote}
+              tooltip={`Income yang diterima dari marketplace setelah dikurangi diskon dan promo yang kamu tanggung.${p ? ' Pending dihitung dari harga jual setelah diskon.' : ''}`}
+              pctOmzet={pct(gross)}
+              delta={{ current: kpis.grossIncome, prev: prevKpis.grossIncome, context: 'income' }}
             />
             <KpiCard
               label="HPP + Packaging"
@@ -1348,12 +1348,12 @@ export default function ProfitDashboard({
                   rows.push({ kind: 'divider' })
                   rows.push({
                     kind: 'total',
-                    label: 'Pendapatan Kotor (Gross Income)',
+                    label: 'Income dari Marketplace',
                     value: combinedGross,
                     prev: prevKpis.grossIncome,
                     context: 'income',
                     tone: 'neutral',
-                    sub: hasPending ? 'Setelah diskon & promo (confirmed + pending)' : 'Setelah diskon & promo yang kamu tanggung',
+                    sub: hasPending ? 'Income diterima dari marketplace (confirmed + pending)' : 'Income yang diterima dari marketplace setelah diskon & promo',
                   })
                 }
               }
@@ -1433,12 +1433,12 @@ export default function ProfitDashboard({
                 let isGrossIncomeRow = false
                 for (let j = 0; j < i; j++) {
                   const prevRow = rows[j]
-                  if (prevRow.kind === 'total' && prevRow.label === 'Pendapatan Kotor (Gross Income)') {
+                  if (prevRow.kind === 'total' && prevRow.label === 'Income dari Marketplace') {
                     hasPassedGrossIncome = true
                     break
                   }
                 }
-                if (r.kind === 'total' && r.label === 'Pendapatan Kotor (Gross Income)') {
+                if (r.kind === 'total' && r.label === 'Income dari Marketplace') {
                   isGrossIncomeRow = true
                 }
 
