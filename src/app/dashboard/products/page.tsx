@@ -19,15 +19,11 @@ import {
   Package,
   Search,
   AlertCircle,
-  CheckCircle,
   ArrowUpDown,
   Upload,
   Trash2,
   Link2,
   X,
-  Download,
-  FileUp,
-  RotateCcw,
 } from 'lucide-react'
 import { DashboardLink } from '@/components/layout/dashboard-link'
 import type { MasterProduct, MasterProductSourceTag, Item } from '@/types'
@@ -190,13 +186,8 @@ export default function ProductsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   // linked_item overrides per product (keyed by product.id)
   const [linkedOverrides, setLinkedOverrides] = useState<Record<string, { id: string | null; name: string | null }>>({})
-
-  const [bulkUploading, setBulkUploading] = useState(false)
-  const [resetting, setResetting] = useState(false)
-  const bulkInputRef = useRef<HTMLInputElement>(null)
 
   function handleLinked(productId: string, itemId: string | null, itemName: string | null, hpp: number | null, packagingCost: number | null) {
     setLinkedOverrides((prev) => ({ ...prev, [productId]: { id: itemId, name: itemName } }))
@@ -249,40 +240,6 @@ export default function ProductsPage() {
     loadProducts()
   }, [loadProducts])
 
-  async function resetCosts() {
-    if (!confirm(
-      'Reset semua HPP & Packaging di Mapping Produk ke 0?\n\n' +
-      'Setelah reset, isi HPP & Packaging di Master Item, lalu hubungkan tiap produk ke item-nya agar nilainya terisi otomatis.'
-    )) {
-      return
-    }
-
-    setResetting(true)
-    setError(null)
-    setSuccessMessage(null)
-    try {
-      const params = scopeParams()
-      const url = params.size > 0
-        ? `/api/master-products/reset-costs?${params.toString()}`
-        : '/api/master-products/reset-costs'
-      const res = await fetch(url, { method: 'POST' })
-      const json = await res.json().catch(() => null) as { resetCount?: number; error?: string } | null
-      if (!res.ok) {
-        setError(json?.error ?? 'Gagal mereset HPP & Packaging')
-        return
-      }
-      setLinkedOverrides({})
-      setSuccessMessage(`${json?.resetCount ?? 0} produk direset. Hubungkan ke Master Item untuk mengisi HPP & Packaging.`)
-      await loadProducts()
-      router.refresh()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
-      setError(`Gagal mereset: ${message}`)
-    } finally {
-      setResetting(false)
-    }
-  }
-
   async function deleteProduct(productId: string) {
     if (!confirm('Apakah kamu yakin ingin menghapus produk ini? Aksi ini tidak bisa dibatalkan.')) {
       return
@@ -309,76 +266,6 @@ export default function ProductsPage() {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
       setError(`Gagal menghapus produk: ${message}`)
       setDeleting((prev) => ({ ...prev, [productId]: false }))
-    }
-  }
-
-  function downloadTemplate() {
-    const params = scopeParams()
-    const url = params.size > 0
-      ? `/api/master-products/template?${params.toString()}`
-      : '/api/master-products/template'
-    const a = document.createElement('a')
-    a.href = url
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-  }
-
-  async function handleBulkFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = '' // reset agar file yang sama bisa diupload lagi
-    if (!file) return
-
-    setBulkUploading(true)
-    setError(null)
-    setSuccessMessage(null)
-
-    try {
-      const params = scopeParams()
-      const url = params.size > 0
-        ? `/api/master-products/bulk?${params.toString()}`
-        : '/api/master-products/bulk'
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await fetch(url, { method: 'POST', body: formData })
-      const json = await response.json().catch(() => null) as {
-        updated?: number
-        created?: number
-        createBlocked?: string | null
-        createBlockedCount?: number
-        createFailedCount?: number
-        skippedNoNameCount?: number
-        invalidRows?: number
-        error?: string
-      } | null
-
-      if (!response.ok) {
-        setError(json?.error ?? 'Gagal memproses file Excel')
-        return
-      }
-
-      const parts: string[] = []
-      parts.push(`${json?.updated ?? 0} produk diperbarui`)
-      if (json?.created) parts.push(`${json.created} produk baru ditambahkan`)
-      if (json?.createFailedCount) parts.push(`${json.createFailedCount} produk baru gagal dibuat`)
-      if (json?.skippedNoNameCount) parts.push(`${json.skippedNoNameCount} baris dilewati (tanpa nama)`)
-      if (json?.invalidRows) parts.push(`${json.invalidRows} baris angka tidak valid`)
-      setSuccessMessage(parts.join(' · '))
-
-      // Kalau pembuatan produk baru diblokir (banyak toko), tampilkan sebagai peringatan.
-      if (json?.createBlocked) {
-        setError(`${json.createBlockedCount ?? ''} produk baru belum dibuat: ${json.createBlocked}`.trim())
-      }
-
-      await loadProducts()
-      router.refresh()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Terjadi kesalahan'
-      setError(`Gagal upload: ${message}`)
-    } finally {
-      setBulkUploading(false)
     }
   }
 
@@ -433,45 +320,6 @@ export default function ProductsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            ref={bulkInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleBulkFile}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={downloadTemplate}
-            disabled={loading || products.length === 0}
-            title={products.length === 0 ? 'Belum ada produk untuk dijadikan template' : 'Unduh template Excel berisi produk & HPP saat ini'}
-          >
-            <Download className="h-4 w-4" />
-            Template Excel
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => bulkInputRef.current?.click()}
-            disabled={bulkUploading || loading}
-          >
-            <FileUp className="h-4 w-4" />
-            {bulkUploading ? 'Mengunggah...' : 'Upload Excel'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-            onClick={resetCosts}
-            disabled={resetting || loading || products.length === 0}
-            title="Reset semua HPP & Packaging ke 0, lalu isi ulang dari Master Item via Link Inventori"
-          >
-            <RotateCcw className={`h-4 w-4 ${resetting ? 'animate-spin' : ''}`} />
-            {resetting ? 'Mereset...' : 'Reset HPP & Packaging'}
-          </Button>
           <DashboardLink href="/dashboard/upload">
             <Button variant="outline" size="sm" className="gap-2">
               <Upload className="h-4 w-4" />
@@ -495,13 +343,6 @@ export default function ProductsPage() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      {successMessage && (
-        <Alert className="border-green-200 bg-green-50">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
         </Alert>
       )}
 
