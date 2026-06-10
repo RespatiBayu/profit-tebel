@@ -1,6 +1,15 @@
 import pg from 'pg'
 
-const { Pool } = pg
+const { Pool, types } = pg
+
+// node-postgres returns NUMERIC/DECIMAL (OID 1700) and BIGINT/INT8 (OID 20) as
+// strings to avoid precision loss. The rest of the app was written against the
+// Supabase JS client, which surfaced these columns as JS numbers, so string
+// values break math/formatting (e.g. `roas.toFixed is not a function`). Restore
+// the previous behaviour by parsing them back into numbers globally.
+// NUMERIC(12,2) money + small counts stay well within IEEE-754 safe range.
+types.setTypeParser(1700, (value) => (value === null ? null : parseFloat(value)))
+types.setTypeParser(20, (value) => (value === null ? null : parseInt(value, 10)))
 
 const databaseUrl = process.env.DATABASE_URL
 const databaseRequiresSsl = databaseUrl?.includes('sslmode=require') ?? false
