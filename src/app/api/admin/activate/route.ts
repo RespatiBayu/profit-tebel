@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getCurrentUserAccess } from '@/lib/roles'
+import { computeActivationPatch } from '@/lib/subscription'
 
 /**
  * POST /api/admin/activate
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null) as {
     email?: string
-    plan?: 'lifetime' | 'monthly' | 'free'
+    plan?: 'basic' | 'pro' | 'lifetime' | 'monthly' | 'free'
     months?: number
   } | null
 
@@ -36,7 +37,8 @@ export async function POST(request: NextRequest) {
   if (!email) {
     return NextResponse.json({ error: 'Email wajib diisi' }, { status: 400 })
   }
-  if (plan !== 'lifetime' && plan !== 'monthly' && plan !== 'free') {
+  const validPlans = ['basic', 'pro', 'lifetime', 'monthly', 'free']
+  if (!plan || !validPlans.includes(plan)) {
     return NextResponse.json({ error: 'Paket tidak valid' }, { status: 400 })
   }
 
@@ -66,7 +68,16 @@ export async function POST(request: NextRequest) {
   const manualRef = `MANUAL-${Date.now()}`
 
   let patch: Record<string, unknown>
-  if (plan === 'lifetime') {
+  if (plan === 'basic' || plan === 'pro') {
+    // Model baru tahunan. Upgrade Basic→Pro otomatis keep-expiry (bayar selisih).
+    patch = computeActivationPatch({
+      currentPlan: profile.subscription_plan,
+      currentExpiresAt: profile.subscription_expires_at,
+      target: plan,
+      ref: manualRef,
+      provider: 'manual',
+    })
+  } else if (plan === 'lifetime') {
     patch = {
       subscription_plan: 'lifetime',
       subscription_expires_at: null,
